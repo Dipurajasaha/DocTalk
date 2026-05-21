@@ -1,0 +1,1049 @@
+﻿import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import '../styles/patient.css'; // Uses your existing patient CSS
+import XrayAnalyzerPanel from '../components/XrayAnalyzerPanel';
+
+export default function PatientDashboard() {
+  const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [inputMsg, setInputMsg] = useState('');
+  const [language, setLanguage] = useState('en');
+  const [activePanel, setActivePanel] = useState('explain');
+
+    const [isUploadingProfile, setIsUploadingProfile] = useState(false);
+    
+    const handleProfileUpdate = async (e) => {
+      e.preventDefault();
+      setIsUploadingProfile(true);
+      const formData = new FormData(e.target);
+      try {
+        const res = await fetch('/api/update_patient_profile', {
+          method: 'POST',
+          body: formData,
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (data.success) {
+          setUser(prev => ({ ...prev, name: data.display_name, display_name: data.display_name, profile_pic: data.profile_pic }));
+          alert('Profile updated successfully!');
+        } else {
+          alert('Failed to update profile: ' + data.error);
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Error updating profile');
+      } finally {
+        setIsUploadingProfile(false);
+      }
+    };
+ // 'explain' or 'prescription'
+  const chatEndRef = useRef(null);
+
+  const [doctors, setDoctors] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  
+  // Patient-to-Doctor Chat System
+  const [docChats, setDocChats] = useState([]); // List of doctors the patient has chatted with
+  const [activeDocChat, setActiveDocChat] = useState(null);
+  const [docMessages, setDocMessages] = useState([]);
+  const [docChatDisabled, setDocChatDisabled] = useState(false);
+  const [docMsgInput, setDocMsgInput] = useState('');
+  const [assets, setAssets] = useState({ folders: [], files: [] });
+  const [currentFolder, setCurrentFolder] = useState(null);
+  
+  // Upload state for explain panel
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const explainUploadInputRef = useRef(null);
+  
+  // Analyze panel selection state
+  const [analysisCurrentFolder, setAnalysisCurrentFolder] = useState(null);
+  const [selectedDocForAnalysis, setSelectedDocForAnalysis] = useState(null);
+  const [analysisMode, setAnalysisMode] = useState('upload'); // 'upload' or 'select'
+
+  // 1. Fetch User Session on Mount
+  useEffect(() => {
+    fetch('/api/patient_session', { credentials: 'include' })
+      .then(res => res.json())
+      .then(data => {
+        if (!data.success) {
+          navigate('/login'); // Redirect to login if not authenticated
+        } else {
+          setUser(data);
+          loadChatHistory();
+          loadAppointments();
+          loadDoctors();
+        }
+      })
+      .catch((err) => {
+        console.error("Session fetch failed:", err);
+        navigate('/login');
+      });
+  }, [navigate]);
+
+  const loadAssets = () => {
+        fetch('/api/v2/patient_assets', { credentials: 'include' })
+        .then(res => res.json())
+        .then(data => {
+            if(data.success) {
+                setAssets(data.assets || { folders: [], files: [] });
+            }
+        }).catch(e => console.error(e));
+    };
+
+    useEffect(() => {
+        if(activePanel === 'documents') {
+            loadAssets();
+            setCurrentFolder(null); // root by default
+        }
+        if(activePanel === 'explain') {
+        loadAssets();
+        setAnalysisCurrentFolder(null);
+        }
+    }, [activePanel]);
+
+    const handleUploadAssetV2 = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('folder', currentFolder || '');
+
+        fetch('/api/v2/upload_asset', {
+            method: 'POST',
+            body: formData,
+            credentials: 'include'
+        })
+        .then(res => res.json())
+        .then(data => {
+            if(data.success) {
+                loadAssets();
+            } else {
+                alert("Upload failed: " + data.error);
+            }
+        }).catch(err => console.error("Upload error", err));
+        e.target.value = null; 
+    };
+
+    const handleDeleteAssetV2 = (id, type) => {
+        if (!window.confirm("Are you sure you want to delete this " + type + "?")) return;
+        const formData = new URLSearchParams();
+        formData.append('id', id);
+        formData.append('type', type);
+
+        fetch('/api/v2/delete_asset', {
+            method: 'POST',
+            body: formData,
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if(data.success) {
+                if (type === 'folder' && currentFolder === id) {
+                    setCurrentFolder(null);
+                }
+                loadAssets();
+            } else {
+                alert("Delete failed.");
+            }
+        }).catch(err => console.error("Delete error", err));
+    };
+    
+    const handleCreateFolder = () => {
+        const name = window.prompt("Enter new folder name:");
+        if (!name) return;
+        const formData = new URLSearchParams();
+        formData.append('name', name);
+        fetch('/api/v2/create_folder', {
+            method: 'POST',
+            body: formData,
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if(data.success) loadAssets();
+            else alert("Failed to create folder");
+        });
+    };
+
+    const handleRenameAsset = (id, oldName, type) => {
+        const newName = window.prompt("Enter new name for " + type + ":", type === 'folder' ? oldName : '');
+        if (!newName) return;
+        const formData = new URLSearchParams();
+        formData.append('id', id || oldName);
+        formData.append('old_name', oldName);
+        formData.append('new_name', newName);
+        formData.append('type', type);
+        
+        fetch('/api/v2/rename_asset', {
+            method: 'POST', body: formData, credentials: 'include',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if(data.success) {
+                if (type === 'folder' && currentFolder === oldName) setCurrentFolder(newName);
+                loadAssets();
+            } else alert("Renaming failed");
+        });
+    };
+
+    const loadAppointments = () => {
+
+    fetch('/api/my_appointments', { credentials: 'include' })
+      .then(res => res.json())
+      .then(data => {
+        if(data.success) setAppointments(data.appointments || []);
+      });
+  };
+
+  const loadDoctors = () => {
+    fetch('/api/doctors', { credentials: 'include' })
+      .then(res => res.json())
+      .then(data => {
+        if(data.success) {
+          setDoctors(data.doctors || []);
+          // Doctors to chat with (extract from history or existing appointments optionally)
+          // For simplicity, we just list available doctor chats or let them select via Appointment list
+        }
+      });
+  };
+
+  const loadDocChat = async (docId) => {
+    try {
+      const res = await fetch('/api/doctor_patient_chat?other=' + encodeURIComponent(docId), { credentials: 'include' });
+      const data = await res.json();
+      if(data.success) {
+        setDocMessages(data.messages || []);
+        setDocChatDisabled(data.disabled || false);
+      }
+    } catch(e) {}
+  };
+
+  useEffect(() => {
+    if(activePanel === 'docchat' && activeDocChat) {
+      loadDocChat(activeDocChat);
+      const interval = setInterval(() => loadDocChat(activeDocChat), 5000);
+      return () => clearInterval(interval);
+    }
+  }, [activePanel, activeDocChat]);
+
+  const handleDocChatSubmit = async(e) => {
+    e.preventDefault();
+    if(!docMsgInput.trim() || !activeDocChat) return;
+    try {
+      await fetch('/api/doctor_patient_chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'include',
+        body: JSON.stringify({other: activeDocChat, text: docMsgInput})
+      });
+      setDocMsgInput('');
+      loadDocChat(activeDocChat);
+    } catch(e) {}
+  };
+
+  const handleBookAppointment = async (docId) => {
+    const reason = prompt("Enter reason for appointment:");
+    if (!reason) return;
+
+    try {
+      const response = await fetch('/api/appointment_request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ doctor_id: docId, reason })
+      });
+      const data = await response.json();
+      if (data.success) {
+        alert("Appointment requested successfully!");
+        loadAppointments();
+      } else {
+        alert("Error requesting appointment: " + data.error);
+      }
+    } catch(err) {
+      alert("Error requesting appointment.");
+    }
+  };
+
+  // 2. Load Chat History
+  const loadChatHistory = () => {
+    fetch('/api/chat_sessions', { credentials: 'include' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.sessions) {
+          const isErrorText = (text = '') => /conversation error|chat service error|llm call failed|api quota exceeded/i.test(String(text));
+          const activeSession = (data.sessions || []).find(session =>
+            (session?.messages || []).some(msg => msg?.sender === 'model' && !isErrorText(msg?.text))
+          ) || data.sessions[0];
+          setMessages(activeSession?.messages || []); // Load the newest non-error chat session
+        }
+      });
+  };
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [messages]);
+
+  // 3. Handle Send Chat
+  const handleChatSubmit = async (e) => {
+    e.preventDefault();
+    if (!inputMsg.trim()) return;
+
+    const newMsg = { sender: 'user', text: inputMsg, id: Date.now() };
+    setMessages(prev => [...prev, newMsg, { sender: 'model', id: 'loading', text: 'Typing...' }]);
+    setInputMsg('');
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ message: inputMsg, language })
+      });
+      const data = await response.json();
+      
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.id !== 'loading');
+        if (data.success) {
+          const reply = data.reply;
+          // Convert any structured response to plain text string
+          let textReply = '';
+          if (typeof reply === 'object' && reply) {
+            // Flatten structured object into readable text
+            const parts = [];
+            if (reply.summary) parts.push(reply.summary);
+            if (reply.key_findings && Array.isArray(reply.key_findings)) {
+              parts.push('Key Findings: ' + reply.key_findings.join(', '));
+            }
+            if (reply.observations && Array.isArray(reply.observations)) {
+              parts.push('Observations: ' + reply.observations.join(', '));
+            }
+            if (reply.risks && Array.isArray(reply.risks)) {
+              parts.push('Risks: ' + reply.risks.join(', '));
+            }
+            if (reply.recommendations && Array.isArray(reply.recommendations)) {
+              parts.push('Recommendations: ' + reply.recommendations.join(', '));
+            }
+            if (reply.notes) {
+              const notesText = Array.isArray(reply.notes) ? reply.notes.join('. ') : reply.notes;
+              parts.push('Notes: ' + notesText);
+            }
+            textReply = parts.filter(p => p).join('\n\n');
+          } else {
+            textReply = String(reply);
+          }
+          return [...filtered, { sender: 'model', text: textReply, id: Date.now() }];
+        }
+        return [...filtered, { sender: 'model', text: 'Error: ' + data.error, id: Date.now() }];
+      });
+    } catch (err) {
+      setMessages(prev => prev.filter(m => m.id !== 'loading'));
+      alert("Failed to send message: " + err.message);
+    }
+  };
+
+  // 4. Handle Upload Forms (Explain Report)
+  const handleAddExplainFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    setUploadedFiles(prev => [...prev, {
+      id: Math.random(),
+      file: file,
+      name: file.name,
+      type: file.type
+    }]);
+    
+    if (explainUploadInputRef.current) {
+      explainUploadInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveExplainFile = (id) => {
+    setUploadedFiles(prev => prev.filter(f => f.id !== id));
+  };
+
+  const handleExplainUpload = async (e) => {
+    e.preventDefault();
+    
+    if (uploadedFiles.length === 0) {
+      alert("Please select at least one file to analyze.");
+      return;
+    }
+    
+    // Analyze each uploaded file
+    setMessages(prev => [...prev, { sender: 'model', id: 'loading', text: 'Analyzing files... Please wait.' }]);
+
+    try {
+      for (const fileObj of uploadedFiles) {
+        const formData = new FormData();
+        
+        // Determine if it's a report or medical image based on file type
+        if (fileObj.type === 'application/pdf' || fileObj.name.toLowerCase().endsWith('.pdf')) {
+          formData.append('report', fileObj.file);
+        } else {
+          formData.append('medical_image', fileObj.file);
+        }
+        
+        formData.append('language', language);
+
+        const response = await fetch('/api/explain_report', {
+          method: 'POST',
+          credentials: 'include',
+          body: formData
+        });
+        const data = await response.json();
+        
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== 'loading');
+          if (data.success) {
+            const reply = data.reply;
+            // Convert any structured response to plain text string
+            let textReply = '';
+            if (typeof reply === 'object' && reply) {
+              // Flatten structured object into readable text
+              const parts = [];
+              if (reply.summary) parts.push(reply.summary);
+              if (reply.key_findings && Array.isArray(reply.key_findings)) {
+                parts.push('Key Findings: ' + reply.key_findings.join(', '));
+              }
+              if (reply.observations && Array.isArray(reply.observations)) {
+                parts.push('Observations: ' + reply.observations.join(', '));
+              }
+              if (reply.risks && Array.isArray(reply.risks)) {
+                parts.push('Risks: ' + reply.risks.join(', '));
+              }
+              if (reply.recommendations && Array.isArray(reply.recommendations)) {
+                parts.push('Recommendations: ' + reply.recommendations.join(', '));
+              }
+              if (reply.notes) {
+                const notesText = Array.isArray(reply.notes) ? reply.notes.join('. ') : reply.notes;
+                parts.push('Notes: ' + notesText);
+              }
+              textReply = parts.filter(p => p).join('\n\n');
+            } else {
+              textReply = String(reply);
+            }
+            return [...filtered, { sender: 'model', text: textReply }];
+          }
+          return [...filtered, { sender: 'model', text: 'Error analyzing ' + fileObj.name + ': ' + data.error }];
+        });
+      }
+      
+      // Clear uploaded files after analysis
+      setUploadedFiles([]);
+    } catch (err) {
+      setMessages(prev => prev.filter(m => m.id !== 'loading'));
+      alert("Analysis failed: " + err.message);
+    }
+  };
+
+  const handleAnalyzeSelected = async () => {
+    if (!selectedDocForAnalysis) {
+      alert("Please select a document to analyze.");
+      return;
+    }
+
+    setMessages(prev => [...prev, { sender: 'model', id: 'loading', text: 'Analyzing selected document... Please wait.' }]);
+
+    try {
+      const formData = new FormData();
+      formData.append('file_id', selectedDocForAnalysis);
+      formData.append('language', language);
+
+      const response = await fetch('/api/analyze_document', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData
+      });
+      const data = await response.json();
+
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.id !== 'loading');
+        if (data.success) {
+          const reply = data.reply;
+          if (reply && typeof reply === 'object') return [...filtered, { sender: 'model', structured: reply }];
+          return [...filtered, { sender: 'model', text: String(reply) }];
+        }
+        return [...filtered, { sender: 'model', text: 'Error analyzing document: ' + data.error }];
+      });
+    } catch (err) {
+      setMessages(prev => prev.filter(m => m.id !== 'loading'));
+      alert("Analysis failed: " + err.message);
+    }
+  };
+
+  // 5. Handle Logout
+  const handleLogout = async () => {
+    await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+    navigate('/login');
+  };
+
+  if (!user) return <div style={{padding: '50px', textAlign: 'center'}}>Loading App Data...</div>;
+
+  return (
+    <div className="app-wrapper" style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
+      {/* Top Navigation Bar */}
+      <nav className="top-navbar">
+        <div className="nav-text-logo">
+          DocTalk<span className="logo-sup">AI</span>
+        </div>
+        <div style={{ flex: 1 }} />
+        <button 
+          onClick={handleLogout} 
+          style={{ background: '#fff', color: '#ff4b5c', border: '1px solid #ff4b5c', padding: '8px 20px', borderRadius: '50px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', fontSize: '11px', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
+          onMouseEnter={(e) => { e.target.style.background = '#ff4b5c'; e.target.style.color = '#fff'; }}
+          onMouseLeave={(e) => { e.target.style.background = '#fff'; e.target.style.color = '#ff4b5c'; }}
+        >
+          Logout
+        </button>
+      </nav>
+
+      <div className="profile-container" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', boxSizing: 'border-box' }}>
+                {/* Sidebar */}
+        <div className="sidebar patient-sidebar-override">
+          <img src={user.profile_pic} alt="Profile" className="patient-sidebar-img" />
+          <div className="patient-sidebar-name">{user.name}</div>
+
+          <div className="patient-nav">
+
+
+            <button 
+              className={activePanel === 'explain' ? 'active' : ''}
+              onClick={() => setActivePanel('explain')}
+            >
+              Analyze Report
+            </button>
+              <button
+                className={activePanel === 'documents' ? 'active' : ''}
+                onClick={() => setActivePanel('documents')}
+              >
+                My Documents
+              </button>
+            <button 
+              className={activePanel === 'xray' ? 'active' : ''}
+              onClick={() => setActivePanel('xray')}
+            >
+              X-Ray Analysis
+            </button>
+            <button 
+              className={activePanel === 'appointments' ? 'active' : ''}
+              onClick={() => setActivePanel('appointments')}
+            >
+              Appointments
+            </button>
+            <button 
+              className={activePanel === 'docchat' ? 'active' : ''}
+              onClick={() => setActivePanel('docchat')}
+            >
+              Doctor Chat
+            </button>
+            <button 
+              className={activePanel === 'profile' ? 'active' : ''}
+              onClick={() => setActivePanel('profile')}
+            >
+              Profile
+            </button>
+          </div>
+        </div>
+
+                              {/* Main Content */}
+      <div className="main-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '24px', gap: '24px', background: '#F0F2F5', borderTopLeftRadius: '40px', overflow: 'hidden', minHeight: 0, boxSizing: 'border-box' }}>
+        
+        {activePanel === 'profile' && (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }}>
+                <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>Edit Profile</h2>
+              </div>
+            </div>
+            
+            <div className="profile-edit-container" style={{ display: 'flex', flexDirection: 'column', background: '#FFF', borderRadius: '16px', padding: '32px', overflowY: 'auto', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', maxWidth: '500px', width: '100%', boxSizing: 'border-box' }}>
+              <form onSubmit={handleProfileUpdate} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B' }}>Display Name</label>
+                  <input type="text" name="display_name" defaultValue={user?.name || user?.display_name || ''} style={{ padding: '12px 16px', borderRadius: '8px', border: '1px solid #E2E8F0', outline: 'none', fontSize: '14px', background: '#F8FAFC' }} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B' }}>Profile Picture</label>
+                  <input type="file" name="profile_pic" accept="image/*" style={{ padding: '12px 16px', borderRadius: '8px', border: '1px solid #E2E8F0', outline: 'none', fontSize: '14px', background: '#F8FAFC' }} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B' }}>New Password (leave blank to keep current)</label>
+                  <input type="password" name="password" placeholder="Enter new password..." style={{ padding: '12px 16px', borderRadius: '8px', border: '1px solid #E2E8F0', outline: 'none', fontSize: '14px', background: '#F8FAFC' }} />
+                </div>
+                <button type="submit" disabled={isUploadingProfile} style={{ marginTop: '12px', padding: '14px', borderRadius: '50px', background: 'linear-gradient(to right, #D67CFF, #6B5CE7)', color: '#FFF', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', transition: 'all 0.3s', opacity: isUploadingProfile ? 0.7 : 1, boxShadow: '0 4px 12px rgba(107, 92, 231, 0.3)' }}>
+                  {isUploadingProfile ? 'Saving...' : 'Save Profile Changes'}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {activePanel === 'explain' && (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '20px' }}>
+            {/* Main Header for Explain Panel */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+                                                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }}>
+                   <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>AI Health Assistant</h2>
+                   <p style={{ margin: '6px 0 0 0', fontSize: '11px', color: '#8B7EFF', fontWeight: '500', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif' }}>*Not a substitute for professional medical advice*</p>
+                 </div>
+                 <div style={{ width: '160px' }}>
+                    <select
+                      value={language}
+                      onChange={(e) => setLanguage(e.target.value)}
+                        style={{ width: '100%', padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', fontSize: '11px', backgroundColor: '#FFF', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
+                    >
+                      <option value="en">English</option>
+                      <option value="es">EspaÃ±ol</option>
+                      <option value="hi">Hindi</option>
+                      <option value="bn">Bengali</option>
+                    </select>
+                 </div>
+              </div>
+
+            <div className="analyze-view-container" style={{ display: 'flex', flex: 1, gap: '24px', minHeight: 0 }}>
+              <div className="ai-chat-column" style={{ position: 'relative', flex: 7, display: 'flex', flexDirection: 'column', overflow: 'visible', minHeight: 0, gap: '0' }}>
+                <div className="chat-box-container" style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', background: '#FFF', borderRadius: '16px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', overflow: 'hidden', minHeight: 0 }}>
+              <div className="chat-box" style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 100px 24px', minHeight: 0 }}>
+                {messages.length === 0 && <div style={{textAlign: "center", color: "#6B6B6B", marginTop: "20px"}}>Start chatting with your AI Medical Assistant!</div>}
+                {messages.map((msg, idx) => (
+                  <div key={idx} className={`chat-message ${msg.sender === 'user' ? 'user' : 'model'}`} style={{ marginBottom: '16px', display: 'flex', alignItems: 'flex-start', justifyContent: msg.sender==='user' ? 'flex-end' : 'flex-start' }}>
+                    {msg.sender !== 'user' && <div className="emoji" style={{ marginRight: '8px', fontSize: '18px' }}></div>}
+                    <div className="bubble" style={{ background: msg.sender==='user' ? '#8B7EFF' : '#F1F5F9', color: msg.sender==='user' ? '#FFF' : '#1E293B', padding: '12px 16px', borderRadius: '16px', maxWidth: '80%', boxShadow: '0 8px 16px rgba(0,0,0,0.08), 0 4px 6px rgba(0,0,0,0.04)' }}>
+                      <div className="content" dangerouslySetInnerHTML={{ __html: (msg.text || '').replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br/>") }} />
+                    </div>
+                  </div>
+                ))}
+                <div ref={chatEndRef} />
+              </div>
+<form id="chatInputForm" style={{ position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)', width: 'calc(90% - 48px)', maxWidth: '720px', display: 'flex', alignItems: 'center', padding: '6px 6px 6px 12px', background: '#ffffff', borderRadius: '50px', boxShadow: '0 16px 32px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', zIndex: 10 }} onSubmit={handleChatSubmit}>
+                  <span style={{ color: '#64748b', fontSize: '22px', marginRight: '16px', cursor: 'pointer' }}>+</span>
+                  <input
+                    type="text"
+                    placeholder="Ask AI Health Assistant..."
+                    value={inputMsg}
+                    onChange={e => setInputMsg(e.target.value)}
+                    style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '15px', color: '#1E293B', fontWeight: '500' }}
+                />
+                <button type="submit" disabled={!inputMsg.trim()} style={{ marginLeft: '12px', width: '40px', height: '40px', borderRadius: '50%', background: !inputMsg.trim() ? '#E2E8F0' : 'linear-gradient(to right, #D67CFF, #6B5CE7)', color: !inputMsg.trim() ? '#94A3B8' : '#FFF', border: 'none', cursor: !inputMsg.trim() ? 'default' : 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: !inputMsg.trim() ? 'none' : '0 4px 12px rgba(214, 124, 255, 0.4)' }}>
+                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                     <line x1="22" y1="2" x2="11" y2="13"></line>
+                     <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                   </svg>
+                </button>  
+              </form>
+            </div>
+              </div> {/* Close chat-box-container */}
+
+            {/* Action Panel Column */}
+            <div className="action-panel-column" style={{ flex: 3, display: 'flex', flexDirection: 'column', gap: '16px', minHeight: 0 }}>
+              {/* Upload Panel */}
+              <div className="floating-box panel" style={{ background: '#FFF', padding: '24px', borderRadius: '16px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', gap: '12px' }}>
+                  <h4 style={{ margin: 0, fontSize: '13px', color: '#6C5CE7', fontWeight: 'bold', flex: 1 }}>Analyze Medical Files</h4>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button 
+                      onClick={() => { setAnalysisMode('upload'); setUploadedFiles([]); setSelectedDocForAnalysis(null); }}
+                      style={{ padding: '6px 12px', fontSize: '10px', fontWeight: '600', borderRadius: '50px', border: '1px solid', background: analysisMode === 'upload' ? '#6C5CE7' : '#F1F5F9', color: analysisMode === 'upload' ? '#FFF' : '#475569', cursor: 'pointer', transition: '0.2s' }}
+                    >
+                      Upload New
+                    </button>
+                    <button 
+                      onClick={() => { setAnalysisMode('select'); setUploadedFiles([]); setSelectedDocForAnalysis(null); setAnalysisCurrentFolder(null); loadAssets(); }}
+                      style={{ padding: '6px 12px', fontSize: '10px', fontWeight: '600', borderRadius: '50px', border: '1px solid', background: analysisMode === 'select' ? '#6C5CE7' : '#F1F5F9', color: analysisMode === 'select' ? '#FFF' : '#475569', cursor: 'pointer', transition: '0.2s' }}
+                    >
+                      My Documents
+                    </button>
+                  </div>
+                </div>
+
+                {analysisMode === 'upload' ? (
+                  // UPLOAD NEW FILES MODE
+                  uploadedFiles.length === 0 ? (
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: '16px' }}>
+                      <div className="styled-dropzone" style={{ border: '2px dashed #CBD5E1', borderRadius: '16px', padding: '48px 24px', textAlign: 'center', background: '#F8FAFC', position: 'relative', transition: 'all 0.2s', cursor: 'pointer', width: '100%', boxSizing: 'border-box' }} onMouseEnter={(e) => e.currentTarget.style.borderColor='#8B7EFF'} onMouseLeave={(e) => e.currentTarget.style.borderColor='#CBD5E1'}>
+                         <label style={{ cursor: 'pointer', display: 'block', width: '100%', height: '100%' }}>
+                            <div style={{ fontSize: '32px', marginBottom: '12px' }}>+</div>
+                            <div style={{ fontSize: '12px', fontWeight: '600', color: '#475569', marginBottom: '6px' }}>Upload Medical File</div>
+                            <div style={{ fontSize: '10px', color: '#64748B' }}>PDF Reports or Medical Images (JPG, PNG)</div>
+                            <input type="file" ref={explainUploadInputRef} accept=".pdf,.jpg,.jpeg,.png" onChange={handleAddExplainFile} style={{ position: 'absolute', top:0, left:0, width:'100%', height:'100%', opacity:0, cursor: 'pointer' }} />
+                         </label>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
+                      <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        {uploadedFiles.map((fileObj) => (
+                          <div key={fileObj.id} style={{ display: 'flex', alignItems: 'center', padding: '12px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', gap: '12px' }}>
+                            <div style={{ width: '36px', height: '36px', background: '#EEF2FF', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6366F1', flexShrink: 0 }}>
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: '600', fontSize: '12px', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileObj.name}</div>
+                              <div style={{ fontSize: '10px', color: '#64748B', marginTop: '2px' }}>{(fileObj.file.size / 1024 / 1024).toFixed(2)} MB</div>
+                            </div>
+                            <button 
+                              onClick={() => handleRemoveExplainFile(fileObj.id)} 
+                              style={{ padding: '6px 12px', background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '50px', fontSize: '10px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', flexShrink: 0 }}
+                              onMouseEnter={(e) => { e.target.style.background = '#ef4444'; e.target.style.color = '#FFF'; }}
+                              onMouseLeave={(e) => { e.target.style.background = '#fee2e2'; e.target.style.color = '#ef4444'; }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      <div className="styled-dropzone" style={{ border: '2px dashed #CBD5E1', borderRadius: '12px', padding: '16px', textAlign: 'center', background: '#F8FAFC', position: 'relative', transition: 'all 0.2s', cursor: 'pointer', marginTop: '8px' }} onMouseEnter={(e) => e.currentTarget.style.borderColor='#8B7EFF'} onMouseLeave={(e) => e.currentTarget.style.borderColor='#CBD5E1'}>
+                         <label style={{ cursor: 'pointer', display: 'block' }}>
+                            <div style={{ fontSize: '20px', color: '#8B7EFF', fontWeight: 'bold' }}>+</div>
+                            <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>Add More Files</div>
+                            <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={handleAddExplainFile} style={{ position: 'absolute', top:0, left:0, width:'100%', height:'100%', opacity:0, cursor: 'pointer' }} />
+                         </label>
+                      </div>
+                      
+                      <button 
+                        onClick={handleExplainUpload} 
+                        style={{ width: '100%', padding: '14px', borderRadius: '50px', background: 'linear-gradient(to right, #D67CFF, #6B5CE7)', color: '#FFF', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', boxShadow: '0 3px 5px rgba(0,0,0,0.3)', transition: 'all 0.3s ease', marginTop: '8px' }}
+                        onMouseEnter={(e) => e.target.style.boxShadow = '0 6px 12px rgba(214, 124, 255, 0.4)'}
+                        onMouseLeave={(e) => e.target.style.boxShadow = '0 3px 5px rgba(0,0,0,0.3)'}
+                      >
+                        Analyze {uploadedFiles.length} File{uploadedFiles.length !== 1 ? 's' : ''}
+                      </button>
+                    </div>
+                  )
+                ) : (
+                  // SELECT FROM MY DOCUMENTS MODE
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
+                    {analysisCurrentFolder !== null && (
+                      <span onClick={() => setAnalysisCurrentFolder(null)} style={{ color: '#8B7EFF', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>
+                        ← Back to Root
+                      </span>
+                    )}
+
+                    {analysisCurrentFolder === null && assets.folders.length === 0 && assets.files.length === 0 ? (
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B', textAlign: 'center', padding: '32px 16px' }}>
+                        <div>
+                          <div style={{ fontSize: '32px', marginBottom: '12px' }}>📁</div>
+                          <div style={{ fontSize: '12px' }}>No documents uploaded yet.</div>
+                          <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '8px' }}>Upload files using the "Upload New" tab or "My Documents" page.</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: '11px', color: '#64748B', marginBottom: '8px', fontWeight: '600' }}>
+                          Select a document to analyze: {analysisCurrentFolder === null ? 'Root' : analysisCurrentFolder}
+                        </div>
+                        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', padding: '2px' }}>
+                          {analysisCurrentFolder === null && assets.folders.map((folderName, i) => (
+                            <div
+                              key={'analysis-folder-' + i}
+                              onClick={() => setAnalysisCurrentFolder(folderName)}
+                              style={{ display: 'flex', alignItems: 'center', padding: '8px 10px', background: '#FAFAFA', borderRadius: '10px', border: '1px solid #E2E8F0', gap: '8px', cursor: 'pointer' }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = '#F1F5F9'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = '#FAFAFA'; }}
+                            >
+                              <div style={{ width: '24px', height: '24px', background: '#E2E8F0', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8B7EFF', flexShrink: 0, fontSize: '12px' }}>
+                                📁
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: '600', fontSize: '10px', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{folderName}</div>
+                                <div style={{ fontSize: '8px', color: '#94A3B8', marginTop: '1px' }}>Folder</div>
+                              </div>
+                            </div>
+                          ))}
+
+                          {assets.files
+                            .filter((f) => (f.folder || '') === (analysisCurrentFolder || ''))
+                            .map((doc) => (
+                            <div 
+                              key={doc.id}
+                              onClick={() => setSelectedDocForAnalysis(doc.id)}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                padding: '8px 10px',
+                                background: selectedDocForAnalysis === doc.id ? '#EEF2FF' : '#F8FAFC',
+                                borderRadius: '10px',
+                                border: selectedDocForAnalysis === doc.id ? '2px solid #6C5CE7' : '1px solid #E2E8F0',
+                                gap: '8px',
+                                cursor: 'pointer',
+                                transition: '0.2s',
+                                minHeight: '42px'
+                              }}
+                              onMouseEnter={(e) => { if (selectedDocForAnalysis !== doc.id) e.currentTarget.style.background = '#F1F5F9'; }}
+                              onMouseLeave={(e) => { if (selectedDocForAnalysis !== doc.id) e.currentTarget.style.background = '#F8FAFC'; }}
+                            >
+                              <div style={{ width: '24px', height: '24px', background: '#EEF2FF', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6366F1', flexShrink: 0, fontSize: '12px' }}>
+                                {String(doc?.name || '').toLowerCase().endsWith('.pdf') ? '📄' : '🖼️'}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: '600', fontSize: '10px', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.name}</div>
+                                <div style={{ fontSize: '8px', color: '#94A3B8', marginTop: '1px', lineHeight: '1.2' }}>{doc.folder || 'Root'} • {doc.uploaded_at || 'Unknown'}</div>
+                              </div>
+                              <input
+                                type="radio"
+                                checked={selectedDocForAnalysis === doc.id}
+                                onChange={() => setSelectedDocForAnalysis(doc.id)}
+                                style={{
+                                  width: '14px',
+                                  height: '14px',
+                                  margin: 0,
+                                  padding: 0,
+                                  flex: '0 0 auto',
+                                  cursor: 'pointer',
+                                  accentColor: '#6C5CE7'
+                                }}
+                              />
+                            </div>
+                          ))}
+
+                          {assets.files.filter((f) => (f.folder || '') === (analysisCurrentFolder || '')).length === 0 && (
+                            <div style={{ padding: '24px', textAlign: 'center', color: '#64748B', fontSize: '11px' }}>
+                              No files found in this folder.
+                            </div>
+                          )}
+                        </div>
+                        
+                        <button 
+                          onClick={handleAnalyzeSelected}
+                          disabled={!selectedDocForAnalysis}
+                          style={{ width: '100%', padding: '14px', borderRadius: '50px', background: selectedDocForAnalysis ? 'linear-gradient(to right, #D67CFF, #6B5CE7)' : '#E2E8F0', color: selectedDocForAnalysis ? '#FFF' : '#94A3B8', border: 'none', fontWeight: 'bold', cursor: selectedDocForAnalysis ? 'pointer' : 'default', fontSize: '14px', boxShadow: selectedDocForAnalysis ? '0 3px 5px rgba(0,0,0,0.3)' : 'none', transition: 'all 0.3s ease', marginTop: '8px' }}
+                          onMouseEnter={(e) => { if (selectedDocForAnalysis) e.target.style.boxShadow = '0 6px 12px rgba(214, 124, 255, 0.4)'; }}
+                          onMouseLeave={(e) => { if (selectedDocForAnalysis) e.target.style.boxShadow = '0 3px 5px rgba(0,0,0,0.3)'; }}
+                        >
+                          Analyze Selected
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          </div>
+        )}
+
+        {activePanel === 'documents' && (
+            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', fontFamily: '"Inter", sans-serif', letterSpacing: '-0.5px' }}>
+                    {currentFolder === null ? 'My Documents' : currentFolder}
+                  </h2>
+                  {currentFolder !== null && (
+                    <span onClick={() => setCurrentFolder(null)} style={{ color: '#8B7EFF', cursor: 'pointer', fontSize: '12px', marginTop: '8px', fontWeight: '600' }}>
+                      &larr; Back to Root
+                    </span>
+                  )}
+                </div>
+                <div style={{display: 'flex', gap: '8px'}}>
+                  {currentFolder === null && (
+                      <button onClick={handleCreateFolder} style={{ background: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>+ New Folder</button>
+                  )}
+                  <input type="file" id="upload-doc-v2" style={{display: 'none'}} onChange={handleUploadAssetV2} />
+                  <button onClick={() => document.getElementById('upload-doc-v2').click()} style={{ background: '#6C5CE7', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Upload Here</button>
+                </div>
+              </div>
+
+              <div className="documents-container" style={{ display: 'flex', flexDirection: 'column', flex: 1, background: '#FFF', borderRadius: '16px', padding: '32px', overflowY: 'auto', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', minHeight: 0, boxSizing: 'border-box' }}>
+                  
+                  {/* UNIFIED 1D LIST VIEW */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {/* Folders (only in root) */}
+                    {currentFolder === null && assets.folders.map((folderName, i) => (
+                        <div key={'f'+i} style={{ display: 'flex', alignItems: 'center', padding: '16px', border: '1px solid #E2E8F0', borderRadius: '12px', background: '#FAFAFA' }}>
+                          <div style={{ width: '40px', height: '40px', background: '#E2E8F0', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '16px', color: '#8B7EFF' }}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="#8B7EFF"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: '600', fontSize: '12px', color: '#1E293B', cursor: 'pointer' }} onClick={() => setCurrentFolder(folderName)}>{folderName}</div>
+                            <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>Folder</div>
+                          </div>
+                          
+                          <button onClick={() => setCurrentFolder(folderName)} style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>Open</button>
+
+                          <button onClick={() => handleRenameAsset(folderName, folderName, 'folder')} style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #FEF3C7' }}>Rename</button>
+
+                          <button onClick={() => handleDeleteAssetV2(folderName, 'folder')} style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #fecaca' }} onMouseEnter={(e)=> {e.target.style.background='#ef4444'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#fee2e2'; e.target.style.color='#ef4444';}}>Delete</button>
+                        </div>
+                    ))}
+
+                    {/* Files */}
+                    {assets.files.filter(f => (f.folder || '') === (currentFolder || '')).map((file, i) => (
+                        <div key={'file'+i} style={{ display: 'flex', alignItems: 'center', padding: '16px', border: '1px solid #E2E8F0', borderRadius: '12px', background: '#FFF' }}>
+                          <div style={{ width: '40px', height: '40px', background: '#EEF2FF', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '16px', color: '#6366F1' }}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: '600', fontSize: '12px', color: '#1E293B' }}>{file?.name || `File ${i+1}`} </div>
+                            <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>{file?.uploaded_at || 'Unknown Date'}</div>
+                          </div>
+                          <a href={(file?.url || file)} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>View</a>
+                          
+                          <button onClick={() => handleRenameAsset(file.id, file.name, 'file')} style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #FEF3C7' }}>Rename</button>
+
+                          <button onClick={() => handleDeleteAssetV2(file?.id || file?.url, 'file')} style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #fecaca' }} onMouseEnter={(e)=> {e.target.style.background='#ef4444'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#fee2e2'; e.target.style.color='#ef4444';}}>Delete</button>
+                        </div>
+                    ))}
+
+                    {currentFolder === null && assets.folders.length === 0 && assets.files.filter(f => !f.folder).length === 0 && (
+                        <div style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>No documents in root.</div>
+                    )}
+                    {currentFolder !== null && assets.files.filter(f => f.folder === currentFolder).length === 0 && (
+                        <div style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>No files found in this folder.</div>
+                    )}
+                  </div>
+
+              </div>
+            </div>
+          )}
+
+        {activePanel === 'xray' && (
+          <XrayAnalyzerPanel />
+        )}
+
+          {activePanel === 'appointments' && (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }}>
+                <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>Appointments Hub</h2>
+              </div>
+            </div>
+            <div className="appointments-container" style={{ display: 'flex', flexDirection: 'column', flex: 1, background: '#FFF', borderRadius: '16px', padding: '32px', overflowY: 'auto', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', minHeight: 0, boxSizing: 'border-box' }}>
+            
+            <div style={{ display: 'flex', gap: '40px' }}>
+               <div style={{ flex: 1 }}>
+                  <h3 style={{ fontSize: '11px', marginBottom: '24px', color: '#475569', borderBottom: '2px solid #F1F5F9', paddingBottom: '12px' }}>Your Scheduled Sessions</h3>
+                  {appointments.length === 0 ? (
+                     <div style={{ padding: '48px 32px', textAlign: 'center', background: '#F8FAFC', borderRadius: '16px', border: '1px dashed #CBD5E1' }}>
+                       <div style={{ fontSize: '20px', marginBottom: '16px' }}></div>
+                       <p style={{ color: '#64748B', margin: 0, fontSize: '11px' }}>No upcoming appointments scheduled.</p>
+                     </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {appointments.map((appt, i) => (
+                        <div key={i} className="session-card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', background: '#FFF', border: '1px solid #E2E8F0', borderRadius: '16px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                          <div>
+                            <strong style={{ fontSize: '11px', color: '#1E293B' }}>Dr. {appt.doctor_display}</strong>
+                            <div style={{ fontSize: '11px', color: '#64748B', marginTop: '6px' }}>Reason: {appt.reason}</div>
+                            {appt.status === 'scheduled' && <div style={{ fontSize: '11px', color: '#8B7EFF', marginTop: '4px', fontWeight: '500' }}>Time: {new Date(appt.scheduled_time).toLocaleString()}</div>}
+                          </div>
+                          <div>
+                            <span style={{ display: 'inline-block', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '700', background: appt.status === 'pending' ? '#FEF3C7' : '#DCFCE7', color: appt.status === 'pending' ? '#D97706' : '#166534' }}>
+                               {appt.status.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+               </div>
+
+               <div style={{ flex: 1 }}>
+                  <h3 style={{ fontSize: '11px', marginBottom: '24px', color: '#475569', borderBottom: '2px solid #F1F5F9', paddingBottom: '12px' }}>Book New Appointment</h3>
+                  <div className="doctor-profile-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '20px' }}>
+                    {doctors.map(doc => (
+                      <div key={doc.id} style={{ padding: '24px', border: '1px solid #E2E8F0', borderRadius: '16px', background: '#F8FAFC', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', transition: 'all 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.05)'} onMouseLeave={(e) => e.currentTarget.style.boxShadow='none'}>
+                        <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: '#E2E8F0', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}></div>
+                        <div style={{ fontWeight: '700', fontSize: '11px', color: '#1E293B' }}>Dr. {doc.name}</div>
+                        <div style={{ fontSize: '11px', color: '#64748B', marginBottom: '20px' }}>{doc.category}</div>
+                        <button onClick={() => handleBookAppointment(doc.id)} style={{ width: '100%', background: '#8B7EFF', color: '#fff', border: 'none', padding: '12px 16px', borderRadius: '50px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>Book Slot</button>
+                      </div>
+                    ))}
+                  </div>
+               </div>
+            </div>
+          </div>
+          </div>
+        )}
+
+        {activePanel === 'docchat' && (
+          <div className="human-chat-wrapper" style={{ display: 'flex', flex: 1, background: '#FFF', borderRadius: '16px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', overflow: 'hidden', border: '1px solid #E2E8F0', minHeight: 0 }}>
+            
+            {/* Contact Sidebar */}
+            <div className="contact-sidebar" style={{ width: '300px', borderRight: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column', background: '#FAFAFA' }}>
+               <div style={{ padding: '24px', borderBottom: '1px solid #E2E8F0', background: '#FFF' }}>
+                 <h2 style={{ margin: 0, fontSize: '11px', color: '#1E293B' }}>My Doctors</h2>
+               </div>
+               <div style={{ flex: 1, overflowY: 'auto' }}>
+                 {doctors.map(d => (
+                   <div 
+                     key={d.id} 
+                     onClick={() => setActiveDocChat(d.id)}
+                     style={{ padding: '16px 24px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', background: activeDocChat === d.id ? '#F3F0FF' : 'transparent', borderLeft: activeDocChat === d.id ? '4px solid #8B7EFF' : '4px solid transparent', display: 'flex', alignItems: 'center', gap: '16px' }}
+                   >
+                     <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', position: 'relative' }}>
+                       
+                       <div style={{ position: 'absolute', bottom: 0, right: 0, width: '12px', height: '12px', background: '#22C55E', borderRadius: '50%', border: '2px solid #FFF' }}></div>
+                     </div>
+                     <div>
+                       <div style={{ fontWeight: '600', fontSize: '11px', color: '#1E293B' }}>Dr. {d.name}</div>
+                       <div style={{ fontSize: '11px', color: '#64748B' }}>{d.category}</div>
+                     </div>
+                   </div>
+                 ))}
+               </div>
+            </div>
+
+            {/* Active Conversation */}
+            <div className="active-conversation" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#FFF' }}>
+               {activeDocChat ? (
+                 <>
+                   <div className="conversation-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid #E2E8F0', height: '80px', boxSizing: 'border-box' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                        <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}></div>
+                        <div>
+                           <div style={{ fontWeight: '700', fontSize: '11px', color: '#1E293B' }}>Dr. {doctors.find(d => d.id === activeDocChat)?.name}</div>
+                           <div style={{ fontSize: '11px', color: '#22C55E', fontWeight: '600' }}>Online</div>
+                        </div>
+                      </div>
+                      <div style={{ color: '#8B7EFF', cursor: 'pointer', fontWeight: '600', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', background: '#F3F0FF', borderRadius: '50px' }}>
+                          Book Video Call
+                      </div>
+                   </div>
+                   
+                   <div style={{ flex: 1, padding: '32px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', background: '#F8FAFC' }}>
+                     {docMessages.length === 0 && <div style={{textAlign: 'center', fontSize: '11px', color: '#94A3B8', marginTop: '40px'}}>Start a secure end-to-end conversation with your doctor.</div>}
+                     {docMessages.slice().reverse().map((m, idx) => (     
+                       <div key={idx} style={{
+                          alignSelf: m.sender === 'patient' ? 'flex-end' : 'flex-start',
+                          background: m.sender === 'patient' ? '#8B7EFF' : '#FFF',
+                          color: m.sender === 'patient' ? '#FFF' : '#1E293B',
+                          padding: '12px 18px', borderRadius: m.sender === 'patient' ? '16px 16px 0 16px' : '16px 16px 16px 0', maxWidth: '75%', fontSize: '11px',
+                          boxShadow: '0 2px 4px rgba(0,0,0,0.04)'
+                       }}>
+                         {m.text}
+                       </div>
+                     ))}
+                   </div>
+
+                   <div style={{ padding: '12px 32px 32px 32px', background: 'transparent', flexShrink: 0 }}>
+                     <form onSubmit={handleDocChatSubmit} className="rich-input-row" style={{ display: 'flex', alignItems: 'center', padding: '8px 8px 8px 24px', background: '#F1F5F9', borderRadius: '50px', border: '1px solid #E2E8F0', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
+                        <div style={{ color: '#64748B', fontWeight: '300', fontSize: '18px', marginRight: '16px', cursor: 'pointer' }} title="Attach media">+</div>
+                        <input type="text" value={docMsgInput} onChange={e=>setDocMsgInput(e.target.value)} disabled={docChatDisabled} placeholder={docChatDisabled ? 'Chat disabled' : 'Type a secure message...'} style={{flex: 1, padding: '10px 0', border: 'none', background: 'transparent', outline: 'none', fontSize: '11px', color: '#1E293B'}} />
+                        <button disabled={docChatDisabled} type="submit" style={{ marginLeft: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '42px', height: '42px', borderRadius: '50%', background: docChatDisabled ? '#E2E8F0' : '#8B7EFF', color: docChatDisabled ? '#94A3B8' : '#FFF', border: 'none', cursor: docChatDisabled ? 'default' : 'pointer', fontWeight: '700', fontSize: '11px', transition: 'all 0.2s', boxShadow: docChatDisabled ? 'none' : '0 4px 12px rgba(139, 126, 255, 0.3)' }}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></button>
+                     </form>
+                   </div>
+                 </>
+               ) : (
+                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: '#94A3B8', background: '#F8FAFC' }}>
+                    <div style={{ fontSize: '32px', marginBottom: '24px' }}></div>
+                    <div style={{ fontSize: '11px', fontWeight: '500' }}>Select a doctor from the sidebar to start corresponding.</div>
+                 </div>
+               )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+ );
+}

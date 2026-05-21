@@ -1,0 +1,157 @@
+{
+  "name": "Dipu raja",
+  "dob": "2009-02-03",
+  "gender": "Male",
+  "password": "Svdhara",
+  "blood_group": "B+",
+  "address": "Nagerbazar",
+  "mobile": "23534534533",
+  "_migrated_v2": true,
+  "custom_assets": {
+    "folders": [
+      "Reports",
+      "Medical Images"
+    ],
+    "files": []
+  },
+  "xray_analyses": [
+    {
+      "filename": "Xrays-11.jpg",
+      "upload_date": "2026-04-01T19:30:15.285426Z",
+      "analysis": {
+        "has_defect": false,
+        "severity": 0,
+        "defect_type": "none",
+        "location": "none",
+        "affected_area": "hand and wrist",
+        "bounding_box": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "width": 850,
+        "height": 550,
+        "recommendation": "The X-ray appears to demonstrate normal anatomical structures of the hand and wrist without obvious fractures or lesions. This analysis is for educational purposes only. If you are experiencing pain or have medical concerns, please consult with a qualified physician for a clinical diagnosis.",
+        "image_size": [
+          740,
+          490
+        ]
+      },
+      "has_defect": false
+    },
+    {
+      "filename": "Xrays-11.jpg",
+      "upload_date": "2026-04-01T19:21:50.133159Z",
+      "analysis": {
+        "has_defect": false,
+        "severity": 0,
+        "defect_type": "No obvious abnormalities detected.",
+        "location": "Entire imaged area of the hand and wrist.",
+        "affected_area": "Hand and wrist.",
+        "bounding_box": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "width": 768,
+        "height": 512,
+        "recommendation": "This educational analysis suggests no obvious abnormalities based on the provided X-ray image. For a definitive medical interpretation and personalized advice, it is crucial to consult with a qualified healthcare professional who can review all clinical information and imaging studies.",
+        "image_size": [
+          740,
+          490
+        ]
+      },
+      "has_defect": false
+    }
+  ],
+  "prescriptions": [
+    {
+      "id": "pres_1775072230472",
+      "filename": "pres.jpg",
+      "uploaded_at": "2026-04-01T19:37:10.472947Z",
+      "medicines": [
+        {
+          "name": "morphine 130 mg/24 hours oral capsule, extended release",
+          "dosage": "130 mg (1 capsule)",
+          "frequency": "Once daily",
+          "purpose": "Severe chronic pain relief",
+          "price": 1250.0,
+          "link": "Note: Prescription required, hospital/clinic only - Estimated price range: ₹500-2000"
+        },
+        {
+          "name": "OXYcodone oral 10 mg tablet",
+          "dosage": "10 mg (1 tablet)",
+          "frequency": "Every 6 hours as needed for pain",
+          "purpose": "Moderate to severe pain relief",
+          "price": 1900.0,
+          "link": "Note: Prescription required, hospital/clinic only - Estimated price range: ₹800-3000"
+        },
+        {
+          "name": "codeine sulfate oral 60 mg tablet",
+          "dosage": "60 mg (1 tablet)",
+          "frequency": "Every 4 hours as needed for pain",
+          "purpose": "Mild to moderate pain relief",
+          "price": 500.0,
+          "link": "Note: Prescription required, limited availability - Estimated price range: ₹200-800"
+        },
+        {
+          "name": "Norco oral 325-5 mg tablet",
+          "dosage": "2 tablets",
+          "frequency": "Every 4 hours as needed for pain",
+          "purpose": "Moderate to severe pain relief",
+          "price": 800.0,
+          "link": "Note: Prescription required, contains hydrocodone - Estimated price range: ₹400-1200"
+        }
+      ],
+      "raw_data": {
+        "morphine 130 mg/24 hours oral capsule, extended release": [
+          {
+            "dosage": "130 mg (1 capsule)",
+            "frequency": "Once daily",
+            "purpose": "Severe chronic pain relief"
+          }
+        ],
+        "OXYcodone oral 10 mg tablet": [
+          {
+            "dosage": "10 mg (1 tablet)",
+            "frequency": "Every 6 hours as needed for pain",
+            "purpose": "Moderate to severe pain relief"
+          }
+        ],
+        "codeine sulfate oral 60 mg tablet": [
+          {
+            "dosage": "60 mg (1 tablet)",
+            "frequency": "Every 4 hours as needed for pain",
+            "purpose": "Mild to moderate pain relief"
+          }
+        ],
+        "Norco oral 325-5 mg tablet": [
+          {
+            "dosage": "2 tablets",
+            "frequency": "Every 4 hours as needed for pain",
+            "purpose": "Moderate to severe pain relief"
+          }
+        ]
+      }
+    }
+  ],
+  "closed_doctor_chats": {
+    "drDhara": "2026-04-02T19:28:36.344921Z"
+  },
+  "doctor_chats": {
+    "drDhara": [
+      {
+        "sender": "system",
+        "text": "Chat closed after completion of appointment apt_1775158030012.",
+        "ts": "2026-04-02T19:28:36.344921Z"
+      },
+      {
+        "sender": "system",
+        "text": "Appointment scheduled for Svdhara on 2026-04-03T00:59.",
+        "ts": "2026-04-02T19:28:16.941430Z"
+      }
+    ]
+  }
+}

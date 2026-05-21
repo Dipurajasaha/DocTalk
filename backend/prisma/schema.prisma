@@ -1,0 +1,131 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  patient
+  doctor
+}
+
+enum Gender {
+  male
+  female
+  other
+}
+
+enum AppointmentStatus {
+  pending
+  requested
+  scheduled
+  completed
+  cancelled
+  declined
+}
+
+model Patient {
+  username         String   @id
+  name             String
+  displayName      String?
+  dob              DateTime?
+  gender           Gender?
+  password         String
+  bloodGroup       String?
+  address          String?
+  mobile           String?
+  email            String?
+  phone            String?
+  profilePic       String?
+  closedDoctorChats Json?   @db.JsonB
+  doctorChats       Json?   @db.JsonB
+  chatSessions      Json?   @db.JsonB
+  reports           Json?   @db.JsonB
+  medicalImages     Json?   @db.JsonB
+  prescriptions     Json?   @db.JsonB
+  xrayAnalyses      Json?   @db.JsonB
+  customAssets      Json?   @db.JsonB
+  appointments      Appointment[]
+  publicKey         String?
+  encryptedPrivateKey String?
+  fileKeys          FileKey[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("patients")
+}
+
+model Doctor {
+  doctorId           String   @id
+  name               String
+  displayName        String?
+  gender             Gender?
+  password           String
+  role               Role     @default(doctor)
+  category           String?
+  location           String?
+  address            String?
+  registrationNumber String?
+  hospitalName       String?
+  hospitalLocation   String?
+  specialization     String?
+  bio                String?
+  profilePic        String?
+  schedules          Json?    @db.JsonB
+  appointmentRequests Json?   @db.JsonB
+  payments           Json?    @db.JsonB
+  patientChats       Json?    @db.JsonB
+  assistantChat      Json?    @db.JsonB
+  closedChats        Json?    @db.JsonB
+  appointments      Appointment[]
+  publicKey         String?
+  encryptedPrivateKey String?
+  fileKeys          FileKey[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("doctors")
+}
+
+model Appointment {
+  id            String           @id
+  patientUsername String
+  doctorId      String
+  date          String?
+  time          String?
+  scheduledTime DateTime?
+  reason        String
+  note          String?
+  status        AppointmentStatus @default(pending)
+  requestedAt   DateTime          @default(now())
+  createdAt     DateTime          @default(now())
+  completedAt   DateTime?
+  patient      Patient          @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  doctor       Doctor           @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+
+  @@index([patientUsername])
+  @@index([doctorId])
+  @@index([status])
+  @@map("appointments")
+}
+
+model FileKey {
+  id                 String   @id @default(uuid())
+  fileId             String
+  patientUsername    String?
+  doctorId           String?
+  encryptedFileKey   String
+  createdAt          DateTime @default(now())
+  
+  patient            Patient? @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  doctor             Doctor?  @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+
+  @@index([fileId])
+  @@index([patientUsername])
+  @@index([doctorId])
+  @@map("file_keys")
+}

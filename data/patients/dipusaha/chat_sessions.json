@@ -1,0 +1,53 @@
+[
+  {
+    "id": "s_1779134783748",
+    "title": "hi",
+    "messages": [
+      {
+        "sender": "user",
+        "text": "hi",
+        "ts": "2026-05-18T20:06:23.748720Z"
+      },
+      {
+        "sender": "model",
+        "text": "\n\n\n⚠️ IMPORTANT DISCLAIMER:\nThis AI output is informational only and NOT a medical diagnosis. Consult a qualified healthcare professional.",
+        "ts": "2026-05-18T20:06:23.748720Z"
+      }
+    ],
+    "created": "2026-05-18T20:06:23.748720Z"
+  },
+  {
+    "id": "s_1777752669013",
+    "title": "who are you?",
+    "messages": [
+      {
+        "sender": "user",
+        "text": "who are you?",
+        "ts": "2026-05-02T20:11:09.013021Z"
+      },
+      {
+        "sender": "model",
+        "text": "\n\n\n⚠️ IMPORTANT DISCLAIMER:\nThis AI output is informational only and NOT a medical diagnosis. Consult a qualified healthcare professional.",
+        "ts": "2026-05-02T20:11:09.013021Z"
+      }
+    ],
+    "created": "2026-05-02T20:11:09.013021Z"
+  },
+  {
+    "id": "s_1777752369113",
+    "title": "hi",
+    "messages": [
+      {
+        "sender": "user",
+        "text": "hi",
+        "ts": "2026-05-02T20:06:09.113588Z"
+      },
+      {
+        "sender": "model",
+        "text": "\n\n\n⚠️ IMPORTANT DISCLAIMER:\nThis AI output is informational only and NOT a medical diagnosis. Consult a qualified healthcare professional.",
+        "ts": "2026-05-02T20:06:09.113588Z"
+      }
+    ],
+    "created": "2026-05-02T20:06:09.113588Z"
+  }
+]

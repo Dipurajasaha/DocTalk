@@ -1,0 +1,14 @@
+[
+  {
+    "id": "apt_1775158030012",
+    "doctor_id": "drDhara",
+    "doctor_name": "Dr Dhara",
+    "category": "Heart",
+    "location": null,
+    "requested_at": "2026-04-02T19:27:10.012471Z",
+    "status": "completed",
+    "scheduled_time": "2026-04-03T00:59",
+    "note": "Scheduled from request",
+    "completed_at": "2026-04-02T19:28:36.344921Z"
+  }
+]
