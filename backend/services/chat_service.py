@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 
 from ..core.database import prisma
 from ..core.logger import get_logger
+from .contextual_ai_service import contextual_ai_service
 
 
 logger = get_logger(__name__)
@@ -121,6 +122,31 @@ class ChatService:
             "has_more": skip + len(items) < total,
         }
 
+    async def analyze_consultation_context(self, user_id: str, role: AuthRole, consultation_id: str, language: str = "en") -> dict[str, Any]:
+        consultation = await self._load_consultation(consultation_id)
+        self.validate_consultation_access(role, user_id, consultation.patientUsername, consultation.doctorId)
+
+        messages = await self.client.message.find_many(
+            where={"consultationId": consultation_id},
+            order={"timestamp": "asc"},
+            take=30,
+        )
+        transcript = self._build_transcript(messages)
+        return await contextual_ai_service.analyze_consultation_text(
+            requester_id=user_id,
+            role=role,
+            patient_id=consultation.patientUsername,
+            conversation_text=transcript,
+            language=language,
+            consultation_id=consultation_id,
+            metadata={
+                "consultation_id": consultation_id,
+                "patient_id": consultation.patientUsername,
+                "message_count": len(messages),
+                "source": "consultation_chat",
+            },
+        )
+
     def validate_consultation_access(self, role: AuthRole, user_id: str, patient_id: str, doctor_id: str) -> None:
         if role == "patient" and user_id == patient_id:
             return
@@ -177,3 +203,20 @@ class ChatService:
             "message": data.get("message"),
             "timestamp": data.get("timestamp"),
         }
+
+    @staticmethod
+    def _build_transcript(messages: list[Any]) -> str:
+        lines: list[str] = []
+        for message in messages:
+            data = message.model_dump() if hasattr(message, "model_dump") else dict(message)
+            sender_role = str(data.get("senderRole") or "unknown").lower()
+            timestamp = data.get("timestamp")
+            timestamp_text = timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp or "")
+            content = str(data.get("message") or "").strip()
+            if not content:
+                continue
+            lines.append(f"{sender_role} | {timestamp_text}: {content}")
+        transcript = "\n".join(lines).strip()
+        if len(transcript) > 5000:
+            return transcript[-5000:]
+        return transcript

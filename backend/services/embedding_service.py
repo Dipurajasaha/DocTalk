@@ -6,63 +6,79 @@ import os
 import re
 from typing import Any
 
+import httpx
+
+from ..core.config import settings
 from ..core.logger import get_logger
 
 logger = get_logger(__name__)
-
-try:  # pragma: no cover - optional dependency path
-	import google.generativeai as genai
-except Exception:  # pragma: no cover - dependency may be absent in some environments
-	genai = None
 
 
 class EmbeddingService:
 	def __init__(self) -> None:
 		self.dimension = max(int(os.getenv("RAG_EMBEDDING_DIMENSION", "384")), 64)
-		self.model_name = os.getenv("RAG_EMBEDDING_MODEL", "text-embedding-004")
-		self.api_key = (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip()
-		self.available = bool(genai is not None and self.api_key and self.api_key not in {"YOUR_GOOGLE_API_KEY", "###"})
-		if self.available:
-			try:
-				genai.configure(api_key=self.api_key)
-				logger.info("RAG embeddings configured", extra={"component": "rag", "model": self.model_name, "dimension": self.dimension})
-			except Exception:
-				self.available = False
+		self.base_url = settings.ollama_base_url.rstrip("/")
+		self.model_name = settings.ollama_embed_model.strip() or "nomic-embed-text"
+		self.timeout_seconds = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", os.getenv("AI_REQUEST_TIMEOUT_SECONDS", "30")))
+		self._provider_checked = False
+		self._provider_available = False
+		logger.info("RAG embeddings configured", extra={"component": "rag", "model": self.model_name, "dimension": self.dimension, "provider": "ollama"})
+
+	@property
+	def available(self) -> bool:
+		return self._provider_checked and self._provider_available
 
 	async def embed_text(self, text: str) -> list[float]:
 		normalized = self._normalize_text(text)
 		if not normalized:
 			raise ValueError("Embedding text is empty")
 
-		if self.available:
+		if await self.validate_connection():
 			try:
 				raw = await self._embed_with_provider(normalized)
 				vector = self._fit_dimension(raw)
 				return self._normalize_vector(vector)
 			except Exception as exc:
+				self._provider_available = False
 				logger.warning("Embedding provider failed, using fallback", extra={"component": "rag", "error": str(exc)})
 
 		return self._normalize_vector(self._fallback_embedding(normalized))
 
+	async def validate_connection(self) -> bool:
+		if self._provider_checked:
+			return self._provider_available
+
+		try:
+			async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout_seconds) as client:
+				response = await client.get("/api/tags")
+				response.raise_for_status()
+				payload = response.json()
+				models = payload.get("models") if isinstance(payload, dict) else None
+				if isinstance(models, list):
+					model_names = {str(item.get("name") or "") for item in models if isinstance(item, dict)}
+					if model_names and not any(name == self.model_name or name.startswith(f"{self.model_name}:") for name in model_names):
+						raise RuntimeError(f"Embedding model {self.model_name} is not available in Ollama")
+				self._provider_available = True
+				self._provider_checked = True
+				return True
+		except Exception as exc:
+			self._provider_available = False
+			self._provider_checked = True
+			logger.warning("Ollama embedding provider unavailable, using fallback", extra={"component": "rag", "error": str(exc), "model": self.model_name})
+			return False
+
 	async def _embed_with_provider(self, text: str) -> list[float]:
-		if genai is None:
-			raise RuntimeError("Embedding provider unavailable")
-
-		embed_fn = getattr(genai, "embed_content", None)
-		if embed_fn is None:
-			raise RuntimeError("Embedding provider does not support embed_content")
-
-		response = await self._to_thread(
-			embed_fn,
-			model=self.model_name,
-			content=text[:8192],
-			task_type="retrieval_document",
-		)
-		embedding = response.get("embedding") if isinstance(response, dict) else getattr(response, "embedding", None)
-		if embedding is None:
-			raise RuntimeError("Embedding response missing vector")
-		values = getattr(embedding, "values", embedding)
-		return [float(value) for value in values]
+		async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout_seconds) as client:
+			response = await client.post(
+				"/api/embeddings",
+				json={"model": self.model_name, "prompt": text[:8192]},
+			)
+			response.raise_for_status()
+			payload = response.json()
+			embedding = payload.get("embedding") if isinstance(payload, dict) else None
+			if embedding is None:
+				raise RuntimeError("Embedding response missing vector")
+			return [float(value) for value in embedding]
 
 	def _fallback_embedding(self, text: str) -> list[float]:
 		tokens = re.findall(r"[A-Za-z0-9]+", text.lower())
@@ -105,12 +121,6 @@ class EmbeddingService:
 		if norm == 0:
 			return cleaned
 		return [value / norm for value in cleaned]
-
-	@staticmethod
-	async def _to_thread(func, /, *args, **kwargs):
-		import asyncio
-
-		return await asyncio.to_thread(func, *args, **kwargs)
 
 	def to_vector_literal(self, values: list[float]) -> str:
 		vector = self._normalize_vector(self._fit_dimension(values))

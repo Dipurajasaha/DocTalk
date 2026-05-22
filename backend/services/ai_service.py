@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
+import mimetypes
 import time
 from pathlib import Path
 from typing import Any, Literal
 
+import httpx
 from PIL import Image, ImageStat
 
+from ..core.config import settings
 from ..core.logger import get_logger
 from .prompt_service import medical_prompt_service
 from .response_formatter import medical_response_formatter
@@ -16,13 +20,8 @@ from .safety_service import medical_safety_service
 
 logger = get_logger(__name__)
 
-try:  # pragma: no cover - optional dependency path
-    import google.generativeai as genai
-except Exception:  # pragma: no cover - dependency may be absent in some environments
-    genai = None
 
-
-PromptType = Literal["ocr_image", "prescription", "xray", "consultation"]
+PromptType = Literal["ocr_image", "prescription", "xray", "consultation", "summary"]
 
 
 def _clean_json_text(raw_text: str) -> str:
@@ -36,49 +35,69 @@ def _clean_json_text(raw_text: str) -> str:
 
 class AIService:
     def __init__(self) -> None:
-        api_key = (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip()
-        self.model_name = os.getenv("GEMINI_TEXT_MODEL", "gemini-3-flash-preview")
-        self.timeout_seconds = float(os.getenv("AI_REQUEST_TIMEOUT_SECONDS", "30"))
+        self.base_url = settings.ollama_base_url.rstrip("/")
+        self.chat_model_name = settings.ollama_chat_model.strip() or "qwen2.5:7b-instruct"
+        self.reasoning_model_name = self.chat_model_name
+        self.vision_model_name = settings.ollama_vision_model.strip() or "llama3.2-vision"
+        self.summary_model_name = self.chat_model_name
+        self.model_name = self.chat_model_name
+        self._last_model_name = self.model_name
+        self.timeout_seconds = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", os.getenv("AI_REQUEST_TIMEOUT_SECONDS", "45")))
         self.max_retries = max(int(os.getenv("AI_RETRY_ATTEMPTS", "2")), 1)
-        self.model = None
+        self.chat_keep_alive = os.getenv("OLLAMA_CHAT_KEEP_ALIVE", "8m")
+        self.vision_keep_alive = os.getenv("OLLAMA_VISION_KEEP_ALIVE", "30s")
+        self.chat_num_ctx = max(int(os.getenv("OLLAMA_CHAT_NUM_CTX", "3072")), 1024)
+        self.vision_num_ctx = max(int(os.getenv("OLLAMA_VISION_NUM_CTX", "1536")), 512)
+        self.client: httpx.AsyncClient | None = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout_seconds)
+        self._provider_checked = False
+        self._provider_available = False
         self.generation_config = {
             "temperature": 0.2,
-            "top_p": 0.9,
-            "top_k": 40,
-            "max_output_tokens": 2048,
+            "max_output_tokens": 1024,
         }
         self.safety_config = medical_safety_service.build_safety_config()
 
-        if genai is not None and api_key and api_key not in {"YOUR_GOOGLE_API_KEY", "###"}:
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel(self.model_name)
-            logger.info("Medical AI configured", extra={"component": "ai", "model": self.model_name})
-        else:
-            logger.info("Medical AI unavailable, using local fallbacks", extra={"component": "ai"})
+        logger.info(
+            "Medical AI configured",
+            extra={
+                "component": "ai",
+                "provider": "ollama",
+                "base_url": self.base_url,
+                "chat_model": self.chat_model_name,
+                "vision_model": self.vision_model_name,
+                "chat_keep_alive": self.chat_keep_alive,
+                "vision_keep_alive": self.vision_keep_alive,
+            },
+        )
 
     @property
     def available(self) -> bool:
-        return self.model is not None
+        return self.client is not None
 
-    async def analyze_ocr_image(self, image_path: str | Path, language: str = "en", metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        prompt = medical_prompt_service.build_ocr_prompt(language)
+    async def analyze_ocr_image(self, image_path: str | Path, language: str = "en", metadata: dict[str, Any] | None = None, context_text: str | None = None) -> dict[str, Any]:
+        prompt = medical_prompt_service.build_ocr_prompt(language, context_text=context_text)
         fallback = self._ocr_image_fallback(Path(image_path), language=language, metadata=metadata)
         return await self._generate_image_result("ocr_image", prompt, image_path, fallback, metadata=metadata)
 
-    async def analyze_prescription_text(self, extracted_text: str, language: str = "en", metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        prompt = medical_prompt_service.build_prescription_prompt(language)
+    async def analyze_prescription_text(self, extracted_text: str, language: str = "en", metadata: dict[str, Any] | None = None, context_text: str | None = None) -> dict[str, Any]:
+        prompt = medical_prompt_service.build_prescription_prompt(language, context_text=context_text)
         fallback = self._prescription_fallback(extracted_text, language=language, metadata=metadata)
         return await self._generate_text_result("prescription", prompt, extracted_text, fallback, metadata=metadata)
 
-    async def analyze_xray_image(self, image_path: str | Path, language: str = "en", metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        prompt = medical_prompt_service.build_xray_prompt(language)
+    async def analyze_xray_image(self, image_path: str | Path, language: str = "en", metadata: dict[str, Any] | None = None, context_text: str | None = None) -> dict[str, Any]:
+        prompt = medical_prompt_service.build_xray_prompt(language, context_text=context_text)
         fallback = self._xray_fallback(Path(image_path), language=language, metadata=metadata)
         return await self._generate_image_result("xray", prompt, image_path, fallback, metadata=metadata)
 
-    async def analyze_consultation_text(self, conversation_text: str, language: str = "en", metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        prompt = medical_prompt_service.build_consultation_prompt(language)
+    async def analyze_consultation_text(self, conversation_text: str, language: str = "en", metadata: dict[str, Any] | None = None, context_text: str | None = None) -> dict[str, Any]:
+        prompt = medical_prompt_service.build_consultation_prompt(language, context_text=context_text)
         fallback = self._consultation_fallback(conversation_text, language=language, metadata=metadata)
         return await self._generate_text_result("consultation", prompt, conversation_text, fallback, metadata=metadata)
+
+    async def summarize_medical_text(self, text: str, language: str = "en", metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        prompt = medical_prompt_service.build_summary_prompt(language)
+        fallback = self._summary_fallback(text, language=language, metadata=metadata)
+        return await self._generate_text_result("summary", prompt, text, fallback, metadata=metadata)
 
     async def _generate_text_result(
         self,
@@ -88,7 +107,7 @@ class AIService:
         fallback: dict[str, Any],
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if self.model is None:
+        if not await self.validate_connection():
             return fallback
 
         return await self._generate_with_retry(
@@ -108,7 +127,7 @@ class AIService:
         fallback: dict[str, Any],
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if self.model is None:
+        if not await self.validate_connection():
             return fallback
 
         return await self._generate_with_retry(
@@ -134,7 +153,7 @@ class AIService:
             started_at = time.perf_counter()
             try:
                 response = await asyncio.wait_for(
-                    asyncio.to_thread(self._invoke_model, prompt, payload, payload_kind),
+                    self._invoke_model(prompt_type, prompt, payload, payload_kind),
                     timeout=self.timeout_seconds,
                 )
                 payload_data = self._parse_model_response(response)
@@ -151,29 +170,76 @@ class AIService:
 
         return medical_safety_service.fallback_response(prompt_type, reason=last_error or "model unavailable", fallback=fallback)
 
-    def _invoke_model(self, prompt: str, payload: str | Path, payload_kind: Literal["text", "image"]):
-        if self.model is None:
+    async def _invoke_model(self, prompt_type: PromptType, prompt: str, payload: str | Path, payload_kind: Literal["text", "image"]):
+        if self.client is None:
             raise RuntimeError("Model is unavailable")
 
-        generation_kwargs = {
-            "generation_config": self.generation_config,
-            "safety_settings": self.safety_config,
-        }
+        model_name = self._select_model(prompt_type, payload_kind)
+        self._last_model_name = model_name
+        body = self._build_request_body(prompt, payload, payload_kind, model_name)
+        response = await self.client.post(
+            "/api/chat",
+            json=body,
+        )
+        response.raise_for_status()
+        payload_data = response.json()
+        if isinstance(payload_data, dict) and payload_data.get("error"):
+            raise RuntimeError(str(payload_data.get("error")))
+        return payload_data
+
+    async def validate_connection(self) -> bool:
+        if self.client is None:
+            return False
+        if self._provider_checked and self._provider_available:
+            return True
 
         try:
-            if payload_kind == "text":
-                return self.model.generate_content([medical_safety_service.inject_disclaimer(prompt), payload], **generation_kwargs)
+            response = await self.client.get("/api/tags")
+            response.raise_for_status()
+            payload = response.json()
+            models = payload.get("models") if isinstance(payload, dict) else None
+            if isinstance(models, list) and models:
+                names = {str(item.get("name") or "") for item in models if isinstance(item, dict)}
+                required = [self.chat_model_name, self.vision_model_name]
+                missing = [name for name in required if not any(candidate == name or candidate.startswith(f"{name}:") for candidate in names)]
+                if missing:
+                    raise RuntimeError(f"Missing Ollama model(s): {', '.join(missing)}")
+            self._provider_available = True
+            self._provider_checked = True
+            return True
+        except Exception as exc:
+            self._provider_available = False
+            self._provider_checked = True
+            logger.warning("Ollama AI provider unavailable, using local fallbacks", extra={"component": "ai", "error": str(exc)})
+            return False
 
-            with Image.open(Path(payload)) as image:
-                return self.model.generate_content([medical_safety_service.inject_disclaimer(prompt), image], **generation_kwargs)
-        except TypeError:
-            if payload_kind == "text":
-                return self.model.generate_content([medical_safety_service.inject_disclaimer(prompt), payload], generation_config=self.generation_config)
-            with Image.open(Path(payload)) as image:
-                return self.model.generate_content([medical_safety_service.inject_disclaimer(prompt), image], generation_config=self.generation_config)
+    def _build_request_body(
+        self,
+        prompt: str,
+        payload: str | Path,
+        payload_kind: Literal["text", "image"],
+        model_name: str,
+    ) -> dict[str, Any]:
+        system_prompt = medical_safety_service.inject_disclaimer(prompt)
+        keep_alive = self.vision_keep_alive if payload_kind == "image" else self.chat_keep_alive
+        num_ctx = self.vision_num_ctx if payload_kind == "image" else self.chat_num_ctx
+        options = {
+            "temperature": self.generation_config["temperature"],
+            "num_ctx": num_ctx,
+            "num_predict": self.generation_config["max_output_tokens"],
+        }
+        messages = self._build_messages(system_prompt, payload, payload_kind)
+        return {
+            "model": model_name,
+            "messages": messages,
+            "format": "json",
+            "stream": False,
+            "keep_alive": keep_alive,
+            "options": options,
+        }
 
     def _parse_model_response(self, response: Any) -> dict[str, Any]:
-        raw_text = str(getattr(response, "text", "") or "").strip()
+        raw_text = self._extract_response_text(response)
         if not raw_text:
             return {}
 
@@ -192,6 +258,8 @@ class AIService:
         extracted_text = str(payload.get("extracted_text") or "").strip()
         if extracted_text:
             combined_metadata["extracted_text"] = extracted_text
+        combined_metadata.setdefault("provider", "ollama")
+        combined_metadata.setdefault("model", getattr(self, "_last_model_name", self.model_name))
 
         formatted = medical_response_formatter.format_output(
             success=bool(payload.get("success", True)),
@@ -214,8 +282,8 @@ class AIService:
             success=True,
             summary="Image OCR completed using local metadata fallback.",
             findings=["Image file opened successfully.", f"Dimensions: {width}x{height}", f"Mode: {mode}"],
-            recommendations=["Use the extracted image metadata for follow-up review."] ,
-            warnings=["Gemini model unavailable; returning metadata-based image text."],
+            recommendations=["Use the extracted image metadata for follow-up review."],
+            warnings=["Ollama model unavailable; returning metadata-based image text."],
             metadata=self._merge_metadata(metadata, extracted_text=extracted_text, prompt_type="ocr_image"),
         )
 
@@ -245,7 +313,7 @@ class AIService:
             summary=summary,
             findings=findings,
             recommendations=recommendations,
-            warnings=["Gemini model unavailable; using local prescription heuristics."] + ([] if extracted_text else ["No extracted text available for prescription analysis."]),
+            warnings=["Ollama model unavailable; using local prescription heuristics."] + ([] if extracted_text else ["No extracted text available for prescription analysis."]),
             metadata=self._merge_metadata(metadata, extracted_text=extracted_text, prompt_type="prescription"),
         )
 
@@ -266,10 +334,10 @@ class AIService:
         extracted_text = f"Image metadata: {width}x{height}, mode {mode}."
         return medical_response_formatter.format_output(
             success=True,
-            summary="Local image validation completed. No AI model was configured, so analysis is metadata-based.",
+            summary="Local image validation completed. Ollama was unavailable, so analysis is metadata-based.",
             findings=findings,
             recommendations=["Consult a radiologist for clinical interpretation."],
-            warnings=["Gemini model unavailable; using local image metadata fallback."],
+            warnings=["Ollama model unavailable; using local image metadata fallback."],
             metadata=self._merge_metadata(metadata, extracted_text=extracted_text, prompt_type="xray"),
         )
 
@@ -278,7 +346,7 @@ class AIService:
         findings = ["Conversation text received for review."] if text else []
         summary = "Consultation review completed." if text else "No consultation text was provided."
         recommendations = ["Review the conversation with the assigned clinician."] if text else []
-        warnings = ["Gemini model unavailable; using local consultation fallback."] if text else ["No conversation text available for consultation analysis."]
+        warnings = ["Ollama model unavailable; using local consultation fallback."] if text else ["No conversation text available for consultation analysis."]
         return medical_response_formatter.format_output(
             success=True,
             summary=summary,
@@ -288,6 +356,94 @@ class AIService:
             metadata=self._merge_metadata(metadata, extracted_text=text, prompt_type="consultation"),
         )
 
+    def _summary_fallback(self, text: str, language: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        content = text.strip()
+        summary = self._first_sentences(content, count=2) or "Medical summary completed."
+        findings = []
+        if content:
+            findings.append(content.split(".")[0].strip())
+        return medical_response_formatter.format_output(
+            success=True,
+            summary=summary,
+            findings=findings,
+            recommendations=["Use the summary for retrieval and consultation review."],
+            warnings=["Ollama model unavailable; using local summarization fallback."],
+            metadata=self._merge_metadata(metadata, extracted_text=content, prompt_type="summary"),
+        )
+
+    @staticmethod
+    def _first_sentences(text: str, *, count: int) -> str:
+        parts = [segment.strip() for segment in str(text or "").replace("\n", " ").split(".") if segment.strip()]
+        if not parts:
+            return ""
+        snippet = ". ".join(parts[:count]).strip()
+        return snippet + ("." if len(parts[:count]) == 1 else "")
+
+    def _select_model(self, prompt_type: PromptType, payload_kind: Literal["text", "image"]) -> str:
+        if payload_kind == "image":
+            return self.vision_model_name
+        return self.chat_model_name
+
+    def _build_messages(self, system_prompt: str, payload: str | Path, payload_kind: Literal["text", "image"]) -> list[dict[str, Any]]:
+        if payload_kind == "text":
+            return [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": str(payload)},
+            ]
+
+        image_path = Path(payload)
+        image_b64 = self._encode_image_base64(image_path)
+        return [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": "Analyze this medical image and return only valid JSON matching the requested schema.",
+                "images": [image_b64],
+            },
+        ]
+
+    @staticmethod
+    def _encode_image_base64(image_path: Path) -> str:
+        _mime_type, _ = mimetypes.guess_type(str(image_path))
+        data = image_path.read_bytes()
+        return base64.b64encode(data).decode("ascii")
+
+    @staticmethod
+    def _extract_response_text(response: Any) -> str:
+        if response is None:
+            return ""
+        if isinstance(response, str):
+            return response.strip()
+        if isinstance(response, dict):
+            message = response.get("message") if isinstance(response.get("message"), dict) else {}
+            content = message.get("content")
+            if isinstance(content, str):
+                return content.strip()
+            return str(response.get("response") or "").strip()
+
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            return str(getattr(response, "text", "") or "").strip()
+        message = getattr(choices[0], "message", None)
+        if message is None:
+            return str(getattr(response, "text", "") or "").strip()
+        content = getattr(message, "content", None)
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get("text")
+                    if text:
+                        parts.append(str(text))
+                else:
+                    text = getattr(item, "text", None)
+                    if text:
+                        parts.append(str(text))
+            return "\n".join(parts).strip()
+        return str(content or "").strip()
+
     @staticmethod
     def _merge_metadata(metadata: dict[str, Any] | None, **extra: Any) -> dict[str, Any]:
         merged = dict(metadata or {})
@@ -296,24 +452,31 @@ class AIService:
 
     def _log_success(self, prompt_type: PromptType, started_at: float, response: Any, attempt: int) -> None:
         latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
-        usage = getattr(response, "usage_metadata", None)
+        usage = response.get("eval_count") if isinstance(response, dict) else getattr(response, "usage_metadata", None)
         token_usage = None
         if usage is not None:
-            token_usage = {
-                "prompt_tokens": getattr(usage, "prompt_token_count", None),
-                "response_tokens": getattr(usage, "candidates_token_count", None),
-                "total_tokens": getattr(usage, "total_token_count", None),
-            }
+            if isinstance(response, dict):
+                token_usage = {
+                    "prompt_tokens": response.get("prompt_eval_count"),
+                    "response_tokens": response.get("eval_count"),
+                    "total_tokens": (response.get("prompt_eval_count") or 0) + (response.get("eval_count") or 0),
+                }
+            else:
+                token_usage = {
+                    "prompt_tokens": getattr(usage, "prompt_token_count", None),
+                    "response_tokens": getattr(usage, "candidates_token_count", None),
+                    "total_tokens": getattr(usage, "total_token_count", None),
+                }
         logger.info(
             "AI request completed",
-            extra={"component": "ai", "prompt_type": prompt_type, "latency_ms": latency_ms, "attempt": attempt, "model": self.model_name, "tokens": token_usage},
+            extra={"component": "ai", "prompt_type": prompt_type, "latency_ms": latency_ms, "attempt": attempt, "model": getattr(self, "_last_model_name", self.model_name), "tokens": token_usage},
         )
 
     def _log_failure(self, prompt_type: PromptType, started_at: float, error: str, attempt: int) -> None:
         latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
         logger.warning(
             "AI request failed",
-            extra={"component": "ai", "prompt_type": prompt_type, "latency_ms": latency_ms, "attempt": attempt, "model": self.model_name, "error": error},
+            extra={"component": "ai", "prompt_type": prompt_type, "latency_ms": latency_ms, "attempt": attempt, "model": getattr(self, "_last_model_name", self.model_name), "error": error},
         )
 
 

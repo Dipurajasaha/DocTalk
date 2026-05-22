@@ -2,20 +2,32 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import fitz
 from fastapi import HTTPException, status
 
 from ..core.logger import get_logger
 from .ai_service import ai_service
+from .contextual_ai_service import contextual_ai_service
 
 
 logger = get_logger(__name__)
+AuthRole = Literal["patient", "doctor"]
 
 
 class OCRService:
-    async def extract_text_from_file(self, file_path: str | Path, mime_type: str | None = None, language: str = "en") -> dict[str, Any]:
+    async def extract_text_from_file(
+        self,
+        file_path: str | Path,
+        mime_type: str | None = None,
+        language: str = "en",
+        *,
+        requester_id: str | None = None,
+        role: AuthRole | None = None,
+        patient_id: str | None = None,
+        consultation_id: str | None = None,
+    ) -> dict[str, Any]:
         path = Path(file_path)
         if not path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
@@ -27,7 +39,14 @@ class OCRService:
             return await self.extract_pdf_text(path, language=language)
 
         if suffix in {".png", ".jpg", ".jpeg", ".webp"} or content_type.startswith("image/"):
-            return await self.extract_image_text(path, language=language)
+            return await self.extract_image_text(
+                path,
+                language=language,
+                requester_id=requester_id,
+                role=role,
+                patient_id=patient_id,
+                consultation_id=consultation_id,
+            )
 
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Unsupported file format for OCR")
 
@@ -55,10 +74,29 @@ class OCRService:
 
         return await self._run_in_thread(_run)
 
-    async def extract_image_text(self, file_path: str | Path, language: str = "en") -> dict[str, Any]:
+    async def extract_image_text(
+        self,
+        file_path: str | Path,
+        language: str = "en",
+        *,
+        requester_id: str | None = None,
+        role: AuthRole | None = None,
+        patient_id: str | None = None,
+        consultation_id: str | None = None,
+    ) -> dict[str, Any]:
         path = Path(file_path)
 
         try:
+            if requester_id and role and patient_id:
+                return await contextual_ai_service.analyze_ocr_image(
+                    requester_id=requester_id,
+                    role=role,
+                    patient_id=patient_id,
+                    image_path=path,
+                    language=language,
+                    consultation_id=consultation_id,
+                    metadata={"source": "ocr_image"},
+                )
             return await ai_service.analyze_ocr_image(path, language=language, metadata={"source": "ocr_image"})
         except HTTPException:
             raise

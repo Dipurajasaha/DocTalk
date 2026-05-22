@@ -44,7 +44,7 @@ Purpose
 - Provide a compact, modular FastAPI backend for a healthcare educational assistant. It exposes routes for authentication, doctor/patient data, file uploads, AI chat, prescription parsing, and X-ray analysis.
 - Store application data as JSON files under `data/` (no external DB dependency required).
 - Provide encrypted file storage with AES-GCM + RSA key wrapping.
-- Integrate with LLMs (Gemini via `google.generativeai`) for chat, document explanation, prescription extraction, and X-ray analysis.
+- Integrate with a local Ollama AI layer: qwen2.5:7b-instruct for chat/reasoning and llama3.2-vision for image analysis, with `nomic-embed-text` for embeddings.
 
 Audience
 - Backend maintainers and developers working on features, testing, or deployment.
@@ -73,7 +73,7 @@ Diagram (simplified)
 ```
 Frontend --> FastAPI Route --> Service --> Repository --> JsonHealthCareStore (files)
                                     \-> StorageFileService (files + encryption)
-                                    \-> AIChatService (LLM calls via Gemini)
+                                    \-> AIChatService / AIService (Ollama local model calls)
 ```
 
 ---

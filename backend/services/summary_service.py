@@ -37,7 +37,7 @@ class SummaryService:
 
         if source_type == "consultation" and normalized_content and ai_service.available:
             try:
-                analysis = await ai_service.analyze_consultation_text(normalized_content, metadata=metadata)
+                analysis = await ai_service.summarize_medical_text(normalized_content, metadata=metadata)
                 normalized_summary = normalized_summary or self._normalize_text(analysis.get("summary"))
                 normalized_findings = normalized_findings or self._normalize_items(analysis.get("findings"))
                 normalized_recommendations = normalized_recommendations or self._normalize_items(analysis.get("recommendations"))

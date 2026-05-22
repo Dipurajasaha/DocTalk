@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 
 from ...middleware.auth_middleware import CurrentUser, get_current_user
 from ...services.chat_service import ChatService
+from ..processing.schemas import ProcessingResponse
 from .schemas import (
     ConsultationCreateRequest,
     ConsultationResponse,
@@ -78,4 +79,16 @@ async def fetch_message_history(
         limit=history["limit"],
         total=history["total"],
         has_more=history["has_more"],
+    )
+
+
+@router.post("/consultations/{consultation_id}/analysis", response_model=ProcessingResponse)
+async def analyze_consultation_context(
+    consultation_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    language: str = Query(default="en", min_length=1),
+    chat_service: ChatService = Depends(get_chat_service),
+) -> ProcessingResponse:
+    return ProcessingResponse.model_validate(
+        await chat_service.analyze_consultation_context(current_user.user_id, current_user.role, consultation_id, language=language)
     )

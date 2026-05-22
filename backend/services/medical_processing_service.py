@@ -33,7 +33,15 @@ class MedicalProcessingService:
     async def analyze_report(self, user_id: str, role: AuthRole, report_id: str, language: str = "en") -> dict[str, Any]:
         asset = await self.report_service.get_asset(user_id, role, report_id)
         file_path, original_name, mime_type = await self.report_service.get_asset_file_path(user_id, role, report_id)
-        extracted = await ocr_service.extract_text_from_file(file_path, mime_type=mime_type, language=language)
+        extracted = await ocr_service.extract_text_from_file(
+            file_path,
+            mime_type=mime_type,
+            language=language,
+            requester_id=user_id,
+            role=role,
+            patient_id=asset["patient_id"],
+            consultation_id=asset.get("consultation_id"),
+        )
         response = self._build_response(
             extracted_text=self._get_extracted_text(extracted),
             findings=self._extract_findings_from_report(self._get_extracted_text(extracted), language=language),
@@ -57,7 +65,14 @@ class MedicalProcessingService:
         asset = await self.prescription_upload_service.get_asset(user_id, role, prescription_id)
         file_path, _, mime_type = await self.prescription_upload_service.get_asset_file_path(user_id, role, prescription_id)
         extracted = await ocr_service.extract_text_from_file(file_path, mime_type=mime_type, language=language)
-        analysis = await prescription_analysis_service.analyze_text(extracted.get("extracted_text", ""), language=language)
+        analysis = await prescription_analysis_service.analyze_text(
+            extracted.get("extracted_text", ""),
+            language=language,
+            requester_id=user_id,
+            role=role,
+            patient_id=asset["patient_id"],
+            consultation_id=asset.get("consultation_id"),
+        )
         response = self._build_response(
             extracted_text=self._get_extracted_text(analysis, fallback=extracted.get("extracted_text", "")),
             findings=analysis.get("findings", []),
@@ -80,7 +95,14 @@ class MedicalProcessingService:
     async def analyze_xray(self, user_id: str, role: AuthRole, medical_image_id: str, language: str = "en") -> dict[str, Any]:
         asset = await self.medical_image_service.get_asset(user_id, role, medical_image_id)
         file_path, _, _ = await self.medical_image_service.get_asset_file_path(user_id, role, medical_image_id)
-        analysis = await xray_analysis_service.analyze_image(file_path, language=language)
+        analysis = await xray_analysis_service.analyze_image(
+            file_path,
+            language=language,
+            requester_id=user_id,
+            role=role,
+            patient_id=asset["patient_id"],
+            consultation_id=asset.get("consultation_id"),
+        )
         response = self._build_response(
             extracted_text=self._get_extracted_text(analysis),
             findings=analysis.get("findings", []),
