@@ -46,13 +46,13 @@ model Patient {
   closedDoctorChats   Json?    @db.JsonB
   doctorChats         Json?    @db.JsonB
   chatSessions        Json?    @db.JsonB
-  reports             Json?    @db.JsonB
-  medicalImages       Json?    @db.JsonB
-  prescriptions       Json?    @db.JsonB
   xrayAnalyses        Json?    @db.JsonB
   customAssets        Json?    @db.JsonB
   appointments        Appointment[]
   consultations       Consultation[]
+  reports             Report[]
+  prescriptions       Prescription[]
+  medicalImages       MedicalImage[]
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
@@ -131,6 +131,9 @@ model Consultation {
   patient          Patient     @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
   doctor           Doctor      @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
   messages         Message[]
+  reports          Report[]
+  prescriptions    Prescription[]
+  medicalImages    MedicalImage[]
 
   @@index([patientUsername])
   @@index([doctorId])
@@ -168,4 +171,73 @@ model FileKey {
   @@index([patientUsername])
   @@index([doctorId])
   @@map("file_keys")
+}
+
+model Report {
+  id             String     @id @default(uuid())
+  patientUsername String
+  uploadedBy     String
+  uploadedByRole Role
+  consultationId String?
+  fileType       String
+  originalName   String
+  storedPath     String
+  mimeType       String
+  fileSize       Int
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  patient        Patient     @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  consultation   Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+
+  @@index([patientUsername])
+  @@index([uploadedBy])
+  @@index([consultationId])
+  @@map("reports")
+}
+
+model Prescription {
+  id             String     @id @default(uuid())
+  patientUsername String
+  uploadedBy     String
+  uploadedByRole Role
+  consultationId String?
+  fileType       String
+  originalName   String
+  storedPath     String
+  mimeType       String
+  fileSize       Int
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  patient        Patient     @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  consultation   Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+
+  @@index([patientUsername])
+  @@index([uploadedBy])
+  @@index([consultationId])
+  @@map("prescriptions")
+}
+
+model MedicalImage {
+  id             String     @id @default(uuid())
+  patientUsername String
+  uploadedBy     String
+  uploadedByRole Role
+  consultationId String?
+  fileType       String
+  originalName   String
+  storedPath     String
+  mimeType       String
+  fileSize       Int
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  patient        Patient     @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  consultation   Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+
+  @@index([patientUsername])
+  @@index([uploadedBy])
+  @@index([consultationId])
+  @@map("medical_images")
 }

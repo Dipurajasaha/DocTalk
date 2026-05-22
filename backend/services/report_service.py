@@ -4,16 +4,16 @@ from ..core.database import prisma
 from .file_service import AssetConfig, MedicalFileService
 
 
-PRESCRIPTION_CONFIG = AssetConfig(
-    model_name="prescription",
-    storage_folder="prescriptions",
-    api_prefix="/api/prescriptions",
-    file_type="prescription",
+REPORT_CONFIG = AssetConfig(
+    model_name="report",
+    storage_folder="reports",
+    api_prefix="/api/reports",
+    file_type="report",
     allowed_mime_types=frozenset({"application/pdf", "image/jpeg", "image/png"}),
     allowed_extensions=frozenset({".pdf", ".jpg", ".jpeg", ".png"}),
 )
 
 
-class PrescriptionService(MedicalFileService):
+class ReportService(MedicalFileService):
     def __init__(self, client=prisma) -> None:
-        super().__init__(PRESCRIPTION_CONFIG, client=client)
+        super().__init__(REPORT_CONFIG, client=client)
