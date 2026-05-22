@@ -6,11 +6,11 @@ from typing import Any, Literal
 from fastapi import HTTPException, status
 
 from ..core.logger import get_logger
+from .medical_image_service import MedicalImageService
 from .ocr_service import ocr_service
 from .prescription_analysis_service import prescription_analysis_service
-from .report_service import ReportService
-from .medical_image_service import MedicalImageService
 from .prescription_service import PrescriptionService
+from .report_service import ReportService
 from .xray_analysis_service import xray_analysis_service
 
 
@@ -33,10 +33,10 @@ class MedicalProcessingService:
         file_path, original_name, mime_type = await self.report_service.get_asset_file_path(user_id, role, report_id)
         extracted = await ocr_service.extract_text_from_file(file_path, mime_type=mime_type, language=language)
         return self._build_response(
-            extracted_text=extracted.get("extracted_text", ""),
-            findings=self._extract_findings_from_report(extracted.get("extracted_text", ""), language=language),
-            summary=self._summarize_report_text(extracted.get("extracted_text", ""), original_name),
-            recommendations=self._report_recommendations(extracted.get("extracted_text", "")),
+            extracted_text=self._get_extracted_text(extracted),
+            findings=self._extract_findings_from_report(self._get_extracted_text(extracted), language=language),
+            summary=self._summarize_report_text(self._get_extracted_text(extracted), original_name),
+            recommendations=self._report_recommendations(self._get_extracted_text(extracted)),
             warnings=extracted.get("warnings", []),
         )
 
@@ -45,7 +45,7 @@ class MedicalProcessingService:
         extracted = await ocr_service.extract_text_from_file(file_path, mime_type=mime_type, language=language)
         analysis = await prescription_analysis_service.analyze_text(extracted.get("extracted_text", ""), language=language)
         return self._build_response(
-            extracted_text=analysis.get("extracted_text", extracted.get("extracted_text", "")),
+            extracted_text=self._get_extracted_text(analysis, fallback=extracted.get("extracted_text", "")),
             findings=analysis.get("findings", []),
             summary=analysis.get("summary", "Prescription analysis completed."),
             recommendations=analysis.get("recommendations", []),
@@ -56,7 +56,7 @@ class MedicalProcessingService:
         file_path, _, _ = await self.medical_image_service.get_asset_file_path(user_id, role, medical_image_id)
         analysis = await xray_analysis_service.analyze_image(file_path, language=language)
         return self._build_response(
-            extracted_text=analysis.get("extracted_text", ""),
+            extracted_text=self._get_extracted_text(analysis),
             findings=analysis.get("findings", []),
             summary=analysis.get("summary", "X-ray analysis completed."),
             recommendations=analysis.get("recommendations", []),
@@ -124,6 +124,19 @@ class MedicalProcessingService:
             if value and value not in result:
                 result.append(value)
         return result
+
+    @staticmethod
+    def _get_extracted_text(payload: dict[str, Any], fallback: str = "") -> str:
+        direct_text = str(payload.get("extracted_text") or "").strip()
+        if direct_text:
+            return direct_text
+
+        metadata = payload.get("metadata") or {}
+        metadata_text = str(metadata.get("extracted_text") or "").strip()
+        if metadata_text:
+            return metadata_text
+
+        return str(fallback or "").strip()
 
 
 medical_processing_service = MedicalProcessingService()

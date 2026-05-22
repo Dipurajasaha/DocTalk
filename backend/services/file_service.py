@@ -9,6 +9,8 @@ from fastapi import HTTPException, UploadFile, status
 
 from ..core.config import settings
 from ..core.database import prisma
+from PIL import Image as PILImage
+import fitz
 
 
 AuthRole = Literal["patient", "doctor"]
@@ -54,6 +56,14 @@ class MedicalFileService:
         if file_size <= 0:
             self._safe_unlink(stored_path)
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Uploaded file is empty")
+        # Lightweight server-side validation to avoid trusting client MIME
+        try:
+            self._validate_saved_file(stored_path, extension, upload_file.content_type or "")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            self._safe_unlink(stored_path)
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Uploaded file appears to be invalid or corrupted") from exc
 
         record = await self.model.create(
             data={
@@ -105,8 +115,14 @@ class MedicalFileService:
     async def delete_asset(self, user_id: str, role: AuthRole, asset_id: str) -> None:
         record = await self._load_record(asset_id)
         self._assert_access(record, user_id, role)
-        self._safe_unlink(self._resolve_disk_path(record.storedPath))
+        # Delete DB record first to avoid leaving dangling DB entries if file unlink fails.
+        stored_path = record.storedPath
         await self.model.delete(where={"id": asset_id})
+        try:
+            self._safe_unlink(self._resolve_disk_path(stored_path))
+        except HTTPException:
+            # If path resolution fails, we already removed the DB record — just log and continue.
+            raise
 
     async def _resolve_upload_context(
         self,
@@ -205,7 +221,33 @@ class MedicalFileService:
         return total
 
     def _resolve_disk_path(self, stored_path: str) -> Path:
-        return settings.data_root / stored_path
+        # Resolve and ensure the path remains inside the configured data root
+        candidate = (settings.data_root / stored_path).resolve()
+        root = settings.data_root.resolve()
+        try:
+            if not str(candidate).startswith(str(root)):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        return candidate
+
+    def _validate_saved_file(self, destination: Path, extension: str, content_type: str) -> None:
+        ext = (extension or destination.suffix or "").lower()
+        try:
+            if ext == ".pdf" or content_type.lower() == "application/pdf":
+                # Validate PDF can be opened
+                doc = fitz.open(destination)
+                try:
+                    if doc.page_count == 0:
+                        raise ValueError("Empty PDF")
+                finally:
+                    doc.close()
+            else:
+                # Validate image
+                with PILImage.open(destination) as img:
+                    img.verify()
+        except Exception as exc:  # pragma: no cover - validation errors
+            raise
 
     def _serialize_record(self, record: Any) -> dict[str, Any]:
         data = record.model_dump() if hasattr(record, "model_dump") else dict(record)

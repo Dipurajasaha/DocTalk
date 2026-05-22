@@ -38,7 +38,7 @@ class Settings:
     database_url: str = os.getenv("DATABASE_URL", "")
     direct_url: str = os.getenv("DIRECT_URL", "")
     shadow_database_url: str = os.getenv("SHADOW_DATABASE_URL", "")
-    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY") or os.getenv("SESSION_SECRET_KEY", "dev-jwt-secret")
+    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY") or os.getenv("SESSION_SECRET_KEY", "")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
     postgres_user: str = os.getenv("POSTGRES_USER", "doctalk")
@@ -64,7 +64,11 @@ class Settings:
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    # In non-development environments, JWT secret must be explicitly set.
+    if s.environment != "development" and not s.jwt_secret_key:
+        raise RuntimeError("JWT_SECRET_KEY must be set in production environment")
+    return s
 
 
 settings = get_settings()

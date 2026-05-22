@@ -35,8 +35,8 @@ class AuthService:
 
         await self._ensure_user_available(normalized_username, "patient")
         hashed_password = hash_password(password)
-        await self.client.patient.create(
-            data={
+        await self._safe_create_patient(
+            {
                 "username": normalized_username,
                 "name": normalized_name,
                 "password": hashed_password,
@@ -44,6 +44,14 @@ class AuthService:
         )
         logger.info("Patient signed up", extra={"component": "auth", "request_id": normalized_username})
         return self._issue_token(normalized_username, "patient")
+    
+    async def _safe_create_patient(self, data: dict[str, Any]) -> None:
+        try:
+            await self.client.patient.create(data=data)
+        except Exception as exc:
+            if "unique" in str(exc).lower() or "already exists" in str(exc).lower():
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists") from exc
+            raise
 
     async def signup_doctor(self, doctor_id: str, name: str, password: str) -> AuthResult:
         normalized_doctor_id = doctor_id.strip()
@@ -52,13 +60,18 @@ class AuthService:
 
         await self._ensure_user_available(normalized_doctor_id, "doctor")
         hashed_password = hash_password(password)
-        await self.client.doctor.create(
-            data={
-                "doctorId": normalized_doctor_id,
-                "name": normalized_name,
-                "password": hashed_password,
-            }
-        )
+        try:
+            await self.client.doctor.create(
+                data={
+                    "doctorId": normalized_doctor_id,
+                    "name": normalized_name,
+                    "password": hashed_password,
+                }
+            )
+        except Exception as exc:
+            if "unique" in str(exc).lower() or "already exists" in str(exc).lower():
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists") from exc
+            raise
         logger.info("Doctor signed up", extra={"component": "auth", "request_id": normalized_doctor_id})
         return self._issue_token(normalized_doctor_id, "doctor")
 

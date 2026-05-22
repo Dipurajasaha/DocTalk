@@ -34,14 +34,21 @@ class ChatService:
         if existing is not None:
             return self._serialize_consultation(existing)
 
-        consultation = await self.client.consultation.create(
-            data={
-                "appointmentId": appointment_id,
-                "patientUsername": appointment.patientUsername,
-                "doctorId": appointment.doctorId,
-            },
-            include={"appointment": True},
-        )
+        try:
+            consultation = await self.client.consultation.create(
+                data={
+                    "appointmentId": appointment_id,
+                    "patientUsername": appointment.patientUsername,
+                    "doctorId": appointment.doctorId,
+                },
+                include={"appointment": True},
+            )
+        except Exception:
+            # Possible race: another request created the consultation concurrently.
+            existing = await self.client.consultation.find_unique(where={"appointmentId": appointment_id})
+            if existing is not None:
+                return self._serialize_consultation(existing)
+            raise
         logger.info("Consultation created", extra={"component": "chat", "request_id": consultation.id})
         return self._serialize_consultation(consultation)
 
