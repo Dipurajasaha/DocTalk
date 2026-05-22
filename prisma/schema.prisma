@@ -52,6 +52,7 @@ model Patient {
   xrayAnalyses        Json?    @db.JsonB
   customAssets        Json?    @db.JsonB
   appointments        Appointment[]
+  consultations       Consultation[]
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
@@ -84,6 +85,7 @@ model Doctor {
   assistantChat       Json?    @db.JsonB
   closedChats         Json?    @db.JsonB
   appointments        Appointment[]
+  consultations       Consultation[]
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
@@ -108,11 +110,47 @@ model Appointment {
   completedAt     DateTime?
   patient         Patient           @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
   doctor          Doctor            @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+  consultation    Consultation?
 
   @@index([patientUsername])
   @@index([doctorId])
   @@index([status])
   @@map("appointments")
+}
+
+model Consultation {
+  id               String     @id @default(uuid())
+  appointmentId    String     @unique
+  patientUsername  String
+  doctorId         String
+  lastMessageAt    DateTime?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  appointment      Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patient          Patient     @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  doctor           Doctor      @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+  messages         Message[]
+
+  @@index([patientUsername])
+  @@index([doctorId])
+  @@index([lastMessageAt])
+  @@map("consultations")
+}
+
+model Message {
+  id              String   @id @default(uuid())
+  consultationId  String
+  senderId        String
+  senderRole      Role
+  message         String
+  timestamp       DateTime @default(now())
+
+  consultation    Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+
+  @@index([consultationId, timestamp])
+  @@index([senderId])
+  @@map("messages")
 }
 
 model FileKey {
