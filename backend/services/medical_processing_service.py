@@ -13,6 +13,9 @@ from .prescription_service import PrescriptionService
 from .rag_service import rag_service
 from .report_service import ReportService
 from .xray_analysis_service import xray_analysis_service
+from ..workflows.report_analysis_workflow import report_analysis_workflow
+from ..workflows.prescription_workflow import prescription_workflow
+from ..workflows.xray_workflow import xray_workflow
 
 
 logger = get_logger(__name__)
@@ -31,96 +34,31 @@ class MedicalProcessingService:
         self.medical_image_service = medical_image_service or MedicalImageService()
 
     async def analyze_report(self, user_id: str, role: AuthRole, report_id: str, language: str = "en") -> dict[str, Any]:
-        asset = await self.report_service.get_asset(user_id, role, report_id)
-        file_path, original_name, mime_type = await self.report_service.get_asset_file_path(user_id, role, report_id)
-        extracted = await ocr_service.extract_text_from_file(
-            file_path,
-            mime_type=mime_type,
-            language=language,
+        workflow_state = await report_analysis_workflow.run(
             requester_id=user_id,
             role=role,
-            patient_id=asset["patient_id"],
-            consultation_id=asset.get("consultation_id"),
+            report_id=report_id,
+            language=language,
         )
-        response = self._build_response(
-            extracted_text=self._get_extracted_text(extracted),
-            findings=self._extract_findings_from_report(self._get_extracted_text(extracted), language=language),
-            summary=self._summarize_report_text(self._get_extracted_text(extracted), original_name),
-            recommendations=self._report_recommendations(self._get_extracted_text(extracted)),
-            warnings=extracted.get("warnings", []),
-        )
-        await self._ingest_rag_memory(
-            patient_id=asset["patient_id"],
-            consultation_id=asset.get("consultation_id"),
-            source_type="ocr",
-            content=response["extracted_text"],
-            summary=response["summary"],
-            findings=response["findings"],
-            recommendations=response["recommendations"],
-            metadata={"report_id": report_id, "language": language},
-        )
-        return response
+        return dict(workflow_state.get("formatted_result") or {})
 
     async def analyze_prescription(self, user_id: str, role: AuthRole, prescription_id: str, language: str = "en") -> dict[str, Any]:
-        asset = await self.prescription_upload_service.get_asset(user_id, role, prescription_id)
-        file_path, _, mime_type = await self.prescription_upload_service.get_asset_file_path(user_id, role, prescription_id)
-        extracted = await ocr_service.extract_text_from_file(file_path, mime_type=mime_type, language=language)
-        analysis = await prescription_analysis_service.analyze_text(
-            extracted.get("extracted_text", ""),
-            language=language,
+        workflow_state = await prescription_workflow.run(
             requester_id=user_id,
             role=role,
-            patient_id=asset["patient_id"],
-            consultation_id=asset.get("consultation_id"),
+            prescription_id=prescription_id,
+            language=language,
         )
-        response = self._build_response(
-            extracted_text=self._get_extracted_text(analysis, fallback=extracted.get("extracted_text", "")),
-            findings=analysis.get("findings", []),
-            summary=analysis.get("summary", "Prescription analysis completed."),
-            recommendations=analysis.get("recommendations", []),
-            warnings=extracted.get("warnings", []) + analysis.get("warnings", []),
-        )
-        await self._ingest_rag_memory(
-            patient_id=asset["patient_id"],
-            consultation_id=asset.get("consultation_id"),
-            source_type="prescription",
-            content=response["extracted_text"],
-            summary=response["summary"],
-            findings=response["findings"],
-            recommendations=response["recommendations"],
-            metadata={"prescription_id": prescription_id, "language": language},
-        )
-        return response
+        return dict(workflow_state.get("formatted_result") or {})
 
     async def analyze_xray(self, user_id: str, role: AuthRole, medical_image_id: str, language: str = "en") -> dict[str, Any]:
-        asset = await self.medical_image_service.get_asset(user_id, role, medical_image_id)
-        file_path, _, _ = await self.medical_image_service.get_asset_file_path(user_id, role, medical_image_id)
-        analysis = await xray_analysis_service.analyze_image(
-            file_path,
-            language=language,
+        workflow_state = await xray_workflow.run(
             requester_id=user_id,
             role=role,
-            patient_id=asset["patient_id"],
-            consultation_id=asset.get("consultation_id"),
+            medical_image_id=medical_image_id,
+            language=language,
         )
-        response = self._build_response(
-            extracted_text=self._get_extracted_text(analysis),
-            findings=analysis.get("findings", []),
-            summary=analysis.get("summary", "X-ray analysis completed."),
-            recommendations=analysis.get("recommendations", []),
-            warnings=analysis.get("warnings", []),
-        )
-        await self._ingest_rag_memory(
-            patient_id=asset["patient_id"],
-            consultation_id=asset.get("consultation_id"),
-            source_type="xray",
-            content="\n".join(response["findings"] or [response["summary"]]),
-            summary=response["summary"],
-            findings=response["findings"],
-            recommendations=response["recommendations"],
-            metadata={"medical_image_id": medical_image_id, "language": language},
-        )
-        return response
+        return dict(workflow_state.get("formatted_result") or {})
 
     def _summarize_report_text(self, extracted_text: str, original_name: str) -> str:
         text = extracted_text.strip()

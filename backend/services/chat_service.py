@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 
 from ..core.database import prisma
 from ..core.logger import get_logger
-from .contextual_ai_service import contextual_ai_service
+from ..workflows.patient_chat_workflow import patient_chat_workflow
 
 
 logger = get_logger(__name__)
@@ -132,7 +132,7 @@ class ChatService:
             take=30,
         )
         transcript = self._build_transcript(messages)
-        return await contextual_ai_service.analyze_consultation_text(
+        workflow_result = await patient_chat_workflow.run(
             requester_id=user_id,
             role=role,
             patient_id=consultation.patientUsername,
@@ -146,6 +146,7 @@ class ChatService:
                 "source": "consultation_chat",
             },
         )
+        return dict(workflow_result.get("formatted_result") or {})
 
     def validate_consultation_access(self, role: AuthRole, user_id: str, patient_id: str, doctor_id: str) -> None:
         if role == "patient" and user_id == patient_id:
