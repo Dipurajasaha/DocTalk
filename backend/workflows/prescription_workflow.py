@@ -4,6 +4,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from ..agents import summarizer_agent
 from ..services.ocr_service import ocr_service
 from ..services.prescription_analysis_service import prescription_analysis_service
 from ..services.prescription_service import PrescriptionService
@@ -169,22 +170,27 @@ class PrescriptionWorkflow:
         summary_payload = await run_step(state, "summarize", operation, max_attempts=2, fallback=None)
         if summary_payload is None:
             return build_summary_payload(analysis)
-        return {
-            "summary_payload": {
-                "source_type": summary_payload.source_type,
-                "content": summary_payload.content,
-                "summary": summary_payload.summary,
-                "findings": list(summary_payload.findings),
-                "recommendations": list(summary_payload.recommendations),
-                "warnings": list(analysis.get("warnings") or []),
-                "metadata": dict(summary_payload.metadata),
-                "success": bool(analysis.get("success", True)),
-            },
-            "extracted_text": extracted_text,
-            "findings": list(summary_payload.findings),
-            "recommendations": list(summary_payload.recommendations),
-            "warnings": list(analysis.get("warnings") or []),
+        agent_summary = await summarizer_agent.summarize_medical_context(
+            source_type="prescription",
+            content=extracted_text,
+            summary=str(summary_payload.summary).strip() or None,
+            findings=list(summary_payload.findings),
+            recommendations=list(summary_payload.recommendations),
+            metadata=metadata,
+        )
+        payload = {
+            "source_type": "prescription",
+            "content": str(agent_summary.get("content") or summary_payload.content).strip(),
+            "summary": str(agent_summary.get("summary") or summary_payload.summary).strip(),
+            "findings": list(agent_summary.get("findings") or summary_payload.findings or []),
+            "recommendations": list(agent_summary.get("recommendations") or summary_payload.recommendations or []),
+            "warnings": list(agent_summary.get("warnings") or analysis.get("warnings") or []),
+            "metadata": dict(agent_summary.get("metadata") or summary_payload.metadata),
+            "success": bool(agent_summary.get("success", analysis.get("success", True))),
+            "symptoms": list(agent_summary.get("symptoms") or []),
+            "medicines": list(agent_summary.get("medicines") or []),
         }
+        return {"summary_payload": payload, "extracted_text": extracted_text, **build_summary_payload(payload)}
 
     async def _safety(self, state: WorkflowState) -> dict[str, Any]:
         payload = dict(state.get("summary_payload") or {})

@@ -1,12 +1,12 @@
 # DocTalk Backend Architecture
 
-> **DocTalk** is a modular healthcare backend built with **FastAPI**, **Prisma**, **PostgreSQL**, **Docker**, and **JWT-based security**. The current implementation is a strong solo-project backend foundation with relational consultations, messaging, secure medical asset handling, and a fully local Ollama-based AI stack for OCR, RAG, and clinical reasoning.
+> **DocTalk** is a modular healthcare backend built with **FastAPI**, **Prisma**, **PostgreSQL**, **Docker**, and **JWT-based security**. It combines consultation messaging, secure medical asset handling, contextual RAG, semantic medical memory, a local Ollama AI stack, LangGraph workflow orchestration, and controlled medical assistant agents in a single backend architecture.
 
 ---
 
 ## 1) Project Overview
 
-DocTalk is a healthcare backend designed to support patient-doctor interactions, appointment scheduling, consultation messaging, and secure file handling for medical documents and images. The system is intentionally structured to stay clean, practical, and production-minded without adding unnecessary enterprise overhead.
+DocTalk is a healthcare backend designed to support patient-doctor interactions, appointment scheduling, consultation messaging, secure file handling for medical documents and images, and controlled AI-assisted medical workflows. The system stays practical and production-minded without unnecessary enterprise overhead.
 
 ### What it does today
 
@@ -15,14 +15,26 @@ DocTalk is a healthcare backend designed to support patient-doctor interactions,
 - Stores medical assets such as reports, prescriptions, and medical images
 - Separates file metadata in PostgreSQL from binary storage on disk
 - Enforces ownership and role-based access control across protected resources
+- Runs deterministic workflow graphs for consultation reasoning, report analysis, prescription processing, and X-ray analysis
+- Uses controlled medical assistant agents for triage, consultation summarization, and doctor briefings
 
 ### High-level intent
 
-The backend is designed as a stable clinical data layer that now feeds OCR, retrieval pipelines, local AI assistants, and physician-facing workflows without relying on cloud model providers.
+The backend is designed as a stable clinical data layer that feeds OCR, retrieval pipelines, local AI assistants, and physician-facing workflows without depending on cloud model providers.
 
-### Stage 10: Workflow orchestration
+### Workflow orchestration
 
-Stage 10 adds a lightweight workflow orchestration layer (LangGraph) to coordinate existing services into explicit, observable pipelines. Workflows orchestrate retrieval, context assembly, model reasoning, safety checks, and storage without moving core business logic out of services.
+A lightweight workflow orchestration layer (LangGraph) coordinates existing services into explicit, observable pipelines. Workflows orchestrate retrieval, context assembly, model reasoning, safety checks, and storage without moving core business logic out of services.
+
+### Architecture goals
+
+| Goal | Description |
+|---|---|
+| Safety | Keep patient-facing AI bounded by deterministic workflow steps and policy checks |
+| Clarity | Keep routes thin and let services own business logic |
+| Reliability | Use Prisma and PostgreSQL as the source of truth for relational data and vector-backed memory |
+| Local-first operation | Route reasoning, vision, and embeddings through Ollama to reduce external dependency |
+| Observability | Make workflow steps visible, testable, and auditable |
 
 ---
 
@@ -73,6 +85,146 @@ The backend is optimized around five goals:
 
 ---
 
+## Workflow Orchestration
+
+LangGraph is used as an orchestration layer, not as a business-logic layer. Each workflow is a small deterministic graph that sequences service calls for a single medical task.
+
+```mermaid
+flowchart TD
+    PM[patient message] --> RW[retrieval workflow]
+    RW --> TR[triage analysis]
+    TR --> CR[contextual reasoning]
+    CR --> RG[response generation]
+```
+
+### Why workflows are orchestration-only
+
+- The workflow layer decides order, branching, retries, and step visibility
+- Services decide validation, storage, retrieval, and AI payload construction
+- This keeps business rules testable without embedding them into the orchestration engine
+- It also prevents the graph layer from becoming a hidden second application layer
+
+### Workflow-agent interaction
+
+- Workflows collect context and invoke controlled agents when a bounded medical assistant step is needed
+- Agents return structured outputs only; they do not own persistence or cross-service side effects
+- Services remain the canonical place for database access, file handling, and model routing
+
+### Typical orchestration patterns
+
+- Patient message flows run retrieval, triage, reasoning, safety, and response formatting
+- Consultation summaries run summary generation, semantic memory compaction, and RAG ingestion
+- Doctor-facing workflows assemble a patient overview before returning a concise briefing
+
+---
+
+## Medical Assistant Layer
+
+DocTalk uses controlled medical assistant agents as narrow helpers inside workflows. They are not autonomous chatbots.
+
+```mermaid
+flowchart TD
+    Consultation[consultation text] --> Triage[triage agent]
+    Consultation --> Summary[summary agent]
+    Retrieval[patient history] --> Doctor[doctor assistant agent]
+    Triage --> Safety[safety checks]
+    Summary --> Memory[semantic memory]
+    Doctor --> Briefing[doctor briefing]
+```
+
+### Agent design principles
+
+- Agents are deterministic wrappers around existing services and heuristics
+- Each agent returns structured medical support data, not unrestricted free-form output
+- Agents run inside workflows so they inherit request scope, ownership checks, and audit logging
+- Agents never bypass service-layer authorization or persistence controls
+
+### Included agents
+
+- Triage agent for urgency and risk classification
+- Consultation summarization agent for compact clinical summaries
+- Doctor assistant agent for patient briefings and review support
+
+---
+
+## Triage & Risk Analysis
+
+The triage layer identifies urgent patterns early in the consultation path so the system can safely route high-risk content.
+
+```mermaid
+flowchart TD
+    Message[patient message] --> Signals[clinical signal matching]
+    Signals --> Risk[risk scoring]
+    Risk --> Escalate[escalation decision]
+    Escalate --> Note[triage note + warnings]
+```
+
+### Triage behavior
+
+- Matches urgent symptom language and produces a bounded risk score
+- Marks escalation when emergency patterns are detected
+- Generates warnings that are suitable for a clinician-facing workflow, not a diagnosis
+- Keeps triage deterministic so the same inputs produce the same safety output class
+
+### Safety role
+
+- Triage runs before deeper reasoning when the workflow needs early risk detection
+- Escalation flags can influence workflow branching, response framing, or manual review
+- The output is advisory only and does not replace clinical judgment
+
+---
+
+## Consultation Summarization
+
+Consultation summaries compress the conversation into a compact, retrieval-friendly clinical record.
+
+```mermaid
+flowchart TD
+    Consultation[consultation] --> Summarizer[summarization agent]
+    Summarizer --> Memory[semantic memory]
+    Summarizer --> RAG[RAG ingestion]
+```
+
+### Why summarization exists
+
+- Full chat transcripts are too noisy for long-term retrieval
+- Compact summaries keep the semantic memory layer small and useful
+- Summaries make later doctor review and retrieval more stable than raw conversation replay
+
+### Output shape
+
+- Summary text for immediate display
+- Structured findings, recommendations, warnings, and metadata
+- Compact content for semantic memory and retrieval ingestion
+
+---
+
+## Doctor Assistance System
+
+The doctor assistant layer builds short patient overviews before the clinician reads the full history.
+
+```mermaid
+flowchart TD
+    DoctorRequest[doctor request] --> Overview[patient overview builder]
+    Overview --> History[medical history retrieval]
+    History --> Briefing[consultation briefing]
+```
+
+### What it does
+
+- Pulls recent consultation context and prior findings
+- Condenses the patient history into a briefing suitable for a doctor-facing workflow
+- Highlights key risks, recent findings, and prior medications
+- Keeps the assistant bounded to the current patient scope
+
+### Why it matters
+
+- Reduces the amount of manual context assembly needed before review
+- Keeps the workflow deterministic while still adding useful medical assistance
+- Preserves the doctor as the final decision-maker
+
+---
+
 
 ## RAG Architecture
 
@@ -88,9 +240,10 @@ RAG is a single, coherent pipeline integrated with the AI service and scoped to 
 - **Authorization is checked before any sensitive operation**
 - **RAG is a service-layer pipeline** with explicit summary, embedding, storage, and retrieval steps
 - **Summaries are embedded instead of raw chats** so the memory layer stays compact, normalized, and clinically relevant
+- **Workflow outputs feed RAG** so consultation summaries, report summaries, and analysis results can be stored as compact memory instead of full raw payloads
 
 > [!TIP]
-> This separation keeps future OCR and AI ingestion work isolated from core clinical CRUD logic.
+> This separation keeps OCR and AI ingestion work isolated from core clinical CRUD logic.
 
 ## Local AI Architecture
 
@@ -110,7 +263,7 @@ DocTalk uses a fully local AI stack so the backend can run without cloud depende
 - Vision workloads are isolated to a vision route/service to avoid co-residency with the text model.
 - The AI layer is service-oriented: `embedding_service`, `retrieval_service`, `context_builder_service`, and `ai_service` provide clear responsibilities and safe provider swaps.
 
-Workflow orchestration (Stage 10)
+Workflow orchestration
 
 - A thin orchestration layer (LangGraph) sequences service calls into named workflows (e.g., `patient_chat`, `report_processing`, `xray_analysis`).
 - LangGraph is used for coordination only: services retain the authoritative business logic, validation, and DB access.
@@ -126,6 +279,7 @@ Ollama is the local runtime provider for all model calls. The backend communicat
 - Embeddings call Ollama's embeddings endpoint (configured to `nomic-embed-text`).
 - Calls include short `keep_alive` hints to reduce VRAM residency and avoid long-lived heavy-model residency.
 - Robust error handling: timeouts, malformed responses, model-missing errors, and deterministic fallbacks are implemented in the embedding and ai services.
+- Local routing keeps the agent layer predictable: triage, summarization, and doctor briefings all share the same bounded model-routing strategy.
 
 ## Local Model Routing
 
@@ -190,7 +344,7 @@ backend/
 │   ├── reports/
 │   ├── prescriptions/
 │   ├── medical_images/
-│   └── processing/          # Stage 6: OCR, prescription, x-ray analysis routes
+│   └── processing/          # processing routes: OCR, prescription, x-ray analysis
 ├── core/
 ├── middleware/
 ├── services/
@@ -269,7 +423,7 @@ sequenceDiagram
 
 ### Workflow-driven request example
 
-For Stage 10 we model common AI request flows as explicit workflow graphs. This keeps the route -> service call simple and delegates orchestration to LangGraph when an ordered pipeline is required.
+We model common AI request flows as explicit workflow graphs. This keeps the route -> service call simple and delegates orchestration to LangGraph when an ordered pipeline is required.
 
 ```mermaid
 flowchart TD
@@ -336,13 +490,13 @@ flowchart LR
 
 - Easy to reason about
 - Suitable for solo-project scale
-- Cleanly upgradeable to notifications, attachments, or future AI summaries
+- Cleanly upgradeable to notifications, attachments, or additional AI summaries
 
 ---
 
 ## 9) Medical Asset Architecture
 
-Stage 5 introduced a secure file workflow for medical assets.
+The project includes a secure file workflow for medical assets.
 
 ```mermaid
 flowchart TD
@@ -408,7 +562,7 @@ flowchart LR
 
 ## RAG Architecture
 
-Stage 8 adds a lightweight semantic memory layer on top of the existing medical asset and consultation system.
+This design adds a lightweight semantic memory layer on top of the existing medical asset and consultation system.
 
 ```mermaid
 flowchart LR
@@ -495,29 +649,54 @@ flowchart TD
 
 ---
 
-## Workflow Architecture
+## Workflow Orchestration
 
-Stage 10 introduces an explicit, lightweight workflow layer to sequence existing services into named pipelines. Workflows are small, deterministic graphs that call into service methods (not replace them). Each workflow focuses on a single business process (chat handling, report ingestion, x-ray analysis), emits structured events, and exposes run-time observability.
+The workflow layer is a deterministic orchestration boundary that sequences service calls into named medical pipelines. LangGraph coordinates steps, but services still own validation, persistence, retrieval, and model access.
 
-### Why workflows improve maintainability
+### What the workflow layer does
 
-- **Explicit sequencing:** The order of retrieval, context assembly, reasoning, safety, and storage is documented in the workflow, not hidden in ad-hoc service call chains.
-- **Testability:** Each workflow step can be stubbed or replayed for unit and integration tests.
-- **Reusability:** The same services are reused across workflows with distinct orchestration, avoiding duplicated logic.
+- Sequences retrieval, triage, contextual reasoning, summarization, and persistence
+- Emits step-level logs and structured state for observability
+- Allows controlled branching for escalation, fallback, or failed asset handling
+- Keeps workflows narrow enough to test without a full model runtime
 
-## LangGraph Integration
+### What the workflow layer does not do
 
-LangGraph is used as a coordinator only — it defines and runs small graphs of steps that call into the backend services. It does not contain business logic or direct DB access; those remain inside services implemented in Python. LangGraph's role is to:
+- It does not own business logic
+- It does not perform direct database access
+- It does not replace service boundaries or route authorization
+- It does not make autonomous medical decisions
 
-- Define named workflow graphs (versioned, small, and human-readable).
-- Emit lifecycle events (start, step-complete, error, finish) for observability.
-- Provide a compact retry and error-handling policy per step.
+### Why the boundary matters
 
-Why LangGraph is orchestration-only
+- The graph stays readable while the services stay reusable
+- Step failures remain visible instead of being hidden inside large service methods
+- The orchestration layer can change without rewriting core medical business logic
 
-- Keeps service code authoritative and easy to test.
-- Avoids embedding persistence or validation inside orchestration definitions.
-- Enables operator-friendly workflow changes without touching core service code.
+## Workflow-Agent Interaction
+
+Workflows invoke agents only at controlled points where a narrow medical assistant is useful.
+
+- The patient chat workflow can call triage before response generation
+- The consultation workflow can call the summarizer before RAG ingestion
+- The doctor workflow can call the doctor assistant before the final briefing
+- The medical processing workflows can call the summarizer to compact OCR or analysis output
+
+### Interaction pattern
+
+1. A workflow collects scoped context from services
+2. A controlled agent returns structured support data
+3. The workflow routes that data into safety checks, formatting, or memory ingestion
+4. Persistence remains a service-layer responsibility
+
+## Workflow Observability
+
+Workflow execution is intentionally visible and compact.
+
+- Step start and completion logs show where the pipeline is running
+- Retry boundaries are explicit and bounded per step
+- Errors are attached to workflow state so failed steps can be traced quickly
+- Safety-related outputs remain small enough to inspect in logs without exposing raw secrets or unnecessary payloads
 
 ## Patient Chat Workflow
 
@@ -525,20 +704,21 @@ An example workflow for processing an incoming patient message:
 
 ```mermaid
 flowchart TD
-    PM[patient message] --> RN[retrieval node]
-    RN --> CN[context node]
-    CN --> AI[AI reasoning node]
-    AI --> SN[safety node]
-    SN --> RESP[response node]
+    PM[patient message] --> RN[retrieval workflow]
+    RN --> TN[triage analysis]
+    TN --> CN[contextual reasoning]
+    CN --> AI[response generation]
+    AI --> SN[safety + formatting]
+    SN --> RESP[final response]
 ```
 
 Notes:
 
-- `retrieval node` calls `retrieval_service` (pgvector + metadata filtering).
-- `context node` calls `context_builder_service` to assemble a prompt bundle.
-- `AI reasoning node` calls `ai_service` (Ollama routing) and returns structured output.
-- `safety node` runs policy checks and optional human-in-the-loop gating.
-- `response node` persists any new `rag_document` items and returns the final payload.
+- `retrieval workflow` calls `retrieval_service` and `context_builder_service` to assemble a scoped prompt bundle.
+- `triage analysis` invokes the controlled triage agent to detect urgent symptom patterns.
+- `contextual reasoning` uses `ai_service` for local reasoning and response shaping.
+- `safety + formatting` normalizes output and applies policy checks before the final response.
+- The final response can trigger compact RAG ingestion when the workflow produces a reusable summary.
 
 ## Report Processing Workflow
 
@@ -546,15 +726,16 @@ A report upload is commonly processed through an ingestion workflow:
 
 ```mermaid
 flowchart TD
-    Upload[report upload] --> OCR[OCR node]
-    OCR --> SUM[summary node]
-    SUM --> EMB[embedding node]
-    EMB --> STORE[vector storage node]
+    Upload[report upload] --> OCR[OCR + extraction]
+    OCR --> SUM[consultation summarization]
+    SUM --> MEM[semantic memory]
+    MEM --> STORE[RAG ingestion]
 ```
 
-- The OCR node calls `ocr_service` and `prescription_analysis_service` as needed.
-- The summary node normalizes and prepares text for embedding.
-- The embedding node calls `embedding_service`; store writes to `rag_documents`.
+- The OCR step calls `ocr_service` and related extraction helpers.
+- The summarization step compacts the extracted report into a retrieval-friendly medical summary.
+- The memory step stores the compact output as semantic context instead of raw document text.
+- The ingestion step writes to the RAG layer using patient-scoped metadata.
 
 ## X-ray Analysis Workflow
 
@@ -562,13 +743,15 @@ Image-based pipelines are separate to avoid model co-residency and to keep visio
 
 ```mermaid
 flowchart TD
-    Upload[X-ray upload] --> Vision[vision analysis node]
-    Vision --> Findings[structured findings node]
-    Findings --> OptIn[optional RAG ingestion node]
+    Upload[X-ray upload] --> Vision[vision analysis]
+    Vision --> Findings[structured findings]
+    Findings --> SUM[summary + safety]
+    SUM --> OptIn[optional RAG ingestion]
 ```
 
 - Vision runs on the `llama3.2-vision` model via the vision service and returns structured findings.
-- Findings may be summarized and optionally ingested into RAG depending on configuration.
+- Findings are normalized before persistence so the vector store only receives compact, patient-scoped content.
+- Optional ingestion keeps the file-analysis result available for later retrieval without repeating the full image workflow.
 
 ## Workflow State Management
 
@@ -579,21 +762,25 @@ Workflows maintain minimal run state (step status, timestamps, error payloads, a
 
 This separation keeps orchestration recoverable and auditable without duplicating business data in the orchestration layer.
 
-## Controlled AI Orchestration
+## Healthcare Safety Controls
 
-Workflows implement deterministic, auditable orchestration rather than autonomous agents. Design points:
+DocTalk uses workflow-level and service-level safety controls to keep medical AI bounded and reviewable.
 
-- Steps are limited and explicit; each step maps to a service call with well-defined inputs/outputs.
-- Safety nodes run standardized checks and can pause for manual review.
-- Retries are configured per-step with bounded backoff and failure policies.
-- No autonomous agents: the system avoids open-ended decision loops and keeps human oversight simple.
+### Safety patterns
 
-Why autonomous agents were intentionally avoided
+- Patient isolation is enforced before retrieval, summarization, or ingestion
+- Ownership checks gate every workflow that touches medical records or assets
+- Triage can escalate urgent symptoms without turning the workflow into an autonomous decision engine
+- Safety checks sanitize output before it is shown to users or written into memory
+- Workflow failures stop downstream writes instead of allowing partial unsafe persistence
 
-- Agents introduce unpredictable side effects and harder-to-test behaviors for medical data.
-- Controlled workflows keep clinical safety, auditability, and regulatory simplicity intact.
+### Why autonomous agents were intentionally avoided
 
-## Workflow Observability
+- Unbounded agents make medical side effects harder to reason about
+- Deterministic agent wrappers are easier to test and audit
+- The backend needs bounded orchestration, not open-ended task execution
+
+## Execution Telemetry
 
 Observability focuses on step-level events, execution traces, and concise metrics:
 
@@ -602,10 +789,10 @@ Observability focuses on step-level events, execution traces, and concise metric
 - Persist small run metadata for troubleshooting; rely on existing logging for full traces.
 - Use these signals to alert when embeddings fail, models time out, or safety checks trigger.
 
-How workflows prepare the backend for future assistants
+How workflows support controlled assistants
 
-- Workflows make end-to-end behaviors explicit and versionable, providing a safe surface for future assistant components to call into (human-in-the-loop approval, task handoffs, or multi-step assistant flows).
-- Because services contain core logic, future assistants can orchestrate higher-level goals by composing stable service calls via workflows without re-implementing business rules.
+- Workflows make end-to-end behaviors explicit and versionable, providing a safe surface for assistant components to call into when a bounded medical task needs to be coordinated.
+- Because services contain core logic, assistant flows can compose stable service calls without re-implementing business rules.
 
 
 ## Embedding Generation Pipeline
@@ -832,7 +1019,7 @@ The API is grouped by domain and intentionally kept shallow.
 | JWT | Authentication and authorization |
 | bcrypt | Password hashing |
 | python-multipart | Multipart file uploads |
-| Pillow / PyMuPDF | Supporting future document and image workflows |
+| Pillow / PyMuPDF | Supporting document and image workflows |
 | Ollama | Local runtime for text, vision, and embeddings models |
 | pgvector | Vector storage and semantic search in PostgreSQL |
 
@@ -867,49 +1054,45 @@ DocTalk is deployed as a local-first healthcare AI backend rather than a cloud-L
 
 ---
 
-## 15) Future Roadmap
+## 15) Operational Enhancements
 
-The backend is intentionally structured to support future expansion without rewriting the core system.
+The backend remains intentionally modular so it can absorb additional medical workflows without rewriting the core system.
 
-
-### Near-term priorities
+### Useful expansion areas
 
 - Async background processing for large asset parsing and RAG ingestion
 - Better retrieval ranking and summary quality tuning
 - Comprehensive monitoring, logging, and alerting for AI endpoints
 - Production hardening: secrets management, backups, and rate-limiting
-
-### Longer-term
-
-- LangGraph or workflow orchestrators that consume `context_builder_service` outputs (orchestrated, controlled workflows)
-- Controlled agent-like flows with strict step validation and human-in-the-loop approval
+- Additional controlled workflow branches for new medical document types
 - Optional object storage for large files and scalable search indexing
 
 ---
 
-## 16) Future LangGraph Integration
+## 16) Workflow-Agent Boundaries
 
-LangGraph is intentionally deferred until the retrieval and memory layers are stable. The current Stage 8 design already provides the building blocks LangGraph would need later.
+The workflow layer now coordinates the medical assistant layer directly. LangGraph remains orchestration-only, and the agent layer stays deterministic and scoped to the current request.
 
-### Intended flow
+### Current pattern
 
 ```mermaid
 flowchart LR
-    Query[User Query] --> Retrieve[Scoped retrieval]
-    Retrieve --> Summarize[Context summarization]
-    Summarize --> Reason[Controlled workflow step]
-    Reason --> Response[Structured response]
+    Query[scoped request] --> Retrieve[retrieval workflow]
+    Retrieve --> Triage[triage agent]
+    Triage --> Summarize[summary agent]
+    Summarize --> Reason[controlled reasoning]
+    Reason --> Response[structured response]
 ```
 
-### Planned scope
+### Boundary rules
 
-- Route only after the RAG service has produced a scoped context bundle
-- Keep patient-specific retrieval isolated and permission aware
-- Use retrieval as an explicit step, not a hidden side effect
-- Add controlled branches for follow-up questions or document-specific workflows
+- Retrieval always runs inside the authenticated patient or consultation scope
+- Agents only transform already-scoped data into compact clinical support output
+- Workflows own branching, retries, and step ordering
+- Services own persistence, validation, and model routing
 
 > [!NOTE]
-> LangGraph should orchestrate the existing service boundaries, not replace them.
+> The assistant layer is useful because it is controlled, not autonomous.
 
 ## 17) Development Philosophy
 
@@ -919,7 +1102,7 @@ DocTalk follows a simple and professional development philosophy:
 - Prefer explicit relational data over hidden state
 - Write services that can be tested independently
 - Avoid unnecessary abstraction until it proves useful
-- Build future AI capability on top of a stable clinical foundation
+- Build AI capability on top of a stable clinical foundation
 
 This keeps the project realistic, reviewable, and easy to extend.
 
@@ -947,7 +1130,7 @@ The current backend is designed for solo-project scale, but it remains scalable 
 
 ---
 
-## 19) Future Production Improvements
+## 19) Production Hardening Notes
 
 Before production use, the backend would benefit from:
 
@@ -961,7 +1144,7 @@ Before production use, the backend would benefit from:
 - Environment-specific secrets management
 
 > [!TIP]
-> None of these are required to make the current backend understandable or reviewable. They are natural production hardening steps for a later phase.
+> None of these are required to make the current backend understandable or reviewable. They are natural production hardening steps when the deployment needs them.
 
 ---
 
@@ -1010,6 +1193,6 @@ DocTalk’s backend is now a clean relational healthcare foundation with:
 - robust medical asset management
 - Prisma-backed metadata storage
 - filesystem-based binary storage
-- a practical path to future AI integration
+- a practical path to AI integration
 
-It is intentionally simple, professional, and well-positioned for OCR, RAG, and agentic features in later phases.
+It is intentionally simple, professional, and well-positioned for OCR, RAG, and controlled workflow-driven assistants.

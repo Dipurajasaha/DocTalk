@@ -4,6 +4,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from ..agents import summarizer_agent
 from ..services.medical_image_service import MedicalImageService
 from ..services.rag_service import rag_service
 from ..services.response_formatter import medical_response_formatter
@@ -97,9 +98,15 @@ class XRayWorkflow:
 		if loaded:
 			state["patient_id"] = str(loaded.get("patient_id") or state.get("patient_id") or "")
 			state["consultation_id"] = loaded.get("consultation_id")
+		else:
+			append_log(state, "asset load failed; stopping workflow", level="error", node="load_image")
+			mark_status(state, "failed")
+			return {"workflow_status": "failed"}
 		return dict(loaded or {})
 
 	async def _analyze(self, state: WorkflowState) -> dict[str, Any]:
+		if state.get("workflow_status") == "failed":
+			return {}
 		path = str(state.get("source_path") or "")
 		requester_id = str(state.get("metadata", {}).get("requester_id") or "")
 		role = state.get("role") or "patient"
@@ -118,6 +125,8 @@ class XRayWorkflow:
 		return {"ai_result": analysis or {}}
 
 	async def _summarize(self, state: WorkflowState) -> dict[str, Any]:
+		if state.get("workflow_status") == "failed":
+			return {}
 		analysis = dict(state.get("ai_result") or {})
 		findings = list(analysis.get("findings") or [])
 		recommendations = list(analysis.get("recommendations") or [])
@@ -145,23 +154,31 @@ class XRayWorkflow:
 		summary_payload = await run_step(state, "summarize", operation, max_attempts=2, fallback=None)
 		if summary_payload is None:
 			return build_summary_payload(analysis)
-		return {
-			"summary_payload": {
-				"source_type": summary_payload.source_type,
-				"content": summary_payload.content,
-				"summary": summary_payload.summary,
-				"findings": list(summary_payload.findings),
-				"recommendations": list(summary_payload.recommendations),
-				"warnings": list(analysis.get("warnings") or []),
-				"metadata": dict(summary_payload.metadata),
-				"success": bool(analysis.get("success", True)),
-			},
-			"findings": list(summary_payload.findings),
-			"recommendations": list(summary_payload.recommendations),
-			"warnings": list(analysis.get("warnings") or []),
+		agent_summary = await summarizer_agent.summarize_medical_context(
+			source_type="xray",
+			content=source_text,
+			summary=str(summary_payload.summary).strip() or None,
+			findings=list(summary_payload.findings),
+			recommendations=list(summary_payload.recommendations),
+			metadata=metadata,
+		)
+		payload = {
+			"source_type": "xray",
+			"content": str(agent_summary.get("content") or summary_payload.content).strip(),
+			"summary": str(agent_summary.get("summary") or summary_payload.summary).strip(),
+			"findings": list(agent_summary.get("findings") or summary_payload.findings or []),
+			"recommendations": list(agent_summary.get("recommendations") or summary_payload.recommendations or []),
+			"warnings": list(agent_summary.get("warnings") or analysis.get("warnings") or []),
+			"metadata": dict(agent_summary.get("metadata") or summary_payload.metadata),
+			"success": bool(agent_summary.get("success", analysis.get("success", True))),
+			"symptoms": list(agent_summary.get("symptoms") or []),
+			"medicines": list(agent_summary.get("medicines") or []),
 		}
+		return {"summary_payload": payload, **build_summary_payload(payload)}
 
 	async def _safety(self, state: WorkflowState) -> dict[str, Any]:
+		if state.get("workflow_status") == "failed":
+			return {}
 		payload = dict(state.get("summary_payload") or {})
 
 		async def operation() -> dict[str, Any]:
@@ -188,6 +205,8 @@ class XRayWorkflow:
 		}
 
 	async def _format(self, state: WorkflowState) -> dict[str, Any]:
+		if state.get("workflow_status") == "failed":
+			return {}
 		payload = dict(state.get("summary_payload") or {})
 
 		async def operation() -> dict[str, Any]:
@@ -204,15 +223,24 @@ class XRayWorkflow:
 		return build_formatted_output(formatted or {})
 
 	async def _persist(self, state: WorkflowState) -> dict[str, Any]:
+		if state.get("workflow_status") == "failed":
+			return {"persistence_result": {"skipped": True, "reason": "workflow_failed"}}
 		formatted = dict(state.get("formatted_result") or {})
 		if not formatted:
 			return {"persistence_result": {"skipped": True}}
+
+		patient_id = str(state.get("patient_id") or "").strip()
+		requester_id = str(state.get("metadata", {}).get("requester_id") or "").strip()
+		if not patient_id or not requester_id:
+			append_log(state, "missing ownership metadata; stopping persistence", level="error", node="persist")
+			mark_status(state, "failed")
+			return {"workflow_status": "failed", "persistence_result": {"skipped": True, "reason": "missing_ownership"}}
 
 		summary_payload = dict(state.get("summary_payload") or {})
 
 		async def operation() -> dict[str, Any]:
 			return await rag_service.ingest_processing_result(
-				patient_id=str(state.get("patient_id") or ""),
+				patient_id=patient_id,
 				consultation_id=state.get("consultation_id"),
 				source_type="xray",
 				content=str(summary_payload.get("content") or "").strip() or str(state.get("source_path") or ""),

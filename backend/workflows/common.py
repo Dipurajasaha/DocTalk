@@ -30,6 +30,9 @@ class WorkflowState(TypedDict, total=False):
     retrieved_context_text: str
     prompt_context: str
     ai_result: dict[str, Any] | None
+    triage_result: dict[str, Any] | None
+    doctor_briefing: dict[str, Any] | None
+    agent_summary: dict[str, Any] | None
     summary_payload: dict[str, Any] | None
     formatted_result: dict[str, Any] | None
     persistence_result: dict[str, Any] | None
@@ -72,6 +75,9 @@ def create_workflow_state(
         retrieved_context_text="",
         prompt_context="",
         ai_result=None,
+        triage_result=None,
+        doctor_briefing=None,
+        agent_summary=None,
         summary_payload=None,
         formatted_result=None,
         persistence_result=None,
