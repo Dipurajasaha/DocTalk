@@ -13,7 +13,7 @@ from .constants import DEFAULT_CORS_ORIGINS
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = PROJECT_ROOT / "backend"
 DATA_ROOT = PROJECT_ROOT / "data"
-PRISMA_SCHEMA_PATH = BACKEND_ROOT / "prisma" / "schema.prisma"
+PRISMA_SCHEMA_PATH = PROJECT_ROOT / "prisma" / "schema.prisma"
 ENV_FILE = PROJECT_ROOT / ".env"
 
 load_dotenv(ENV_FILE, override=False)
@@ -38,6 +38,9 @@ class Settings:
     database_url: str = os.getenv("DATABASE_URL", "")
     direct_url: str = os.getenv("DIRECT_URL", "")
     shadow_database_url: str = os.getenv("SHADOW_DATABASE_URL", "")
+    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY") or os.getenv("SESSION_SECRET_KEY", "dev-jwt-secret")
+    jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
+    access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
     postgres_user: str = os.getenv("POSTGRES_USER", "doctalk")
     postgres_password: str = os.getenv("POSTGRES_PASSWORD", "doctalk")
     postgres_db: str = os.getenv("POSTGRES_DB", "doctalk")

@@ -1,0 +1,13 @@
+{
+  "name": "doctalk",
+  "private": true,
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  },
+  "prisma": {
+    "schema": "./prisma/schema.prisma"
+  },
+  "devDependencies": {
+    "prisma": "^5.17.0"
+  }
+}
