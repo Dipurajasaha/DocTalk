@@ -1,12 +1,12 @@
 generator client {
-  provider = "prisma-client-py"
+  provider  = "prisma-client-py"
   interface = "asyncio"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  directUrl         = env("DIRECT_URL")
   shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
@@ -31,7 +31,7 @@ enum AppointmentStatus {
 }
 
 model Patient {
-  username            String   @id
+  username            String         @id
   name                String
   displayName         String?
   dob                 DateTime?
@@ -43,32 +43,33 @@ model Patient {
   email               String?
   phone               String?
   profilePic          String?
-  closedDoctorChats   Json?    @db.JsonB
-  doctorChats         Json?    @db.JsonB
-  chatSessions        Json?    @db.JsonB
-  xrayAnalyses        Json?    @db.JsonB
-  customAssets        Json?    @db.JsonB
+  closedDoctorChats   Json?          @db.JsonB
+  doctorChats         Json?          @db.JsonB
+  chatSessions        Json?          @db.JsonB
+  xrayAnalyses        Json?          @db.JsonB
+  customAssets        Json?          @db.JsonB
   appointments        Appointment[]
   consultations       Consultation[]
+  ragDocuments        RagDocument[]
   reports             Report[]
   prescriptions       Prescription[]
   medicalImages       MedicalImage[]
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
   @@map("patients")
 }
 
 model Doctor {
-  doctorId            String   @id
+  doctorId            String         @id
   name                String
   displayName         String?
   gender              Gender?
   password            String
-  role                Role     @default(doctor)
+  role                Role           @default(doctor)
   category            String?
   location            String?
   address             String?
@@ -78,26 +79,26 @@ model Doctor {
   specialization      String?
   bio                 String?
   profilePic          String?
-  schedules           Json?    @db.JsonB
-  appointmentRequests Json?    @db.JsonB
-  payments            Json?    @db.JsonB
-  patientChats        Json?    @db.JsonB
-  assistantChat       Json?    @db.JsonB
-  closedChats         Json?    @db.JsonB
+  schedules           Json?          @db.JsonB
+  appointmentRequests Json?          @db.JsonB
+  payments            Json?          @db.JsonB
+  patientChats        Json?          @db.JsonB
+  assistantChat       Json?          @db.JsonB
+  closedChats         Json?          @db.JsonB
   appointments        Appointment[]
   consultations       Consultation[]
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
   @@map("doctors")
 }
 
 model Appointment {
   id              String            @id
-  patientUsername  String
+  patientUsername String
   doctorId        String
   date            String?
   time            String?
@@ -119,21 +120,22 @@ model Appointment {
 }
 
 model Consultation {
-  id               String     @id @default(uuid())
-  appointmentId    String     @unique
-  patientUsername  String
-  doctorId         String
-  lastMessageAt    DateTime?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  id              String    @id @default(uuid())
+  appointmentId   String    @unique
+  patientUsername String
+  doctorId        String
+  lastMessageAt   DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  appointment      Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
-  patient          Patient     @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
-  doctor           Doctor      @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
-  messages         Message[]
-  reports          Report[]
-  prescriptions    Prescription[]
-  medicalImages    MedicalImage[]
+  appointment   Appointment    @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patient       Patient        @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  doctor        Doctor         @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+  messages      Message[]
+  reports       Report[]
+  prescriptions Prescription[]
+  medicalImages MedicalImage[]
+  ragDocuments  RagDocument[]
 
   @@index([patientUsername])
   @@index([doctorId])
@@ -142,14 +144,14 @@ model Consultation {
 }
 
 model Message {
-  id              String   @id @default(uuid())
-  consultationId  String
-  senderId        String
-  senderRole      Role
-  message         String
-  timestamp       DateTime @default(now())
+  id             String   @id @default(uuid())
+  consultationId String
+  senderId       String
+  senderRole     Role
+  message        String
+  timestamp      DateTime @default(now())
 
-  consultation    Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  consultation Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
 
   @@index([consultationId, timestamp])
   @@index([senderId])
@@ -159,13 +161,13 @@ model Message {
 model FileKey {
   id               String   @id @default(uuid())
   fileId           String
-  patientUsername   String?
+  patientUsername  String?
   doctorId         String?
   encryptedFileKey String
   createdAt        DateTime @default(now())
 
-  patient          Patient? @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
-  doctor           Doctor?  @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+  patient Patient? @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  doctor  Doctor?  @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
 
   @@index([fileId])
   @@index([patientUsername])
@@ -174,21 +176,21 @@ model FileKey {
 }
 
 model Report {
-  id             String     @id @default(uuid())
+  id              String   @id @default(uuid())
   patientUsername String
-  uploadedBy     String
-  uploadedByRole Role
-  consultationId String?
-  fileType       String
-  originalName   String
-  storedPath     String
-  mimeType       String
-  fileSize       Int
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  uploadedBy      String
+  uploadedByRole  Role
+  consultationId  String?
+  fileType        String
+  originalName    String
+  storedPath      String
+  mimeType        String
+  fileSize        Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  patient        Patient     @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
-  consultation   Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+  patient      Patient       @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  consultation Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
 
   @@index([patientUsername])
   @@index([uploadedBy])
@@ -197,21 +199,21 @@ model Report {
 }
 
 model Prescription {
-  id             String     @id @default(uuid())
+  id              String   @id @default(uuid())
   patientUsername String
-  uploadedBy     String
-  uploadedByRole Role
-  consultationId String?
-  fileType       String
-  originalName   String
-  storedPath     String
-  mimeType       String
-  fileSize       Int
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  uploadedBy      String
+  uploadedByRole  Role
+  consultationId  String?
+  fileType        String
+  originalName    String
+  storedPath      String
+  mimeType        String
+  fileSize        Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  patient        Patient     @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
-  consultation   Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+  patient      Patient       @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  consultation Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
 
   @@index([patientUsername])
   @@index([uploadedBy])
@@ -220,24 +222,44 @@ model Prescription {
 }
 
 model MedicalImage {
-  id             String     @id @default(uuid())
+  id              String   @id @default(uuid())
   patientUsername String
-  uploadedBy     String
-  uploadedByRole Role
-  consultationId String?
-  fileType       String
-  originalName   String
-  storedPath     String
-  mimeType       String
-  fileSize       Int
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  uploadedBy      String
+  uploadedByRole  Role
+  consultationId  String?
+  fileType        String
+  originalName    String
+  storedPath      String
+  mimeType        String
+  fileSize        Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  patient        Patient     @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
-  consultation   Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+  patient      Patient       @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  consultation Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
 
   @@index([patientUsername])
   @@index([uploadedBy])
   @@index([consultationId])
   @@map("medical_images")
+}
+
+model RagDocument {
+  id             String                @id @default(uuid())
+  patientId      String                @map("patient_id")
+  consultationId String?               @map("consultation_id")
+  sourceType     String                @map("source_type")
+  content        String
+  summary        String
+  embedding      Unsupported("vector")
+  metadata       Json?                 @db.JsonB
+  createdAt      DateTime              @default(now()) @map("created_at")
+
+  patient      Patient       @relation(fields: [patientId], references: [username], onDelete: Cascade)
+  consultation Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+
+  @@index([patientId])
+  @@index([consultationId])
+  @@index([sourceType])
+  @@map("rag_documents")
 }

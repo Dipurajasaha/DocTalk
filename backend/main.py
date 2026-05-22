@@ -13,12 +13,14 @@ from .api.processing import router as processing_router
 from .api.medical_images import router as medical_images_router
 from .api.patient import router as patient_router
 from .api.prescriptions import router as prescriptions_router
+from .api.rag import router as rag_router
 from .api.reports import router as reports_router
 from .api.ai import router as ai_router
 from .core.config import settings
 from .core.constants import APP_NAME, APP_VERSION, DB_HEALTH_PATH, HEALTH_PATH
 from .core.database import connect_prisma, disconnect_prisma, ping_database
 from .core.logger import configure_logging, get_logger
+from .services.rag_service import rag_service
 
 
 configure_logging()
@@ -29,6 +31,7 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
 	logger.info("Starting application", extra={"component": "lifecycle"})
 	await connect_prisma()
+	await rag_service.ensure_schema()
 	try:
 		yield
 	finally:
@@ -56,6 +59,7 @@ app.include_router(prescriptions_router)
 app.include_router(medical_images_router)
 app.include_router(processing_router)
 app.include_router(ai_router)
+app.include_router(rag_router)
 
 
 @app.get(HEALTH_PATH, tags=["system"])
