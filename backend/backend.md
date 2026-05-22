@@ -54,6 +54,8 @@ The backend is optimized around five goals:
 - Secure chat-style messaging inside consultations
 - Secure upload system for medical assets
 - Metadata storage in PostgreSQL and file storage under `data/uploads`
+ - Medical processing pipelines (OCR, prescription parsing, X-ray analysis) with standardized structured outputs
+ - Centralized AI/model access service (local fallback when cloud models are unavailable)
 
 ### Medical asset types
 
@@ -74,6 +76,25 @@ flowchart LR
     Service --> Prisma[Prisma ORM]
     Prisma --> DB[(PostgreSQL)]
     Service --> FS[(Filesystem: data/uploads)]
+```
+
+### Processing-aware architecture
+
+```mermaid
+flowchart LR
+    Client --> API
+    API --> Processing[Processing Routes (/api/processing)]
+    Processing --> Orchestrator[Medical Processing Service]
+    Orchestrator --> OCR[OCR Service]
+    Orchestrator --> Presc[Prescription Analysis Service]
+    Orchestrator --> Xray[X-ray Analysis Service]
+    Orchestrator --> AIService[AI / Model Service]
+    OCR --> FS
+    Presc --> FS
+    Xray --> FS
+    AIService --> Models[(Cloud LLMs or Local Fallback)]
+    Orchestrator --> Prisma
+    Prisma --> DB
 ```
 
 ### Architectural principles
@@ -103,10 +124,15 @@ backend/
 │   ├── patient/
 │   ├── reports/
 │   ├── prescriptions/
-│   └── medical_images/
+│   ├── medical_images/
+│   └── processing/          # Stage 6: OCR, prescription, x-ray analysis routes
 ├── core/
 ├── middleware/
 ├── services/
+│   ├── ocr_service.py
+│   ├── prescription_analysis_service.py
+│   ├── xray_analysis_service.py
+│   └── medical_processing_service.py
 ├── utils/
 ├── main.py
 └── backend.md
@@ -332,6 +358,7 @@ The API is grouped by domain and intentionally kept shallow.
 /api/reports
 /api/prescriptions
 /api/medical_images
+ /api/processing
 ```
 
 ### Example endpoint categories
@@ -380,6 +407,7 @@ The backend is intentionally structured to support future expansion without rewr
 - Retrieval-based medical knowledge workflows
 - AI-assisted summarization of consultations
 - Physician-facing review tools
+- Stage 6: Medical processing pipelines (OCR, prescription parsing, X-ray analysis) completed; prepares the system for safe RAG integration by producing structured, permissioned outputs
 
 ---
 
@@ -406,6 +434,45 @@ flowchart LR
 
 > [!NOTE]
 > RAG should augment clinical context, not replace the authoritative relational data in PostgreSQL.
+
+---
+
+## Stage 6 — Medical Processing Layer (implemented)
+
+This repo now includes a focused Medical Processing Layer that consumes secure assets and returns deterministic, structured outputs suitable for downstream indexing or UI consumption. The implementation emphasizes ownership checks, thin routes, service orchestration, and safe fallbacks when cloud model keys are not present.
+
+### Highlights
+
+- Thin routes under `/api/processing` that delegate to `medical_processing_service` (orchestrator).
+- Specialized services: `ocr_service.py`, `prescription_analysis_service.py`, `xray_analysis_service.py`.
+- Central `ai_service.MedicalModelService` to abstract model access and validate structured JSON responses.
+- Standardized responses with `status`, `type`, `metadata`, `result`, and `diagnostics` fields for consistent downstream consumption.
+
+### Example processing flows
+
+```mermaid
+flowchart LR
+    File[Existing asset in data/uploads] --> Validate[Ownership & MIME checks]
+    Validate --> Orchestrator[medical_processing_service]
+    Orchestrator --> OCR
+    Orchestrator --> Prescription
+    Orchestrator --> Xray
+    OCR --> AIService
+    Prescription --> AIService
+    Xray --> AIService
+    AIService --> Models[(Cloud LLMs) or Local heuristics]
+    Orchestrator --> Prisma[(Postgres)]
+```
+
+### Failure modes & response policy
+
+- `403` — unauthorized access (ownership/role mismatch)
+- `422` — corrupted or unreadable files (OCR pre-checks)
+- `200` with `status: error` — analysis errors with `diagnostics` for UI/developer inspection
+
+### Why this helps RAG later
+
+- The processing layer emits permissioned, schema-stable results so an indexer can safely build retrieval indexes without re-running costly parsing logic. This separation isolates sensitive authorization checks to the orchestrator, reducing the risk surface for later retrieval/indexing systems.
 
 ---
 

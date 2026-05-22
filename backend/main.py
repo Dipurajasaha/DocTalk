@@ -9,6 +9,7 @@ from .api.auth import router as auth_router
 from .api.chat import router as chat_router
 from .api.appointments import router as appointments_router
 from .api.doctor import router as doctor_router
+from .api.processing import router as processing_router
 from .api.medical_images import router as medical_images_router
 from .api.patient import router as patient_router
 from .api.prescriptions import router as prescriptions_router
@@ -53,6 +54,7 @@ app.include_router(chat_router)
 app.include_router(reports_router)
 app.include_router(prescriptions_router)
 app.include_router(medical_images_router)
+app.include_router(processing_router)
 app.include_router(ai_router)
 
 
