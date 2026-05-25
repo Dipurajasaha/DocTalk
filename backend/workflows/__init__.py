@@ -1,5 +1,6 @@
 """Controlled LangGraph workflows for DocTalk medical AI flows."""
 
+from .doctor_copilot_workflow import DoctorCopilotWorkflow, doctor_copilot_workflow
 from .patient_chat_workflow import PatientChatWorkflow, patient_chat_workflow
 from .prescription_workflow import PrescriptionWorkflow, prescription_workflow
 from .report_analysis_workflow import ReportAnalysisWorkflow, report_analysis_workflow

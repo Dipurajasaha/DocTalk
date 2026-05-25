@@ -17,6 +17,7 @@ DocTalk is a healthcare backend designed to support patient-doctor interactions,
 - Enforces ownership and role-based access control across protected resources
 - Runs deterministic workflow graphs for consultation reasoning, report analysis, prescription processing, and X-ray analysis
 - Uses controlled medical assistant agents for triage, consultation summarization, and doctor briefings
+- Uses a doctor copilot layer to generate explainable clinical intelligence from contextual medical memory
 
 ### High-level intent
 
@@ -155,6 +156,7 @@ Runtime stability is implemented through bounded retries, safe fallbacks, reques
 - Patient message flows run retrieval, triage, reasoning, safety, and response formatting
 - Consultation summaries run summary generation, semantic memory compaction, and RAG ingestion
 - Doctor-facing workflows assemble a patient overview before returning a concise briefing
+- Doctor copilot workflows run overview generation, timeline refresh, and explainable clinical signal composition
 
 ---
 
@@ -263,6 +265,125 @@ flowchart TD
 - Keeps the workflow deterministic while still adding useful medical assistance
 - Preserves the doctor as the final decision-maker
 
+## Doctor Copilot Architecture
+
+The doctor copilot is a workflow-orchestrated clinical support layer that composes retrieval, timeline synthesis, risk highlighting, and concise briefing generation.
+
+```mermaid
+flowchart TD
+    D[doctor opens consultation] --> C[context retrieval]
+    C --> T[timeline generation]
+    T --> R[risk highlighting]
+    R --> O[clinical overview]
+```
+
+Text view: doctor opens consultation -> context retrieval -> timeline generation -> risk highlighting -> clinical overview.
+
+### Core design
+
+- Built as orchestration over existing services, not a separate decision engine
+- Uses contextual memory and scoped retrieval as the source of insight
+- Returns structured outputs designed for clinician review workflows
+- Preserves existing authorization, safety, and logging boundaries
+
+## Clinical Intelligence Layer
+
+Clinical intelligence is implemented as focused service modules that each produce one explainable insight class.
+
+### Included modules
+
+- Patient overview generation
+- Medical timeline system
+- Symptom progression tracking
+- Medication intelligence
+- Clinical risk highlighting
+
+### Why it is assistive instead of autonomous
+
+- No diagnosis generation
+- No prescription generation
+- No autonomous planning loop
+- Every output is informational and evidence-linked
+
+## Patient Overview Generation
+
+Patient overview generation provides a compact doctor-facing summary across the most recent relevant context.
+
+### Overview contents
+
+- Concise patient summary
+- Recent consultations
+- Recurring symptoms
+- Medication continuity signals
+- Recent report references
+- Key findings with evidence
+
+## Medical Timeline System
+
+The medical timeline system produces chronological event views from consultations, reports, prescriptions, imaging, and workflow summaries.
+
+### Timeline output
+
+- Timestamped events
+- Major findings
+- Treatment progression snapshots
+- Source references for each high-value event
+
+## Symptom Progression Tracking
+
+Symptom progression tracking identifies recurrence and trend signals from contextual memory.
+
+```mermaid
+flowchart TD
+    M[medical memory] --> S[symptom tracking]
+    S --> P[pattern analysis]
+    P --> I[doctor insights]
+```
+
+Text view: medical memory -> symptom tracking -> pattern analysis -> doctor insights.
+
+### Tracked behavior
+
+- Recurring symptom terms
+- Worsening and improvement hints
+- Chronic complaint patterns
+- Repeated complaint clusters
+
+## Medication Intelligence
+
+Medication intelligence summarizes continuity and overlap patterns from scoped prescription history.
+
+### Insights returned
+
+- Repeated medications
+- Continuity across recent records
+- Recent medication-change signals
+- Potential overlap warnings for clinician review
+
+### Safety behavior
+
+- Informational wording only
+- No pharmaceutical claims
+- No prescribing recommendations
+
+## Explainable Clinical Assistance
+
+Explainability is enforced by attaching evidence references to each major copilot insight.
+
+### Explainability guarantees
+
+- Source summaries are included in copilot outputs
+- Source references are attached to findings and highlights
+- Retrieved evidence keeps timestamps and source types
+- Outputs avoid black-box or unsupported certainty claims
+
+### Patient isolation in copilot outputs
+
+- Doctor ownership checks run before copilot execution
+- Retrieval remains scoped to authorized patient and consultation context
+- Cross-patient evidence is blocked before insight synthesis
+- Evidence payloads are derived only from authorized retrieval results
+
 ---
 
 
@@ -304,6 +425,7 @@ DocTalk uses a fully local AI stack so the backend can run without cloud depende
 - The AI layer is service-oriented: `embedding_service`, `retrieval_service`, `context_builder_service`, and `ai_service` provide clear responsibilities and safe provider swaps.
 - Context windows are kept compact so the local GPU is not forced to carry unnecessary prompt state.
 - Only one heavy model should be active at a time when possible, which keeps local inference predictable on modest hardware.
+- Doctor copilot insights use the same centralized AI and safety services so response style and safeguards remain consistent.
 
 Workflow orchestration
 
@@ -479,6 +601,25 @@ sequenceDiagram
 4. Prisma reads or writes relational records
 5. Filesystem operations run only for upload/download/delete paths
 6. The response is returned in a normalized API format
+
+### Doctor copilot request flow
+
+- Doctor requests copilot data for a consultation or patient scope
+- Route and service verify doctor ownership and patient scope
+- Workflow orchestrates contextual retrieval and clinical intelligence modules
+- Timeline, symptom, medication, and risk signals are composed into one response
+- Output is returned as an explainable, evidence-backed clinician-facing payload
+
+```mermaid
+flowchart TD
+    DR[doctor copilot request] --> SC[scope and ownership checks]
+    SC --> CR[context retrieval]
+    CR --> TL[timeline generation]
+    TL --> RH[risk highlighting]
+    RH --> CO[clinical overview response]
+```
+
+Text view: doctor copilot request -> scope and ownership checks -> context retrieval -> timeline generation -> risk highlighting -> clinical overview response.
 
 
 ### RAG request flow
@@ -742,6 +883,13 @@ Semantic memory stores compact medical summaries with embeddings so the backend 
 - If the embedding provider fails, the backend uses a deterministic fallback embedding
 - If ingestion cannot produce a safe summary, the service can skip or normalize the record rather than storing malformed memory
 - Retrieval still works with the stored vector or fallback vector, but the source metadata remains scoped to the patient
+
+### Copilot integration
+
+- Doctor copilot modules consume this memory as the primary context source
+- Timeline, symptom, medication, and risk modules all operate on scoped retrieval output
+- Evidence references in copilot responses map back to retrieved memory metadata
+- Memory remains patient-isolated before any clinical intelligence synthesis
 
 ---
 

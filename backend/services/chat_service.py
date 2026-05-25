@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 
 from ..core.database import prisma
 from ..core.logger import get_logger
+from ..workflows.doctor_copilot_workflow import doctor_copilot_workflow
 from ..workflows.patient_chat_workflow import patient_chat_workflow
 
 
@@ -146,6 +147,20 @@ class ChatService:
                 "source": "consultation_chat",
             },
         )
+        if role == "doctor":
+            try:
+                await doctor_copilot_workflow.run(
+                    requester_id=user_id,
+                    role=role,
+                    patient_id=consultation.patientUsername,
+                    consultation_id=consultation_id,
+                    query="consultation completion timeline refresh",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Doctor copilot refresh failed after consultation analysis",
+                    extra={"component": "copilot", "request_id": consultation_id, "error": str(exc)},
+                )
         return dict(workflow_result.get("formatted_result") or {})
 
     def validate_consultation_access(self, role: AuthRole, user_id: str, patient_id: str, doctor_id: str) -> None:

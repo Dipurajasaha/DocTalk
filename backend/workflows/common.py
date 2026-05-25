@@ -34,6 +34,7 @@ class WorkflowState(TypedDict, total=False):
     doctor_briefing: dict[str, Any] | None
     agent_summary: dict[str, Any] | None
     summary_payload: dict[str, Any] | None
+    copilot_payload: dict[str, Any] | None
     formatted_result: dict[str, Any] | None
     persistence_result: dict[str, Any] | None
     findings: list[str]
@@ -79,6 +80,7 @@ def create_workflow_state(
         doctor_briefing=None,
         agent_summary=None,
         summary_payload=None,
+        copilot_payload=None,
         formatted_result=None,
         persistence_result=None,
         findings=[],
