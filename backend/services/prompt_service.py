@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .safety_service import medical_safety_service
+
 class PromptService:
     def build_summary_prompt(self, language: str = "en") -> str:
         language_text = self._language_hint(language)
@@ -48,7 +50,7 @@ class PromptService:
 
     @staticmethod
     def _context_block(context_text: str | None, label: str) -> str:
-        text = str(context_text or "").strip()
+        text = medical_safety_service.sanitize_context_text(context_text)
         if not text:
             return ""
         return (

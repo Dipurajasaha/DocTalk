@@ -5,12 +5,18 @@ from typing import Any
 
 class ResponseFormatter:
     @staticmethod
+    def _clean_text(value: Any, *, limit: int = 4000) -> str:
+        cleaned = str(value or "").replace("\x00", " ").strip()
+        return cleaned[:limit]
+
+    @staticmethod
     def normalize_list(value: Any) -> list[str]:
         if not value:
             return []
         if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        return [str(value).strip()]
+            return [ResponseFormatter._clean_text(item, limit=1000) for item in value if ResponseFormatter._clean_text(item, limit=1000)]
+        cleaned = ResponseFormatter._clean_text(value, limit=1000)
+        return [cleaned] if cleaned else []
 
     def format_output(
         self,
@@ -24,7 +30,7 @@ class ResponseFormatter:
     ) -> dict[str, Any]:
         return {
             "success": bool(success),
-            "summary": summary.strip(),
+            "summary": self._clean_text(summary),
             "findings": self._dedupe(findings or []),
             "recommendations": self._dedupe(recommendations or []),
             "warnings": self._dedupe(warnings or []),
@@ -35,7 +41,7 @@ class ResponseFormatter:
     def _dedupe(items: list[str]) -> list[str]:
         result: list[str] = []
         for item in items:
-            value = str(item).strip()
+            value = ResponseFormatter._clean_text(item, limit=1000)
             if value and value not in result:
                 result.append(value)
         return result

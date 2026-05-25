@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 Gender = Literal["male", "female", "other"]
@@ -11,6 +11,7 @@ AppointmentStatus = Literal["pending", "requested", "scheduled", "completed", "c
 
 
 class PatientProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str | None = None
     display_name: str | None = None
     dob: datetime | None = None
@@ -38,6 +39,7 @@ class PatientProfileResponse(BaseModel):
 
 
 class DoctorProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str | None = None
     display_name: str | None = None
     gender: Gender | None = None
@@ -69,6 +71,7 @@ class DoctorProfileResponse(BaseModel):
 
 
 class AppointmentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     doctor_id: str = Field(min_length=1)
     date: str = Field(min_length=1)
     time: str = Field(min_length=1)

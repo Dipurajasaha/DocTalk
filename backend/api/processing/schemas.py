@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AssetAnalysisRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     asset_id: str = Field(min_length=1)
     language: str = Field(default="en", min_length=1)
 

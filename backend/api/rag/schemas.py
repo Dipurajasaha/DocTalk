@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 SourceType = Literal["consultation", "ocr", "prescription", "xray"]
 
 
 class RagIngestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     patient_id: str = Field(min_length=1)
     consultation_id: str | None = None
     source_type: SourceType
@@ -21,6 +22,7 @@ class RagIngestRequest(BaseModel):
 
 
 class RagSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     patient_id: str = Field(min_length=1)
     consultation_id: str | None = None
     query: str = Field(min_length=1)
@@ -30,6 +32,7 @@ class RagSearchRequest(BaseModel):
 
 
 class PatientMemoryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     consultation_id: str | None = None
     query: str = Field(default="")
     top_k: int = Field(default=5, ge=1, le=20)

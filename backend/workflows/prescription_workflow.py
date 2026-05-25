@@ -101,6 +101,10 @@ class PrescriptionWorkflow:
         if loaded:
             state["patient_id"] = str(loaded.get("patient_id") or state.get("patient_id") or "")
             state["consultation_id"] = loaded.get("consultation_id")
+        else:
+            append_log(state, "asset load failed; stopping workflow", level="error", node="load_prescription")
+            mark_status(state, "failed")
+            return {"workflow_status": "failed"}
         return dict(loaded or {})
 
     async def _extract_text(self, state: WorkflowState) -> dict[str, Any]:

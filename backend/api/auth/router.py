@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ...middleware.auth_middleware import CurrentUser, get_current_user, require_doctor, require_patient
 from ...services.auth_service import AuthService
@@ -13,6 +13,7 @@ router = APIRouter()
 
 
 class TokenResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     access_token: str
     token_type: str = "bearer"
     user_id: str
@@ -20,23 +21,27 @@ class TokenResponse(BaseModel):
 
 
 class PatientSignupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=1)
     name: str = Field(min_length=1)
     password: str = Field(min_length=8)
 
 
 class PatientLoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=1)
     password: str = Field(min_length=1)
 
 
 class DoctorSignupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     doctor_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     password: str = Field(min_length=8)
 
 
 class DoctorLoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     doctor_id: str = Field(min_length=1)
     password: str = Field(min_length=1)
 

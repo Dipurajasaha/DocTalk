@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 Role = Literal["patient", "doctor"]
 
 
 class ConsultationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     appointment_id: str = Field(min_length=1)
 
 
@@ -24,6 +25,7 @@ class ConsultationResponse(BaseModel):
 
 
 class MessageCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     message: str = Field(min_length=1, max_length=10000)
 
 

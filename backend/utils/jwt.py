@@ -23,6 +23,8 @@ def create_access_token(user_id: str, role: str, expires_delta: timedelta | None
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
+    if not token or len(token) > 8192:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     try:
         payload = jwt.decode(
             token,
@@ -36,5 +38,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
 
     if not isinstance(payload, dict):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    if payload.get("sub") != payload.get("user_id"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
 
     return payload

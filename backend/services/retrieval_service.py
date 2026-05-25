@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
+import time
 
 from fastapi import HTTPException, status
 
@@ -24,6 +26,11 @@ class RetrievalResult:
 
 
 class RetrievalService:
+	def __init__(self) -> None:
+		self._search_cache: dict[tuple[Any, ...], RetrievalResult] = {}
+		self._search_cache_order: list[tuple[Any, ...]] = []
+		self._search_cache_size = 64
+
 	async def authorize_scope(self, requester_id: str, role: AuthRole, patient_id: str, consultation_id: str | None = None) -> None:
 		await self._validate_scope(requester_id, role, patient_id, consultation_id)
 
@@ -43,21 +50,37 @@ class RetrievalService:
 		top_k = max(1, min(int(top_k), 20))
 		similarity_threshold = max(0.0, min(float(similarity_threshold), 1.0))
 		normalized_query = str(query or "").strip()
+		cache_key = (requester_id, role, patient_id, normalized_query[:256], consultation_id, top_k, similarity_threshold, source_type)
+		cached = self._search_cache.get(cache_key)
+		if cached is not None:
+			logger.info("RAG retrieval cache hit", extra={"component": "rag", "request_id": consultation_id or patient_id, "patient_id": patient_id, "cached": True})
+			return RetrievalResult(items=[dict(item) for item in cached.items], top_k=cached.top_k, similarity_threshold=cached.similarity_threshold, fallback_used=cached.fallback_used)
 
 		if not normalized_query:
 			items = await self._fetch_recent_documents(patient_id, consultation_id, source_type, top_k)
-			self._log_retrieval(patient_id, consultation_id, role, top_k, similarity_threshold, len(items), fallback_used=True)
-			return RetrievalResult(items=items, top_k=top_k, similarity_threshold=similarity_threshold, fallback_used=True)
+			items = self._postprocess_items(items)
+			result = RetrievalResult(items=items, top_k=top_k, similarity_threshold=similarity_threshold, fallback_used=True)
+			self._cache_result(cache_key, result)
+			self._log_retrieval(patient_id, consultation_id, role, top_k, similarity_threshold, len(items), fallback_used=True, latency_ms=0.0)
+			return result
 
 		try:
+			started_at = time.perf_counter()
 			items = await self._vector_search(patient_id, consultation_id, source_type, normalized_query, top_k, similarity_threshold)
-			self._log_retrieval(patient_id, consultation_id, role, top_k, similarity_threshold, len(items), fallback_used=False)
-			return RetrievalResult(items=items, top_k=top_k, similarity_threshold=similarity_threshold, fallback_used=False)
+			items = self._postprocess_items(items)
+			result = RetrievalResult(items=items, top_k=top_k, similarity_threshold=similarity_threshold, fallback_used=False)
+			self._cache_result(cache_key, result)
+			self._log_retrieval(patient_id, consultation_id, role, top_k, similarity_threshold, len(items), fallback_used=False, latency_ms=round((time.perf_counter() - started_at) * 1000, 2))
+			return result
 		except Exception as exc:
 			logger.warning("Vector retrieval failed, falling back to lexical search", extra={"component": "rag", "error": str(exc)})
+			started_at = time.perf_counter()
 			items = await self._lexical_fallback(patient_id, consultation_id, source_type, normalized_query, top_k, similarity_threshold)
-			self._log_retrieval(patient_id, consultation_id, role, top_k, similarity_threshold, len(items), fallback_used=True)
-			return RetrievalResult(items=items, top_k=top_k, similarity_threshold=similarity_threshold, fallback_used=True)
+			items = self._postprocess_items(items)
+			result = RetrievalResult(items=items, top_k=top_k, similarity_threshold=similarity_threshold, fallback_used=True)
+			self._cache_result(cache_key, result)
+			self._log_retrieval(patient_id, consultation_id, role, top_k, similarity_threshold, len(items), fallback_used=True, latency_ms=round((time.perf_counter() - started_at) * 1000, 2))
+			return result
 
 	async def _vector_search(
 		self,
@@ -73,6 +96,10 @@ class RetrievalService:
 
 		args: list[Any] = [patient_id]
 		clauses = ["patient_id = $1"]
+		memory_cutoff = self._memory_cutoff()
+		if memory_cutoff is not None:
+			args.append(memory_cutoff)
+			clauses.append(f"created_at >= ${len(args)}")
 		if consultation_id is not None:
 			args.append(consultation_id)
 			clauses.append(f"consultation_id = ${len(args)}")
@@ -107,6 +134,10 @@ class RetrievalService:
 	) -> list[dict[str, Any]]:
 		args: list[Any] = [patient_id]
 		clauses = ["patient_id = $1"]
+		memory_cutoff = self._memory_cutoff()
+		if memory_cutoff is not None:
+			args.append(memory_cutoff)
+			clauses.append(f"created_at >= ${len(args)}")
 		if consultation_id is not None:
 			args.append(consultation_id)
 			clauses.append(f"consultation_id = ${len(args)}")
@@ -150,6 +181,47 @@ class RetrievalService:
 			row = dict(row)
 			row.setdefault("similarity", 0.0)
 		return rows[:top_k]
+
+	def _postprocess_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+		deduped: list[dict[str, Any]] = []
+		seen: set[str] = set()
+		for item in items:
+			fingerprint = self._fingerprint(item)
+			if fingerprint in seen:
+				continue
+			seen.add(fingerprint)
+			cleaned = dict(item)
+			cleaned["content"] = self._truncate_text(str(cleaned.get("content") or ""), 1600)
+			cleaned["summary"] = self._truncate_text(str(cleaned.get("summary") or ""), 500)
+			deduped.append(cleaned)
+		return deduped[:6]
+
+	def _cache_result(self, cache_key: tuple[Any, ...], result: RetrievalResult) -> None:
+		self._search_cache[cache_key] = RetrievalResult(items=[dict(item) for item in result.items], top_k=result.top_k, similarity_threshold=result.similarity_threshold, fallback_used=result.fallback_used)
+		self._search_cache_order.append(cache_key)
+		while len(self._search_cache_order) > self._search_cache_size:
+			oldest = self._search_cache_order.pop(0)
+			self._search_cache.pop(oldest, None)
+
+	@staticmethod
+	def _fingerprint(item: dict[str, Any]) -> str:
+		return f"{str(item.get('summary') or '').strip()}|{str(item.get('content') or '').strip()}"
+
+	@staticmethod
+	def _truncate_text(text: str, limit: int) -> str:
+		cleaned = str(text or "").strip()
+		if len(cleaned) <= limit:
+			return cleaned
+		return cleaned[:limit].rstrip() + "..."
+
+	@staticmethod
+	def _memory_cutoff() -> datetime | None:
+		from ..core.config import settings
+
+		days = max(int(getattr(settings, "rag_max_memory_age_days", 0) or 0), 0)
+		if days <= 0:
+			return None
+		return datetime.now(timezone.utc) - timedelta(days=days)
 
 	async def _validate_scope(self, requester_id: str, role: AuthRole, patient_id: str, consultation_id: str | None) -> None:
 		requester_id = str(requester_id or "").strip()
@@ -222,6 +294,7 @@ class RetrievalService:
 		top_k: int,
 		similarity_threshold: float,
 		result_count: int,
+		latency_ms: float,
 		*,
 		fallback_used: bool,
 	) -> None:
@@ -234,6 +307,7 @@ class RetrievalService:
 				"status_code": 200,
 				"result_count": result_count,
 				"fallback_used": fallback_used,
+				"latency_ms": latency_ms,
 			},
 		)
 

@@ -4,6 +4,7 @@ import hashlib
 import math
 import os
 import re
+import time
 from typing import Any
 
 import httpx
@@ -22,6 +23,9 @@ class EmbeddingService:
 		self.timeout_seconds = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", os.getenv("AI_REQUEST_TIMEOUT_SECONDS", "30")))
 		self._provider_checked = False
 		self._provider_available = False
+		self._embedding_cache: dict[str, list[float]] = {}
+		self._embedding_cache_order: list[str] = []
+		self._embedding_cache_size = max(int(os.getenv("RAG_EMBEDDING_CACHE_SIZE", "128")), 16)
 		logger.info("RAG embeddings configured", extra={"component": "rag", "model": self.model_name, "dimension": self.dimension, "provider": "ollama"})
 
 	@property
@@ -33,16 +37,30 @@ class EmbeddingService:
 		if not normalized:
 			raise ValueError("Embedding text is empty")
 
+		cache_key = normalized[:4096]
+		cached = self._embedding_cache.get(cache_key)
+		if cached is not None:
+			return list(cached)
+
 		if await self.validate_connection():
 			try:
+				started_at = time.perf_counter()
 				raw = await self._embed_with_provider(normalized)
 				vector = self._fit_dimension(raw)
-				return self._normalize_vector(vector)
+				result = self._normalize_vector(vector)
+				self._cache_embedding(cache_key, result)
+				logger.info(
+					"Embedding generated",
+					extra={"component": "rag", "model": self.model_name, "latency_ms": round((time.perf_counter() - started_at) * 1000, 2)},
+				)
+				return result
 			except Exception as exc:
 				self._provider_available = False
 				logger.warning("Embedding provider failed, using fallback", extra={"component": "rag", "error": str(exc)})
 
-		return self._normalize_vector(self._fallback_embedding(normalized))
+		result = self._normalize_vector(self._fallback_embedding(normalized))
+		self._cache_embedding(cache_key, result)
+		return result
 
 	async def validate_connection(self) -> bool:
 		if self._provider_checked:
@@ -112,7 +130,9 @@ class EmbeddingService:
 
 	@staticmethod
 	def _normalize_text(value: str | None) -> str:
-		return str(value or "").strip()
+		cleaned = str(value or "").replace("\x00", " ")
+		cleaned = " ".join(cleaned.split())
+		return cleaned[:8192].strip()
 
 	@staticmethod
 	def _normalize_vector(values: list[float]) -> list[float]:
@@ -131,6 +151,13 @@ class EmbeddingService:
 			raise ValueError("Invalid vector dimension")
 		vector = self._normalize_vector([float(value) for value in values])
 		return vector
+
+	def _cache_embedding(self, cache_key: str, vector: list[float]) -> None:
+		self._embedding_cache[cache_key] = list(vector)
+		self._embedding_cache_order.append(cache_key)
+		while len(self._embedding_cache_order) > self._embedding_cache_size:
+			oldest = self._embedding_cache_order.pop(0)
+			self._embedding_cache.pop(oldest, None)
 
 
 embedding_service = EmbeddingService()

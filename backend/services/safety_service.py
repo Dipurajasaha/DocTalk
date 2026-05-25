@@ -25,9 +25,35 @@ class SafetyService:
             return prompt_text
         return f"{prompt_text}\n\n{self.disclaimer}"
 
+    @staticmethod
+    def sanitize_context_text(text: str | None, *, limit: int = 2000) -> str:
+        cleaned = str(text or "").replace("```", " ").replace("\x00", " ")
+        lowered = cleaned.lower()
+        for phrase in (
+            "ignore previous instructions",
+            "ignore all previous instructions",
+            "system prompt",
+            "developer message",
+            "reveal the prompt",
+            "follow these instructions",
+        ):
+            lowered = lowered.replace(phrase, "")
+        cleaned = " ".join(lowered.split())
+        return cleaned[:limit].strip()
+
+    @staticmethod
+    def sanitize_text_output(text: str | None, *, limit: int = 4000) -> str:
+        cleaned = str(text or "").replace("\x00", "").strip()
+        return cleaned[:limit]
+
     def guard_output(self, structured: dict[str, Any], fallback: dict[str, Any], prompt_type: str) -> dict[str, Any]:
         if not structured:
             return self.fallback_response(prompt_type, reason="empty model response", fallback=fallback)
+
+        structured = dict(structured)
+        structured["summary"] = self.sanitize_text_output(structured.get("summary"))
+        structured["findings"] = medical_response_formatter.normalize_list(structured.get("findings"))
+        structured["recommendations"] = medical_response_formatter.normalize_list(structured.get("recommendations"))
 
         if self._is_unsafe(structured):
             warnings = medical_response_formatter.normalize_list(structured.get("warnings"))
@@ -43,6 +69,7 @@ class SafetyService:
 
     def fallback_response(self, prompt_type: str, reason: str, fallback: dict[str, Any]) -> dict[str, Any]:
         output = dict(fallback)
+        output["summary"] = self.sanitize_text_output(output.get("summary"))
         warnings = medical_response_formatter.normalize_list(output.get("warnings"))
         warnings.extend([reason, self.disclaimer])
         output["warnings"] = medical_response_formatter.normalize_list(warnings)
@@ -67,6 +94,9 @@ class SafetyService:
             "you have",
             "confirmed diagnosis",
             "guaranteed",
+            "ignore previous instructions",
+            "system prompt",
+            "developer message",
         )
         return any(term in combined for term in blocked_terms)
 

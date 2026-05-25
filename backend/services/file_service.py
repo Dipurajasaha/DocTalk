@@ -221,14 +221,14 @@ class MedicalFileService:
         return total
 
     def _resolve_disk_path(self, stored_path: str) -> Path:
-        # Resolve and ensure the path remains inside the configured data root
-        candidate = (settings.data_root / stored_path).resolve()
         root = settings.data_root.resolve()
-        try:
-            if not str(candidate).startswith(str(root)):
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-        except Exception:
+        candidate = (root / Path(stored_path)).resolve()
+        if candidate == root:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        try:
+            candidate.relative_to(root)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found") from exc
         return candidate
 
     def _validate_saved_file(self, destination: Path, extension: str, content_type: str) -> None:

@@ -76,7 +76,10 @@ class AIService:
 
     async def analyze_ocr_image(self, image_path: str | Path, language: str = "en", metadata: dict[str, Any] | None = None, context_text: str | None = None) -> dict[str, Any]:
         prompt = medical_prompt_service.build_ocr_prompt(language, context_text=context_text)
-        fallback = self._ocr_image_fallback(Path(image_path), language=language, metadata=metadata)
+        try:
+            fallback = self._ocr_image_fallback(Path(image_path), language=language, metadata=metadata)
+        except Exception as exc:
+            fallback = self._invalid_image_fallback("ocr_image", metadata=metadata, reason=str(exc))
         return await self._generate_image_result("ocr_image", prompt, image_path, fallback, metadata=metadata)
 
     async def analyze_prescription_text(self, extracted_text: str, language: str = "en", metadata: dict[str, Any] | None = None, context_text: str | None = None) -> dict[str, Any]:
@@ -86,7 +89,10 @@ class AIService:
 
     async def analyze_xray_image(self, image_path: str | Path, language: str = "en", metadata: dict[str, Any] | None = None, context_text: str | None = None) -> dict[str, Any]:
         prompt = medical_prompt_service.build_xray_prompt(language, context_text=context_text)
-        fallback = self._xray_fallback(Path(image_path), language=language, metadata=metadata)
+        try:
+            fallback = self._xray_fallback(Path(image_path), language=language, metadata=metadata)
+        except Exception as exc:
+            fallback = self._invalid_image_fallback("xray", metadata=metadata, reason=str(exc))
         return await self._generate_image_result("xray", prompt, image_path, fallback, metadata=metadata)
 
     async def analyze_consultation_text(self, conversation_text: str, language: str = "en", metadata: dict[str, Any] | None = None, context_text: str | None = None) -> dict[str, Any]:
@@ -339,6 +345,19 @@ class AIService:
             recommendations=["Consult a radiologist for clinical interpretation."],
             warnings=["Ollama model unavailable; using local image metadata fallback."],
             metadata=self._merge_metadata(metadata, extracted_text=extracted_text, prompt_type="xray"),
+        )
+
+    def _invalid_image_fallback(self, prompt_type: PromptType, metadata: dict[str, Any] | None = None, reason: str | None = None) -> dict[str, Any]:
+        warnings = ["Image validation failed before analysis."]
+        if reason:
+            warnings.append(str(reason))
+        return medical_response_formatter.format_output(
+            success=False,
+            summary="Unable to analyze the image.",
+            findings=[],
+            recommendations=["Upload a valid image file and try again."],
+            warnings=warnings,
+            metadata=self._merge_metadata(metadata, prompt_type=prompt_type, safety_reason="invalid image"),
         )
 
     def _consultation_fallback(self, conversation_text: str, language: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:

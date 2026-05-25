@@ -9,6 +9,7 @@ from ..core.database import prisma
 from ..core.logger import get_logger
 from .embedding_service import embedding_service
 from .retrieval_service import retrieval_service
+from .safety_service import medical_safety_service
 from .summary_service import medical_summary_service
 
 
@@ -77,10 +78,12 @@ class RagService:
     ) -> dict[str, Any]:
         await self.ensure_schema()
 
+        normalized_content = medical_safety_service.sanitize_context_text(content, limit=5000)
+        normalized_summary = medical_safety_service.sanitize_text_output(summary, limit=1200) if summary else None
         prepared = await medical_summary_service.build_summary(
             source_type,
-            content,
-            summary=summary,
+            normalized_content,
+            summary=normalized_summary,
             findings=findings,
             recommendations=recommendations,
             metadata=metadata,
@@ -90,7 +93,7 @@ class RagService:
         embedding_literal = embedding_service.to_vector_literal(embedding_vector)
         payload_metadata = self._build_metadata(prepared.metadata, source_type, patient_id, consultation_id)
 
-        existing = await self._find_duplicate(patient_id, consultation_id, source_type, prepared.summary)
+        existing = await self._find_duplicate(patient_id, consultation_id, source_type, prepared.summary, prepared.content)
         if existing is not None:
             logger.info("RAG duplicate ingestion skipped", extra={"component": "rag", "request_id": patient_id})
             return self._serialize_row(existing)
@@ -216,7 +219,7 @@ class RagService:
             logger.warning("Embedding generation failed, using zero vector", extra={"component": "rag", "error": str(exc)})
             return [0.0] * embedding_service.dimension
 
-    async def _find_duplicate(self, patient_id: str, consultation_id: str | None, source_type: str, summary: str) -> Any:
+    async def _find_duplicate(self, patient_id: str, consultation_id: str | None, source_type: str, summary: str, content: str) -> Any:
         rows = await prisma.query_raw(
             """
             SELECT id, patient_id, consultation_id, source_type, content, summary, metadata, created_at
@@ -224,16 +227,15 @@ class RagService:
             WHERE patient_id = $1
               AND source_type = $2
               AND summary = $3
-              AND (
-                ($4::text IS NULL AND consultation_id IS NULL)
-                OR consultation_id = $4::text
-              )
+              AND content = $4
+              AND (($5::text IS NULL AND consultation_id IS NULL) OR consultation_id = $5::text)
             ORDER BY created_at DESC
             LIMIT 1
             """,
             patient_id,
             source_type,
             summary,
+            content,
             consultation_id,
         )
         return rows[0] if rows else None
