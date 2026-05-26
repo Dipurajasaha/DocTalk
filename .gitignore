@@ -26,6 +26,6 @@ frontend/dist/
 Thumbs.db
 
 # Ignore agent folders and artifacts
-agent/
-agents/
-.github/agents/
+/agent/
+/agents/
+/.github/agents/
