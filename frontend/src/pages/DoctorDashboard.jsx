@@ -178,17 +178,22 @@ export default function DoctorDashboard() {
 
   // 1. Fetch Doctor Session on Mount
   useEffect(() => {
-    fetch('/api/doctor_session', { credentials: 'include' })
-      .then(res => res.json())
+    const token = localStorage.getItem('doctalk_token');
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
+    fetch('/me', { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => {
+        if (!res.ok) throw new Error('unauth');
+        return res.json();
+      })
       .then(data => {
-        if (!data.success) {
-          navigate('/login'); // Redirect to login if not authenticated
-        } else {
-          setUser(data);
-        }
+        setUser(data);
       })
       .catch((err) => {
-        console.error("Session fetch failed:", err);
+        console.error('Session fetch failed:', err);
         navigate('/login');
       });
   }, [navigate]);

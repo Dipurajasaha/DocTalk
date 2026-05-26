@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../styles/login.css';
 
-export default function Login() {
+export default function Login({ setSession }) {
   const [view, setView] = useState('login'); // 'login' or 'register'
   const [category, setCategory] = useState('patient'); // 'patient' or 'doctor'
   const [errorMsg, setErrorMsg] = useState(null);
@@ -13,24 +13,33 @@ export default function Login() {
     const formData = new FormData(e.target);
     formData.append('category', category);
 
-    // Call our FastAPI login endpoint
+    // Call our FastAPI login endpoint (uses bearer token)
     try {
-      const response = await fetch('/api/login', {
+      const username = formData.get('username');
+      const password = formData.get('password');
+      let url = '/api/auth/patient/login';
+      let body = { username, password };
+      if (category === 'doctor') {
+        url = '/api/auth/doctor/login';
+        body = { doctor_id: username, password };
+      }
+
+      const response = await fetch(url, {
         method: 'POST',
-        // Instead of JSON, we can just send the FormData exactly as HTML did:
-        body: formData, 
-        credentials: 'include' // THIS SAVES THE SESSION COOKIE!
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       });
       const data = await response.json();
-      
-      if (data.success) {
-        if (category === 'patient') {
-          navigate('/patient/dashboard');
-        } else {
-          navigate('/doctor/dashboard');
-        }
+
+      // Expected backend TokenResponse: { access_token, token_type, user_id, role }
+      if (response.ok && data && data.access_token) {
+        const token = data.access_token;
+        const sess = { role: data.role || category, user_id: data.user_id || null };
+        try { localStorage.setItem('doctalk_token', token); localStorage.setItem('doctalk_session', JSON.stringify(sess)); } catch (e) {}
+        if (setSession) setSession({ ...sess, token });
+        if (data.role === 'patient' || category === 'patient') navigate('/patient/dashboard'); else navigate('/doctor/dashboard');
       } else {
-        setErrorMsg(data.error || 'Invalid credentials');
+        setErrorMsg(data.detail || data.error || 'Invalid credentials');
       }
     } catch (err) {
       setErrorMsg('Server connection error. Is the FastAPI backend running?');
@@ -41,20 +50,31 @@ export default function Login() {
     e.preventDefault();
     const formData = new FormData(e.target);
     formData.append('category', category);
-
     try {
-      const response = await fetch('/api/register', {
-        method: 'POST',
-        body: formData,
-      });
+      // Backend expects minimal fields for signup
+      let url = '/api/auth/patient/signup';
+      let body = {};
+      if (category === 'patient') {
+        body = { username: formData.get('username'), name: formData.get('name'), password: formData.get('password') };
+      } else {
+        url = '/api/auth/doctor/signup';
+        body = { doctor_id: formData.get('username'), name: formData.get('name'), password: formData.get('password') };
+      }
+
+      const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await response.json();
-      
-      if (data.success) {
+
+      if (response.ok && data && data.access_token) {
+        // Auto-login on successful signup
+        const token = data.access_token;
+        try { localStorage.setItem('doctalk_token', token); localStorage.setItem('doctalk_session', JSON.stringify({ role: data.role })); } catch (e) {}
+        if (setSession) setSession({ role: data.role, user_id: data.user_id, token });
         setView('login');
         setErrorMsg(null);
-        alert('Registration successful! Please login.');
+        alert('Registration successful! You are logged in.');
+        if (data.role === 'patient') navigate('/patient/dashboard'); else navigate('/doctor/dashboard');
       } else {
-        setErrorMsg(data.error || 'Registration failed');
+        setErrorMsg(data.detail || data.error || 'Registration failed');
       }
     } catch (err) {
       setErrorMsg('Server connection error.');
