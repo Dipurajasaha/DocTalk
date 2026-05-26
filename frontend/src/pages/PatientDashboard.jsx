@@ -1,11 +1,14 @@
 ﻿import { useState, useEffect, useRef } from 'react';
+import { useSession } from '../contexts/SessionContext';
 import { useNavigate } from 'react-router-dom';
+import { authApi, patientApi } from '../lib/api';
 import '../styles/patient.css'; // Uses your existing patient CSS
 import XrayAnalyzerPanel from '../components/XrayAnalyzerPanel';
 
 export default function PatientDashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
+  const { markExpired, logout } = useSession();
   const [messages, setMessages] = useState([]);
   const [inputMsg, setInputMsg] = useState('');
   const [language, setLanguage] = useState('en');
@@ -68,32 +71,37 @@ export default function PatientDashboard() {
       navigate('/login');
       return;
     }
-
-    fetch('/me', { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => {
-        if (!res.ok) throw new Error('unauth');
-        return res.json();
-      })
+    authApi.me(token)
       .then(data => {
+        if (!data) {
+          console.error('Session fetch returned empty/malformed payload');
+          try { markExpired(); } catch (e) {}
+          navigate('/login');
+          return;
+        }
         setUser(data);
-        loadChatHistory();
-        loadAppointments();
-        loadDoctors();
+        // Load dependent page data, but guard each to avoid uncaught rejections
+        try { loadChatHistory(); } catch (e) { console.error(e); }
+        try { loadAppointments(); } catch (e) { console.error(e); }
+        try { loadDoctors(); } catch (e) { console.error(e); }
       })
       .catch((err) => {
         console.error('Session fetch failed:', err);
+        try { markExpired(); } catch (e) {}
         navigate('/login');
       });
   }, [navigate]);
 
   const loadAssets = () => {
-        fetch('/api/v2/patient_assets', { credentials: 'include' })
-        .then(res => res.json())
-        .then(data => {
-            if(data.success) {
-                setAssets(data.assets || { folders: [], files: [] });
-            }
-        }).catch(e => console.error(e));
+    patientApi.listMedicalImages()
+    .then(data => {
+      // adapt response shape if backend uses list of assets
+      if(Array.isArray(data)) {
+        setAssets({ folders: [], files: data });
+      } else if (data.success && data.assets) {
+        setAssets(data.assets || { folders: [], files: [] });
+      }
+    }).catch(e => console.error(e));
     };
 
     useEffect(() => {
@@ -113,13 +121,9 @@ export default function PatientDashboard() {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('folder', currentFolder || '');
-
-        fetch('/api/v2/upload_asset', {
-            method: 'POST',
-            body: formData,
-            credentials: 'include'
-        })
-        .then(res => res.json())
+      // use medical images upload endpoint; include patient_id for backend
+      try { formData.append('patient_id', user?.user_id || ''); } catch (ex) {}
+        patientApi.uploadMedicalImage(formData)
         .then(data => {
             if(data.success) {
                 loadAssets();
@@ -196,24 +200,22 @@ export default function PatientDashboard() {
     };
 
     const loadAppointments = () => {
-
-    fetch('/api/my_appointments', { credentials: 'include' })
-      .then(res => res.json())
+    patientApi.listAppointments()
       .then(data => {
-        if(data.success) setAppointments(data.appointments || []);
-      });
+        if(Array.isArray(data)) setAppointments(data || []);
+        else if (data.success) setAppointments(data.appointments || []);
+      }).catch(e => console.error(e));
   };
 
   const loadDoctors = () => {
-    fetch('/api/doctors', { credentials: 'include' })
-      .then(res => res.json())
+    patientApi.listDoctors()
       .then(data => {
-        if(data.success) {
+        if(Array.isArray(data)) {
+          setDoctors(data || []);
+        } else if (data.success) {
           setDoctors(data.doctors || []);
-          // Doctors to chat with (extract from history or existing appointments optionally)
-          // For simplicity, we just list available doctor chats or let them select via Appointment list
         }
-      });
+      }).catch(e => console.error(e));
   };
 
   const loadDocChat = async (docId) => {
@@ -275,17 +277,21 @@ export default function PatientDashboard() {
 
   // 2. Load Chat History
   const loadChatHistory = () => {
-    fetch('/api/chat_sessions', { credentials: 'include' })
-      .then(res => res.json())
+    patientApi.listConsultations()
       .then(data => {
-        if (data.success && data.sessions) {
+        if (Array.isArray(data)) {
+          // pick first consultation and load messages if present
+          const first = data[0];
+          setMessages(first?.messages || []);
+        } else if (data.success && data.sessions) {
+          const sessions = data.sessions || [];
           const isErrorText = (text = '') => /conversation error|chat service error|llm call failed|api quota exceeded/i.test(String(text));
-          const activeSession = (data.sessions || []).find(session =>
+          const activeSession = sessions.find(session =>
             (session?.messages || []).some(msg => msg?.sender === 'model' && !isErrorText(msg?.text))
-          ) || data.sessions[0];
-          setMessages(activeSession?.messages || []); // Load the newest non-error chat session
+          ) || sessions[0];
+          setMessages(activeSession?.messages || []);
         }
-      });
+      }).catch(e => console.error(e));
   };
 
   // Scroll to bottom when messages change
@@ -486,7 +492,12 @@ export default function PatientDashboard() {
 
   // 5. Handle Logout
   const handleLogout = async () => {
-    await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+    try {
+      await logout();
+    } catch (e) {
+      // fallback: clear storage and redirect
+      try { localStorage.removeItem('doctalk_token'); localStorage.removeItem('doctalk_session'); } catch (e) {}
+    }
     navigate('/login');
   };
 

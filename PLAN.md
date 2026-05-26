@@ -32,7 +32,7 @@ The goal is:
   - Manual: register + login as patient and doctor; verify redirects and protected route access.
   - Automated: add a small integration test that fetches `/api/patient_session` before/after login.
 
-[Todo Next] [frontend] stage 2: ***RBAC & session UX flow***
+[Completed] [frontend] stage 2: ***RBAC & session UX flow***
 
 - objective: Enforce role-based navigation and client-side flows (menu, visibility, route guards) and handle expired sessions gracefully.
 - features:
@@ -53,7 +53,7 @@ The goal is:
   - Manual: attempt to access doctor routes as patient and confirm redirect/403 handling.
   - Unit: session provider tests for correct state transitions.
 
-[Incomplete] [frontend] stage 3: ***API surface mapping & lightweight client SDK***
+[Completed] [frontend] stage 3: ***API surface mapping & lightweight client SDK***
 
 - objective: Create a minimal client-side API layer to centralize calls, error handling, and consistent headers/credentials.
 - features:
@@ -74,7 +74,7 @@ The goal is:
   - Smoke test all refactored pages to ensure parity with previous behavior.
   - Add a small mock-based test for `apiClient` error and retry logic.
 
-[Incomplete] [frontend] stage 4: ***Patient dashboard MVP (core flows)***
+[Todo Next] [frontend] stage 4: ***Patient dashboard MVP (core flows)***
 
 - objective: Deliver a stable, testable patient dashboard with appointment listing, file uploads, and basic chat entry points.
 - features:

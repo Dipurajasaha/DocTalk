@@ -62,6 +62,7 @@ DocTalk is a healthcare platform implemented as a Python FastAPI backend plus a 
 - `frontend/src/index.css` — global styles
 - `frontend/src/pages/` — page-level routes and views
 - `frontend/src/components/` — UI components
+- `frontend/src/lib/` — lightweight API client and endpoint helper wrappers
 - `frontend/src/styles/` — reusable style assets
 
 ### Frontend dependencies

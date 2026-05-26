@@ -1,6 +1,8 @@
 ﻿import { useState, useEffect } from 'react';
+import { useSession } from '../contexts/SessionContext';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { authApi, doctorApi } from '../lib/api';
 import '../styles/doctor.css';
 
 const timeSlots = [];
@@ -153,6 +155,7 @@ const CustomCalendar = ({ selectedDate, onDateSelect, dashboardData, slotsData }
 export default function DoctorDashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
+  const { markExpired, logout } = useSession();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [dashboardData, setDashboardData] = useState(null);
   const [manageSessionTab, setManageSessionTab] = useState('upcoming');
@@ -183,17 +186,19 @@ export default function DoctorDashboard() {
       navigate('/login');
       return;
     }
-
-    fetch('/me', { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => {
-        if (!res.ok) throw new Error('unauth');
-        return res.json();
-      })
+    authApi.me(token)
       .then(data => {
+        if (!data) {
+          console.error('Session fetch returned empty/malformed payload');
+          try { markExpired(); } catch (e) {}
+          navigate('/login');
+          return;
+        }
         setUser(data);
       })
       .catch((err) => {
         console.error('Session fetch failed:', err);
+        try { markExpired(); } catch (e) {}
         navigate('/login');
       });
   }, [navigate]);
@@ -201,9 +206,12 @@ export default function DoctorDashboard() {
   // 2. Fetch Dashboard Data
   useEffect(() => {
     if (user) {
-      fetch('/api/doctor_dashboard_data', { credentials: 'include' })
-        .then(res => res.json())
+      doctorApi.dashboardData()
         .then(data => {
+          if (!data) {
+            console.error('Doctor dashboard returned empty/malformed payload');
+            return;
+          }
           if (data.success) {
             setDashboardData(data);
             
@@ -222,6 +230,10 @@ export default function DoctorDashboard() {
                setActivePatient(plist[0].id);
             }
           }
+        })
+        .catch(err => {
+          console.error('Failed loading doctor dashboard:', err);
+          try { if (err && (err.status === 401 || err.status === 403)) markExpired(); } catch (e) {}
         });
     }
   }, [user, activeTab]);
@@ -331,7 +343,11 @@ export default function DoctorDashboard() {
 
   // 3. Handle Logout
   const handleLogout = async () => {
-    await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+    try {
+      await logout();
+    } catch (e) {
+      try { localStorage.removeItem('doctalk_token'); localStorage.removeItem('doctalk_session'); } catch (e) {}
+    }
     navigate('/login');
   };
 
