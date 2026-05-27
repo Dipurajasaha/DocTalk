@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from ...middleware.auth_middleware import CurrentUser, require_doctor
+from ...middleware.auth_middleware import CurrentUser, get_current_user, require_doctor
 from ...services.doctor_service import DoctorService
 from ...workflows.doctor_copilot_workflow import doctor_copilot_workflow
 from ..schemas import DoctorProfileResponse, DoctorProfileUpdate
@@ -54,7 +54,7 @@ async def update_my_profile(
 
 @router.get("/list", response_model=list[DoctorProfileResponse])
 async def list_doctors(
-    _: CurrentUser = Depends(require_doctor),
+    _: CurrentUser = Depends(get_current_user),
     specialization: str | None = Query(default=None),
     category: str | None = Query(default=None),
     doctor_service: DoctorService = Depends(get_doctor_service),

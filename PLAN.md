@@ -74,7 +74,7 @@ The goal is:
   - Smoke test all refactored pages to ensure parity with previous behavior.
   - Add a small mock-based test for `apiClient` error and retry logic.
 
-[Todo Next] [frontend] stage 4: ***Patient dashboard MVP (core flows)***
+[Completed] [frontend] stage 4: ***Patient dashboard MVP (core flows)***
 
 - objective: Deliver a stable, testable patient dashboard with appointment listing, file uploads, and basic chat entry points.
 - features:
@@ -96,7 +96,7 @@ The goal is:
   - Manual: upload/download/delete file cycle; create appointment request; basic chat message sends.
   - Basic end-to-end script that runs a happy-path scenario.
 
-[Incomplete] [frontend] stage 5: ***Doctor dashboard MVP (core flows)***
+[Todo Next] [frontend] stage 5: ***Doctor dashboard MVP (core flows)***
 
 - objective: Deliver a stable doctor dashboard: schedule view, patient queue, chat, and simple assistant panel.
 - features:

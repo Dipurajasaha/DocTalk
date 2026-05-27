@@ -10,10 +10,21 @@ export const authApi = {
 
 export const patientApi = {
   listAppointments: () => apiClient.get('/api/appointments', { retries: 1, auth: true }),
+  listMyAppointments: () => apiClient.get('/api/my_appointments', { retries: 1, auth: true }),
   listDoctors: () => apiClient.get('/api/doctor/list', { retries: 1, auth: true }),
+  createAppointment: (body) => apiClient.post('/api/appointments', body, { retries: 0, auth: true }),
+  cancelAppointment: (appointmentId) => apiClient.patch(`/api/appointments/${appointmentId}/cancel`, {}, { retries: 0, auth: true }),
   listMedicalImages: () => apiClient.get('/api/medical_images', { retries: 1, auth: true }),
   uploadMedicalImage: (formData) => apiClient.post('/api/medical_images/upload', formData, { retries: 0, auth: true }),
+  uploadAssetV2: (formData) => apiClient.post('/api/v2/upload_asset', formData, { retries: 0, auth: true }),
   listConsultations: () => apiClient.get('/api/chat/consultations', { retries: 1, auth: true }),
+  requestAppointment: (body) => apiClient.post('/api/appointment_request', body, { retries: 0, auth: true }),
+  getDoctorPatientChat: (docId) => apiClient.get(`/api/doctor_patient_chat?other=${encodeURIComponent(docId)}`, { retries: 1, auth: true }),
+  postDoctorPatientChat: (payload) => apiClient.post('/api/doctor_patient_chat', payload, { retries: 0, auth: true }),
+  // v2 asset ops (form-encoded)
+  createFolderV2: (name) => apiClient.post('/api/v2/create_folder', new URLSearchParams({ name }), { retries: 0, auth: true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }),
+  deleteAssetV2: (id, type) => apiClient.post('/api/v2/delete_asset', new URLSearchParams({ id, type }), { retries: 0, auth: true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }),
+  renameAssetV2: (id, old_name, new_name, type) => apiClient.post('/api/v2/rename_asset', new URLSearchParams({ id, old_name, new_name, type }), { retries: 0, auth: true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }),
 };
 
 export const doctorApi = {

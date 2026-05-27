@@ -45,6 +45,13 @@ export default function PatientDashboard() {
 
   const [doctors, setDoctors] = useState([]);
   const [appointments, setAppointments] = useState([]);
+  const [appointmentDraft, setAppointmentDraft] = useState({
+    doctor_id: '',
+    date: '',
+    time: '',
+    reason: 'General consultation',
+    note: '',
+  });
   
   // Patient-to-Doctor Chat System
   const [docChats, setDocChats] = useState([]); // List of doctors the patient has chatted with
@@ -113,6 +120,10 @@ export default function PatientDashboard() {
         loadAssets();
         setAnalysisCurrentFolder(null);
         }
+      if (activePanel === 'appointments') {
+        loadAppointments();
+        loadDoctors();
+      }
     }, [activePanel]);
 
     const handleUploadAssetV2 = (e) => {
@@ -123,89 +134,65 @@ export default function PatientDashboard() {
         formData.append('folder', currentFolder || '');
       // use medical images upload endpoint; include patient_id for backend
       try { formData.append('patient_id', user?.user_id || ''); } catch (ex) {}
-        patientApi.uploadMedicalImage(formData)
-        .then(data => {
-            if(data.success) {
-                loadAssets();
-            } else {
-                alert("Upload failed: " + data.error);
-            }
-        }).catch(err => console.error("Upload error", err));
+      // prefer the v2 upload if available, fallback to older endpoint
+      (patientApi.uploadAssetV2 ? patientApi.uploadAssetV2(formData) : patientApi.uploadMedicalImage(formData))
+      .then(data => {
+        if(data && data.success) {
+          loadAssets();
+        } else {
+          alert("Upload failed: " + (data && (data.error || data.detail)));
+        }
+      }).catch(err => { console.error("Upload error", err); alert('Upload failed: ' + (err?.message || 'unknown')) });
         e.target.value = null; 
     };
 
     const handleDeleteAssetV2 = (id, type) => {
-        if (!window.confirm("Are you sure you want to delete this " + type + "?")) return;
-        const formData = new URLSearchParams();
-        formData.append('id', id);
-        formData.append('type', type);
-
-        fetch('/api/v2/delete_asset', {
-            method: 'POST',
-            body: formData,
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-        })
-        .then(res => res.json())
-        .then(data => {
-            if(data.success) {
-                if (type === 'folder' && currentFolder === id) {
-                    setCurrentFolder(null);
-                }
-                loadAssets();
-            } else {
-                alert("Delete failed.");
-            }
-        }).catch(err => console.error("Delete error", err));
+      if (!window.confirm("Are you sure you want to delete this " + type + "?")) return;
+      patientApi.deleteAssetV2(id, type)
+      .then(data => {
+        if (data && data.success) {
+          if (type === 'folder' && currentFolder === id) setCurrentFolder(null);
+          loadAssets();
+        } else {
+          alert('Delete failed: ' + (data && (data.error || data.detail)));
+        }
+      }).catch(err => { console.error('Delete error', err); alert('Delete failed: ' + (err?.message || 'unknown')) });
     };
     
     const handleCreateFolder = () => {
-        const name = window.prompt("Enter new folder name:");
-        if (!name) return;
-        const formData = new URLSearchParams();
-        formData.append('name', name);
-        fetch('/api/v2/create_folder', {
-            method: 'POST',
-            body: formData,
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-        })
-        .then(res => res.json())
-        .then(data => {
-            if(data.success) loadAssets();
-            else alert("Failed to create folder");
-        });
+      const name = window.prompt("Enter new folder name:");
+      if (!name) return;
+      patientApi.createFolderV2(name)
+      .then(data => {
+        if (data && data.success) loadAssets();
+        else alert('Failed to create folder: ' + (data && (data.error || data.detail)));
+      }).catch(err => { console.error('Create folder error', err); alert('Failed to create folder: ' + (err?.message || 'unknown')) });
     };
 
     const handleRenameAsset = (id, oldName, type) => {
-        const newName = window.prompt("Enter new name for " + type + ":", type === 'folder' ? oldName : '');
-        if (!newName) return;
-        const formData = new URLSearchParams();
-        formData.append('id', id || oldName);
-        formData.append('old_name', oldName);
-        formData.append('new_name', newName);
-        formData.append('type', type);
-        
-        fetch('/api/v2/rename_asset', {
-            method: 'POST', body: formData, credentials: 'include',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-        })
-        .then(res => res.json())
-        .then(data => {
-            if(data.success) {
-                if (type === 'folder' && currentFolder === oldName) setCurrentFolder(newName);
-                loadAssets();
-            } else alert("Renaming failed");
-        });
+      const newName = window.prompt("Enter new name for " + type + ":", type === 'folder' ? oldName : '');
+      if (!newName) return;
+      patientApi.renameAssetV2(id || oldName, oldName, newName, type)
+      .then(data => {
+        if (data && data.success) {
+          if (type === 'folder' && currentFolder === oldName) setCurrentFolder(newName);
+          loadAssets();
+        } else {
+          alert('Renaming failed: ' + (data && (data.error || data.detail)));
+        }
+      }).catch(err => { console.error('Rename error', err); alert('Renaming failed: ' + (err?.message || 'unknown')) });
     };
 
-    const loadAppointments = () => {
-    patientApi.listAppointments()
-      .then(data => {
-        if(Array.isArray(data)) setAppointments(data || []);
-        else if (data.success) setAppointments(data.appointments || []);
-      }).catch(e => console.error(e));
-  };
+    const loadAppointments = async () => {
+      try {
+        // prefer /api/my_appointments if available
+        let data = null;
+        try { data = await patientApi.listMyAppointments(); } catch (e) { /* ignore and fallback */ }
+        if (!data) data = await patientApi.listAppointments();
+        if (Array.isArray(data)) setAppointments(data || []);
+        else if (data && data.success) setAppointments(data.appointments || []);
+      } catch (e) { console.error('Failed loading appointments', e); }
+    };
 
   const loadDoctors = () => {
     patientApi.listDoctors()
@@ -215,18 +202,26 @@ export default function PatientDashboard() {
         } else if (data.success) {
           setDoctors(data.doctors || []);
         }
-      }).catch(e => console.error(e));
+      }).catch(e => {
+        console.error('Failed loading doctors', e);
+        setDoctors([]);
+      });
   };
+
+  useEffect(() => {
+    if (!appointmentDraft.doctor_id && doctors.length > 0) {
+      setAppointmentDraft(prev => prev.doctor_id ? prev : { ...prev, doctor_id: String(doctors[0].doctor_id || doctors[0].id || '') });
+    }
+  }, [doctors, appointmentDraft.doctor_id]);
 
   const loadDocChat = async (docId) => {
     try {
-      const res = await fetch('/api/doctor_patient_chat?other=' + encodeURIComponent(docId), { credentials: 'include' });
-      const data = await res.json();
-      if(data.success) {
+      const data = await patientApi.getDoctorPatientChat(docId);
+      if (data && data.success) {
         setDocMessages(data.messages || []);
         setDocChatDisabled(data.disabled || false);
       }
-    } catch(e) {}
+    } catch (e) { console.error('loadDocChat failed', e); }
   };
 
   useEffect(() => {
@@ -241,37 +236,65 @@ export default function PatientDashboard() {
     e.preventDefault();
     if(!docMsgInput.trim() || !activeDocChat) return;
     try {
-      await fetch('/api/doctor_patient_chat', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        credentials: 'include',
-        body: JSON.stringify({other: activeDocChat, text: docMsgInput})
-      });
+      await patientApi.postDoctorPatientChat({ other: activeDocChat, text: docMsgInput });
       setDocMsgInput('');
       loadDocChat(activeDocChat);
     } catch(e) {}
   };
 
-  const handleBookAppointment = async (docId) => {
-    const reason = prompt("Enter reason for appointment:");
-    if (!reason) return;
+  const handleSelectDoctorForAppointment = (docId) => {
+    setActivePanel('appointments');
+    setAppointmentDraft(prev => ({ ...prev, doctor_id: String(docId) }));
+  };
+
+  const handleCreateAppointment = async (e) => {
+    e.preventDefault();
+    if (!appointmentDraft.doctor_id || !appointmentDraft.date || !appointmentDraft.time || !appointmentDraft.reason.trim()) {
+      alert('Choose a doctor, date, time, and reason before booking.');
+      return;
+    }
 
     try {
-      const response = await fetch('/api/appointment_request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ doctor_id: docId, reason })
+      const data = await patientApi.createAppointment({
+        doctor_id: appointmentDraft.doctor_id,
+        date: appointmentDraft.date,
+        time: appointmentDraft.time,
+        reason: appointmentDraft.reason.trim(),
+        note: appointmentDraft.note.trim() || null,
       });
-      const data = await response.json();
-      if (data.success) {
-        alert("Appointment requested successfully!");
+
+      if (data && (data.id || data.success)) {
+        alert('Appointment requested successfully!');
+        setAppointmentDraft(prev => ({
+          ...prev,
+          date: '',
+          time: '',
+          reason: 'General consultation',
+          note: '',
+        }));
         loadAppointments();
       } else {
-        alert("Error requesting appointment: " + data.error);
+        alert('Error creating appointment: ' + (data && (data.error || data.detail)));
       }
-    } catch(err) {
-      alert("Error requesting appointment.");
+    } catch (err) {
+      console.error('create appointment failed', err);
+      alert('Error creating appointment: ' + (err?.message || 'server error'));
+    }
+  };
+
+  const handleCancelAppointment = async (appointmentId) => {
+    if (!window.confirm('Cancel this appointment?')) return;
+
+    try {
+      const data = await patientApi.cancelAppointment(appointmentId);
+      if (data && (data.success || data.message)) {
+        loadAppointments();
+      } else {
+        alert('Error cancelling appointment: ' + (data && (data.error || data.detail)));
+      }
+    } catch (err) {
+      console.error('cancel appointment failed', err);
+      alert('Error cancelling appointment: ' + (err?.message || 'server error'));
     }
   };
 
@@ -950,12 +973,17 @@ export default function PatientDashboard() {
                           <div>
                             <strong style={{ fontSize: '11px', color: '#1E293B' }}>Dr. {appt.doctor_display}</strong>
                             <div style={{ fontSize: '11px', color: '#64748B', marginTop: '6px' }}>Reason: {appt.reason}</div>
-                            {appt.status === 'scheduled' && <div style={{ fontSize: '11px', color: '#8B7EFF', marginTop: '4px', fontWeight: '500' }}>Time: {new Date(appt.scheduled_time).toLocaleString()}</div>}
+                            {appt.status === 'scheduled' && appt.scheduled_time && <div style={{ fontSize: '11px', color: '#8B7EFF', marginTop: '4px', fontWeight: '500' }}>Time: {new Date(appt.scheduled_time).toLocaleString()}</div>}
                           </div>
-                          <div>
-                            <span style={{ display: 'inline-block', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '700', background: appt.status === 'pending' ? '#FEF3C7' : '#DCFCE7', color: appt.status === 'pending' ? '#D97706' : '#166534' }}>
-                               {appt.status.toUpperCase()}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <span style={{ display: 'inline-block', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '700', background: appt.status === 'pending' ? '#FEF3C7' : appt.status === 'scheduled' ? '#DCFCE7' : '#E2E8F0', color: appt.status === 'pending' ? '#D97706' : appt.status === 'scheduled' ? '#166534' : '#475569' }}>
+                               {String(appt.status || '').toUpperCase()}
                             </span>
+                            {appt.status !== 'cancelled' && appt.status !== 'completed' && appt.status !== 'declined' && (
+                              <button type="button" onClick={() => handleCancelAppointment(appt.id)} style={{ padding: '8px 14px', borderRadius: '50px', border: '1px solid #FCA5A5', background: '#FFF1F2', color: '#BE123C', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>
+                                Cancel
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -965,15 +993,52 @@ export default function PatientDashboard() {
 
                <div style={{ flex: 1 }}>
                   <h3 style={{ fontSize: '11px', marginBottom: '24px', color: '#475569', borderBottom: '2px solid #F1F5F9', paddingBottom: '12px' }}>Book New Appointment</h3>
+                  <form onSubmit={handleCreateAppointment} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', padding: '20px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '16px', marginBottom: '24px' }}>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569' }}>
+                      Doctor
+                      <select value={appointmentDraft.doctor_id} onChange={e => setAppointmentDraft(prev => ({ ...prev, doctor_id: e.target.value }))} style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF' }}>
+                        <option value="">Select a doctor</option>
+                        {doctors.map(doc => {
+                          const doctorId = doc.doctor_id || doc.id;
+                          return <option key={doctorId} value={doctorId}>Dr. {doc.name} {doc.category ? `- ${doc.category}` : ''}</option>;
+                        })}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569' }}>
+                      Date
+                      <input type="date" value={appointmentDraft.date} onChange={e => setAppointmentDraft(prev => ({ ...prev, date: e.target.value }))} style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF' }} />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569' }}>
+                      Time
+                      <input type="time" value={appointmentDraft.time} onChange={e => setAppointmentDraft(prev => ({ ...prev, time: e.target.value }))} style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF' }} />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569' }}>
+                      Reason
+                      <input type="text" value={appointmentDraft.reason} onChange={e => setAppointmentDraft(prev => ({ ...prev, reason: e.target.value }))} placeholder="General consultation" style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF' }} />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569', gridColumn: '1 / -1' }}>
+                      Note
+                      <textarea value={appointmentDraft.note} onChange={e => setAppointmentDraft(prev => ({ ...prev, note: e.target.value }))} placeholder="Optional note for the doctor" rows="3" style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF', resize: 'vertical' }} />
+                    </label>
+                    <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
+                      <button type="submit" style={{ padding: '12px 18px', borderRadius: '999px', border: 'none', background: '#8B7EFF', color: '#FFF', fontSize: '11px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 8px 18px rgba(139,126,255,0.28)' }}>
+                        Create Appointment
+                      </button>
+                    </div>
+                  </form>
+
                   <div className="doctor-profile-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '20px' }}>
-                    {doctors.map(doc => (
-                      <div key={doc.id} style={{ padding: '24px', border: '1px solid #E2E8F0', borderRadius: '16px', background: '#F8FAFC', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', transition: 'all 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.05)'} onMouseLeave={(e) => e.currentTarget.style.boxShadow='none'}>
+                    {doctors.map(doc => {
+                      const doctorId = String(doc.doctor_id || doc.id || '');
+                      return (
+                      <div key={doctorId} style={{ padding: '24px', border: '1px solid #E2E8F0', borderRadius: '16px', background: appointmentDraft.doctor_id === doctorId ? '#F3F0FF' : '#F8FAFC', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', transition: 'all 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.05)'} onMouseLeave={(e) => e.currentTarget.style.boxShadow='none'}>
                         <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: '#E2E8F0', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}></div>
                         <div style={{ fontWeight: '700', fontSize: '11px', color: '#1E293B' }}>Dr. {doc.name}</div>
                         <div style={{ fontSize: '11px', color: '#64748B', marginBottom: '20px' }}>{doc.category}</div>
-                        <button onClick={() => handleBookAppointment(doc.id)} style={{ width: '100%', background: '#8B7EFF', color: '#fff', border: 'none', padding: '12px 16px', borderRadius: '50px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>Book Slot</button>
+                        <button onClick={() => handleSelectDoctorForAppointment(doctorId)} style={{ width: '100%', background: appointmentDraft.doctor_id === doctorId ? '#6C5CE7' : '#8B7EFF', color: '#fff', border: 'none', padding: '12px 16px', borderRadius: '50px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>Select Doctor</button>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                </div>
             </div>
