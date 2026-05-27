@@ -28,17 +28,14 @@ export const patientApi = {
   cancelAppointment: (appointmentId) => apiClient.patch(`/api/appointments/${appointmentId}/cancel`, {}, { retries: 0, auth: true }),
   listMedicalImages: () => apiClient.get('/api/medical_images', { retries: 1, auth: true }),
   uploadMedicalImage: (formData) => apiClient.post('/api/medical_images/upload', formData, { retries: 0, auth: true }),
-  uploadAssetV2: (formData) => apiClient.post('/api/v2/upload_asset', formData, { retries: 0, auth: true }),
+  deleteMedicalImage: (medicalImageId) => apiClient.delete(`/api/medical_images/${encodeURIComponent(medicalImageId)}`, { retries: 0, auth: true }),
+  renameMedicalImage: (medicalImageId, newName) => apiClient.patch(`/api/medical_images/${encodeURIComponent(medicalImageId)}`, { new_name: newName }, { retries: 0, auth: true }),
   listConsultations: () => apiClient.get('/api/chat/consultations', { retries: 1, auth: true }),
   getConsultation: (consultationId) => apiClient.get(`/api/chat/consultations/${encodeURIComponent(consultationId)}`, { retries: 1, auth: true }),
   getConsultationMessages: (consultationId, page = 1, limit = 20) => apiClient.get(`/api/chat/consultations/${encodeURIComponent(consultationId)}/messages?page=${page}&limit=${limit}`, { retries: 1, auth: true }),
   postConsultationMessage: (consultationId, message) => apiClient.post(`/api/chat/consultations/${encodeURIComponent(consultationId)}/messages`, { message }, { retries: 0, auth: true }),
   createConsultation: (appointmentId) => apiClient.post('/api/chat/consultations', { appointment_id: appointmentId }, { retries: 0, auth: true }),
   requestAppointment: (body) => apiClient.post('/api/appointment_request', body, { retries: 0, auth: true }),
-  // v2 asset ops (form-encoded)
-  createFolderV2: (name) => apiClient.post('/api/v2/create_folder', new URLSearchParams({ name }), { retries: 0, auth: true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }),
-  deleteAssetV2: (id, type) => apiClient.post('/api/v2/delete_asset', new URLSearchParams({ id, type }), { retries: 0, auth: true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }),
-  renameAssetV2: (id, old_name, new_name, type) => apiClient.post('/api/v2/rename_asset', new URLSearchParams({ id, old_name, new_name, type }), { retries: 0, auth: true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }),
 };
 
 export const doctorApi = {

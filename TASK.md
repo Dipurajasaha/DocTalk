@@ -89,7 +89,25 @@ frontend/src/api/
 
 ## Next expected action
 
-- [Todo Next] Stage 7: Medical uploads, viewers & privacy controls — implement secure preview components, upload progress, and folder/asset management UI.
+- Completed: [frontend] stage 7: Medical uploads, viewers & privacy controls — implemented secure preview components, upload progress, client-side validation, and folder/asset management UI hooks.
+
+## Changed files (recent)
+
+- frontend/src/pages/PatientDashboard.jsx (added upload progress, XHR uploads, preview modal integration)
+- frontend/src/lib/api.js (added listAssetsV2 and getFilePresign helpers)
+- frontend/src/components/FileViewer.jsx (new: secure preview component for images and PDFs)
+- backend/services/file_service.py (added medical image rename support)
+- backend/api/medical_images/router.py (added PATCH rename route)
+- frontend/src/lib/api.js (updated to use backend medical image delete/rename endpoints)
+- frontend/src/pages/PatientDashboard.jsx (updated file name mapping, delete/rename wiring)
+
+## Blockers
+
+- Backend must expose `/api/v2/upload_asset`, list endpoints (`/api/v2/patient_assets` or `/api/v2/list_assets`) and optional `/api/v2/file_url` for presigned URLs. If not available, View will open the backend-provided `url` property.
+
+## Next expected action
+
+- [Todo Next] Stage 8: Reports & prescriptions viewer and record linking — implement dedicated viewers, metadata pages, and attach-to-consultation flows.
 
 ## Blockers
 

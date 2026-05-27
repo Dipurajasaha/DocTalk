@@ -69,3 +69,16 @@ async def delete_medical_image(
 ) -> OperationResponse:
     await medical_image_service.delete_asset(current_user.user_id, current_user.role, medical_image_id)
     return OperationResponse(message="Medical image deleted")
+
+
+@router.patch("/{medical_image_id}", response_model=MedicalAssetResponse)
+async def rename_medical_image(
+    medical_image_id: str,
+    payload: dict[str, str],
+    current_user: CurrentUser = Depends(get_current_user),
+    medical_image_service: MedicalImageService = Depends(get_medical_image_service),
+) -> MedicalAssetResponse:
+    new_name = payload.get("new_name", "").strip()
+    return MedicalAssetResponse.model_validate(
+        await medical_image_service.rename_asset(current_user.user_id, current_user.role, medical_image_id, new_name)
+    )

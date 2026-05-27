@@ -124,6 +124,17 @@ class MedicalFileService:
             # If path resolution fails, we already removed the DB record — just log and continue.
             raise
 
+    async def rename_asset(self, user_id: str, role: AuthRole, asset_id: str, new_name: str) -> dict[str, Any]:
+        record = await self._load_record(asset_id)
+        self._assert_access(record, user_id, role)
+        normalized_name = self._normalize_identifier(new_name, "new_name")
+        updated = await self.model.update(
+            where={"id": asset_id},
+            data={"originalName": normalized_name},
+            include={"consultation": True},
+        )
+        return self._serialize_record(updated)
+
     async def _resolve_upload_context(
         self,
         user_id: str,

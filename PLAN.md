@@ -137,7 +137,7 @@ The goal is:
   - Manual: long-history consultation loads; upload image and confirm server-side metadata appears.
   - Performance check: lazy-load older messages and verify render performance.
 
-[`Todo Next`] [frontend] stage 7: ***Medical uploads, viewers & privacy controls***
+[Completed] [frontend] stage 7: ***Medical uploads, viewers & privacy controls***
 
 - objective: Harden file upload, preview, and secure access patterns to match backend ownership checks and storage.
 - features:
@@ -158,7 +158,7 @@ The goal is:
   - Manual: upload a variety of files; preview in-browser; verify access denied for other users.
   - Security: attempt file access without credentials and confirm 401/403 responses.
 
-[Incomplete] [frontend] stage 8: ***Reports & prescriptions viewer and record linking***
+[Todo Next] [frontend] stage 8: ***Reports & prescriptions viewer and record linking***
 
 - objective: Provide dedicated viewers for reports and prescriptions and link them to consultations and copilot summaries.
 - features:
