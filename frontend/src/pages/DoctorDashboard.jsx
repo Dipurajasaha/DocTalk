@@ -155,7 +155,7 @@ const CustomCalendar = ({ selectedDate, onDateSelect, dashboardData, slotsData }
 export default function DoctorDashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
-  const { markExpired, logout } = useSession();
+  const { markExpired, logout, session } = useSession();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [dashboardData, setDashboardData] = useState(null);
   const [manageSessionTab, setManageSessionTab] = useState('upcoming');
@@ -181,6 +181,12 @@ export default function DoctorDashboard() {
 
   // 1. Fetch Doctor Session on Mount
   useEffect(() => {
+    // Prefer session from central provider when available
+    if (session) {
+      setUser(session);
+      return;
+    }
+
     const token = localStorage.getItem('doctalk_token');
     if (!token) {
       navigate('/login');
@@ -201,7 +207,7 @@ export default function DoctorDashboard() {
         try { markExpired(); } catch (e) {}
         navigate('/login');
       });
-  }, [navigate]);
+  }, [navigate, session]);
 
   // 2. Fetch Dashboard Data
   useEffect(() => {

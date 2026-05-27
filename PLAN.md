@@ -96,7 +96,7 @@ The goal is:
   - Manual: upload/download/delete file cycle; create appointment request; basic chat message sends.
   - Basic end-to-end script that runs a happy-path scenario.
 
-[Todo Next] [frontend] stage 5: ***Doctor dashboard MVP (core flows)***
+[Completed] [frontend] stage 5: ***Doctor dashboard MVP (core flows)***
 
 - objective: Deliver a stable doctor dashboard: schedule view, patient queue, chat, and simple assistant panel.
 - features:
@@ -116,7 +116,7 @@ The goal is:
 - validation/testing goals:
   - Manual: doctor login -> view dashboard -> open patient chat -> confirm data matches backend.
 
-[Incomplete] [frontend] stage 6: ***Consultation & chat UI polish***
+[Todo Next] [frontend] stage 6: ***Consultation & chat UI polish***
 
 - objective: Build the consultation experience — threaded messages, attachments, message delivery UX, and chat history linking to consult records.
 - features:

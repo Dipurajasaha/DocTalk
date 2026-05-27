@@ -27,6 +27,7 @@ frontend/src/api/
 - Completed: [frontend] stage 2: RBAC & session UX flow.
 - Completed: [frontend] stage 3: API surface mapping & lightweight client SDK.
  - Completed: [frontend] stage 4: Patient dashboard MVP (core flows).
+ - Todo: [frontend] stage 5: Doctor dashboard MVP (core flows).
 - Changed files:
 	- frontend/src/main.jsx
 	- frontend/src/App.jsx
@@ -40,6 +41,8 @@ frontend/src/api/
 	- frontend/src/pages/PatientDashboard.jsx (updated: v2 asset ops, appointment booking, chat wrappers)
 	- PLAN.md (stage status updates)
 	- TASK.md (this file)
+
+	Note: Doctor dashboard UI exists but session/session-endpoint mismatches can leave it blank; updated `authApi.me` to probe common session endpoints. Stage 5 remains Todo until QA.
 
 ## Recent Fixes (post-validation)
 
@@ -63,13 +66,18 @@ frontend/src/api/
 
 ## Next expected action
 
-- Implement [frontend] stage 5: Doctor dashboard MVP (core flows) — calendar, patient queue, chat, and assistant panel.
+- Implement [frontend] stage 6: Consultation & chat UI polish — threaded messages, attachments, message delivery UX, and chat history linking to consult records.
 
 ## Blockers
 
 - Backend must be running and reachable at the same origin (or CORS configured). Session bootstrap and `/me` verification require the backend to be available.
 - Some legacy frontend endpoints still exist in page-level flows and may 404 until mapped in stage 4+ (for example legacy doctor/patient chat and old asset folder operations).
 
+## Blockers
+
+- Backend must be running and reachable at the same origin (or CORS configured). Session bootstrap and `/me` verification require the backend to be available.
+- Long chat histories and attachment previewing depend on backend endpoints for paginated retrieval and secure file links.
+
 ## Next expected action
 
-- Implement [frontend] stage 4: Patient dashboard MVP (core flows) — complete appointment list/booking, document upload/list/delete flows, and stable patient chat entry points using current backend contracts.
+- Implement [frontend] stage 6: Consultation & chat UI polish — threaded messages, attachments, message delivery UX, and chat history linking to consult records.

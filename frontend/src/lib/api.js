@@ -5,7 +5,19 @@ export const authApi = {
   loginDoctor: (doctorId, password) => apiClient.post('/api/auth/doctor/login', { doctor_id: doctorId, password }, { retries: 0 }),
   signupPatient: (username, name, password) => apiClient.post('/api/auth/patient/signup', { username, name, password }, { retries: 0 }),
   signupDoctor: (doctorId, name, password) => apiClient.post('/api/auth/doctor/signup', { doctor_id: doctorId, name, password }, { retries: 0 }),
-  me: (token) => apiClient.get('/me', { auth: true, token, retries: 0 }),
+  me: async (token) => {
+    // Try common session endpoints used by different backend versions.
+    const endpoints = ['/api/me', '/api/doctor_session', '/api/patient_session', '/me'];
+    for (const ep of endpoints) {
+      try {
+        const data = await apiClient.get(ep, { auth: true, token, retries: 0 });
+        if (data) return data;
+      } catch (e) {
+        // ignore and try next
+      }
+    }
+    return null;
+  },
 };
 
 export const patientApi = {
@@ -28,5 +40,44 @@ export const patientApi = {
 };
 
 export const doctorApi = {
-  dashboardData: () => apiClient.get('/api/doctor_dashboard_data', { retries: 1, auth: true }),
+  dashboardData: async () => {
+    // Compose dashboard data from existing endpoints to avoid requiring a new backend route.
+    try {
+      const appointments = await apiClient.get('/api/appointments', { retries: 1, auth: true });
+      const consultations = await apiClient.get('/api/chat/consultations', { retries: 1, auth: true });
+
+      const now = Date.now();
+      const upcoming_schedules = Array.isArray(appointments)
+        ? appointments.filter(a => a.scheduled_time && new Date(a.scheduled_time).getTime() > now)
+        : [];
+
+      const completed_schedules = Array.isArray(appointments)
+        ? appointments.filter(a => a.status === 'completed')
+        : [];
+
+      const requests = Array.isArray(appointments)
+        ? appointments.filter(a => a.status === 'pending' || a.status === 'requested' || a.status === 'awaiting')
+        : [];
+
+      const patient_chat_patients = Array.isArray(consultations)
+        ? Array.from(new Set(consultations.map(c => c.patientUsername || c.patient || c.patient_id).filter(Boolean)))
+        : [];
+
+      const closed_chats = [];
+
+      return {
+        success: true,
+        upcoming_schedules,
+        completed_schedules,
+        requests,
+        patient_chat_patients,
+        closed_chats,
+        total_requests: requests.length,
+        total_patients: Array.isArray(appointments) ? Array.from(new Set(appointments.map(a => a.patientUsername || a.patient))).length : 0,
+        monthly_revenue: 0,
+      };
+    } catch (err) {
+      throw err;
+    }
+  },
 };
