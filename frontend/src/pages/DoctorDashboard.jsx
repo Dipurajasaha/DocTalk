@@ -1,8 +1,8 @@
-﻿import { useState, useEffect } from 'react';
+﻿import { useState, useEffect, useRef } from 'react';
 import { useSession } from '../contexts/SessionContext';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { authApi, doctorApi } from '../lib/api';
+import { authApi, doctorApi, patientApi } from '../lib/api';
 import '../styles/doctor.css';
 
 const timeSlots = [];
@@ -171,9 +171,14 @@ export default function DoctorDashboard() {
   // Patient Chat States
   const [patientChatList, setPatientChatList] = useState([]);
   const [activePatient, setActivePatient] = useState(null);
+  const [consultations, setConsultations] = useState([]);
+  const [patientMessagePage, setPatientMessagePage] = useState(1);
   const [patientMessages, setPatientMessages] = useState([]);
   const [patientMsgInput, setPatientMsgInput] = useState('');
+  const [patientInputFocused, setPatientInputFocused] = useState(false);
   const [chatDisabled, setChatDisabled] = useState(false);
+  const patientChatEndRef = useRef(null);
+  const patientAutoScrollRef = useRef(false);
 
   // Assistant Chat States
   const [assistantMessages, setAssistantMessages] = useState([]);
@@ -212,6 +217,9 @@ export default function DoctorDashboard() {
   // 2. Fetch Dashboard Data
   useEffect(() => {
     if (user) {
+      patientApi.listConsultations()
+        .then(data => setConsultations(Array.isArray(data) ? data : []))
+        .catch(err => console.error('Failed loading doctor consultations:', err));
       doctorApi.dashboardData()
         .then(data => {
           if (!data) {
@@ -244,40 +252,89 @@ export default function DoctorDashboard() {
     }
   }, [user, activeTab]);
 
+  const normalizeChatMessage = (item) => ({
+    id: item?.id,
+    sender: item?.sender_role || item?.senderRole || item?.sender || '',
+    text: item?.message ?? item?.text ?? '',
+    timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
+  });
+
+  const resolveConsultationForPatient = (patientId) => {
+    const matchId = String(patientId || '');
+    return consultations.find((item) => String(item.patient_id || item.patientId || item.patientUsername || '') === matchId) || null;
+  };
+
+  const resolveAppointmentForPatient = (patientId) => {
+    const matchId = String(patientId || '');
+    const candidates = (dashboardData?.upcoming_schedules || []).filter((item) => String(item.patient || item.patient_id || item.patientUsername || '') === matchId)
+      .concat((dashboardData?.requests || []).filter((item) => String(item.patient || item.patient_id || item.patientUsername || '') === matchId));
+    return candidates[0] || null;
+  };
+
+  const ensureConsultationForPatient = async (patientId) => {
+    const existing = resolveConsultationForPatient(patientId);
+    if (existing?.id) return existing.id;
+
+    const appointment = resolveAppointmentForPatient(patientId);
+    if (!appointment?.appointment_id && !appointment?.id) return null;
+
+    const created = await patientApi.createConsultation(appointment.appointment_id || appointment.id);
+    return created?.id || created?.consultation_id || created?.consultationId || null;
+  };
+
   // Handle Loading Patient Chat
   useEffect(() => {
     if(activeTab === 'patientchats' && activePatient) {
-       loadPatientChat(activePatient);
-       const interval = setInterval(() => loadPatientChat(activePatient), 5000);
-       return () => clearInterval(interval);
+       let mounted = true;
+       let intervalId = null;
+       (async () => {
+         const consultationId = await ensureConsultationForPatient(activePatient);
+         if (!mounted) return;
+         if (consultationId) {
+           await loadPatientChat(consultationId, 1);
+           intervalId = setInterval(() => loadPatientChat(consultationId, 1), 5000);
+         }
+       })();
+       return () => {
+         mounted = false;
+         if (intervalId) clearInterval(intervalId);
+       };
     }
-  }, [activeTab, activePatient]);
+  }, [activeTab, activePatient, consultations]);
 
-  const loadPatientChat = async (patientId) => {
+  const loadPatientChat = async (consultationId, page = 1) => {
     try {
-      const res = await fetch('/api/doctor_patient_chat?other=' + encodeURIComponent(patientId), { credentials: 'include' });
-      const data = await res.json();
-      if(data.success) {
-        setPatientMessages(data.messages || []);
-        setChatDisabled(data.disabled || false);
+      if (!consultationId) {
+        setPatientMessages([]);
+        return;
       }
+      patientAutoScrollRef.current = true;
+      const data = await patientApi.getConsultationMessages(consultationId, page, 20);
+      const items = Array.isArray(data) ? data : (data.items || []);
+      setPatientMessages(items.map(normalizeChatMessage));
+      setPatientMessagePage(page);
+      setChatDisabled(false);
     } catch (err) { console.error(err); }
   };
 
   const handlePatientChatSubmit = async (e) => {
     e.preventDefault();
-    if(!patientMsgInput.trim() || !activePatient) return;
+    const consultationId = await ensureConsultationForPatient(activePatient);
+    if(!patientMsgInput.trim() || !consultationId) return;
     try {
-      await fetch('/api/doctor_patient_chat', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        credentials: 'include',
-        body: JSON.stringify({other: activePatient, text: patientMsgInput})
-      });
+      await patientApi.postConsultationMessage(consultationId, patientMsgInput);
+      patientAutoScrollRef.current = true;
       setPatientMsgInput('');
-      loadPatientChat(activePatient);
+      loadPatientChat(consultationId, patientMessagePage);
     } catch(err) { console.error(err); }
   };
+
+  useEffect(() => {
+    if (patientAutoScrollRef.current) {
+      patientChatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      patientAutoScrollRef.current = false;
+    }
+  }, [patientMessages]);
 
   // Assistant Chat Logic
   useEffect(() => {
@@ -792,25 +849,31 @@ export default function DoctorDashboard() {
             <div style={{ padding: '20px', borderBottom: '1px solid #f0f0f0', fontWeight: '700', color: '#8B7EFF', fontSize: '16px' }}>
               Chat with {activePatient || '...'}
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '15px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {patientMessages.slice().reverse().map((m, i) => (
-                <div key={i} style={{ 
-                  alignSelf: m.sender === 'doctor' ? 'flex-end' : 'flex-start',
-                  background: m.sender === 'doctor' ? '#8B7EFF' : '#f8f9fa',
-                  color: m.sender === 'doctor' ? '#fff' : '#333',
-                  padding: '10px 14px', borderRadius: '14px', maxWidth: '70%', fontSize: '14px'
-                }}>
-                  {m.text}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {patientMessages.map((m, i) => (
+                <div key={m.id || i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.sender === 'doctor' ? 'flex-end' : 'flex-start', gap: '3px' }}>
+                  <div style={{ 
+                    alignSelf: m.sender === 'doctor' ? 'flex-end' : 'flex-start',
+                    background: m.sender === 'doctor' ? '#8B7EFF' : '#FFFFFF',
+                    color: m.sender === 'doctor' ? '#fff' : '#1E293B',
+                    padding: '14px 16px', borderRadius: m.sender === 'doctor' ? '18px 18px 4px 18px' : '18px 18px 18px 4px', maxWidth: '72%', fontSize: '14px', lineHeight: '1.55', fontWeight: '500', border: m.sender === 'doctor' ? '1px solid rgba(139,126,255,0.18)' : '1px solid #E2E8F0', boxShadow: '0 2px 8px rgba(15,23,42,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word'
+                  }}>
+                    {m.text}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#94A3B8' }}>{m.timestamp ? new Date(m.timestamp).toLocaleString() : ''}</div>
                 </div>
               ))}
+              <div ref={patientChatEndRef} />
             </div>
-            <form onSubmit={handlePatientChatSubmit} style={{ display: 'flex', padding: '15px', borderTop: '1px solid #eee', gap: '10px' }}>
+            <form onSubmit={handlePatientChatSubmit} style={{ display: 'flex', padding: '15px', borderTop: '1px solid #eee', gap: '10px', border: `1px solid ${patientInputFocused ? 'rgba(139,126,255,0.35)' : '#e2e8f0'}`, borderRadius: '50px', background: '#fff', boxShadow: patientInputFocused ? '0 0 0 3px rgba(139,126,255,0.12)' : 'none', transition: 'border-color 0.18s ease, box-shadow 0.18s ease' }}>
               <input 
                 type="text" 
                 value={patientMsgInput} onChange={e=>setPatientMsgInput(e.target.value)}
+                onFocus={() => setPatientInputFocused(true)}
+                onBlur={() => setPatientInputFocused(false)}
                 disabled={chatDisabled || !activePatient}
                 placeholder={chatDisabled ? 'Chat closed' : 'Type message...'}
-                style={{ flex: 1, padding: '12px 18px', border: '1px solid #e2e8f0', borderRadius: '50px', outline: 'none' }}
+                style={{ flex: 1, padding: '12px 18px', border: 'none', background: 'transparent', borderRadius: '50px', outline: 'none', fontSize: '14px', lineHeight: '1.5', color: '#0F172A', boxShadow: 'none', caretColor: '#8B7EFF' }}
               />
               <button disabled={chatDisabled || !activePatient} className="doc-btn doc-btn-primary" style={{ padding: '10px 24px', borderRadius: '50px', background: '#8B7EFF', color: '#fff', border: 'none', fontWeight: '600', cursor: 'pointer' }}>Send</button>
             </form>
@@ -963,6 +1026,3 @@ export default function DoctorDashboard() {
     </div>
   );
 }
-
-
-

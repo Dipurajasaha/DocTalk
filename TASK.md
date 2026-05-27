@@ -28,6 +28,7 @@ frontend/src/api/
 - Completed: [frontend] stage 3: API surface mapping & lightweight client SDK.
  - Completed: [frontend] stage 4: Patient dashboard MVP (core flows).
  - Todo: [frontend] stage 5: Doctor dashboard MVP (core flows).
+ - Completed: [frontend] stage 5: Doctor dashboard MVP (core flows).
 - Changed files:
 	- frontend/src/main.jsx
 	- frontend/src/App.jsx
@@ -41,6 +42,7 @@ frontend/src/api/
 	- frontend/src/pages/PatientDashboard.jsx (updated: v2 asset ops, appointment booking, chat wrappers)
 	- PLAN.md (stage status updates)
 	- TASK.md (this file)
+	- frontend/src/pages/PatientDashboard.jsx (updated: chat UI polish: attachments, threading, optimistic send)
 
 	Note: Doctor dashboard UI exists but session/session-endpoint mismatches can leave it blank; updated `authApi.me` to probe common session endpoints. Stage 5 remains Todo until QA.
 
@@ -66,7 +68,28 @@ frontend/src/api/
 
 ## Next expected action
 
-- Implement [frontend] stage 6: Consultation & chat UI polish — threaded messages, attachments, message delivery UX, and chat history linking to consult records.
+- Completed: [frontend] stage 6: Consultation & chat UI polish — threaded messages, attachments, message delivery UX, and chat history linking to consult records.
+
+## Current progress
+
+- Implemented consultation-based chat fixes in `frontend/src/pages/PatientDashboard.jsx` and `frontend/src/pages/DoctorDashboard.jsx`: doctor/patient selection now resolves to consultation IDs, messages load from `/api/chat/consultations/{id}/messages`, and sends post to the same backend thread.
+
+## Changed files
+
+- frontend/src/pages/PatientDashboard.jsx
+- frontend/src/pages/DoctorDashboard.jsx
+- frontend/src/lib/api.js
+- PLAN.md
+- TASK.md
+
+## Blockers
+
+- Backend must support chat attachment upload on `/api/doctor_patient_chat` (FormData handling) for attachment previews to persist.
+- Server-side support for `before` or cursor-based pagination on `/api/doctor_patient_chat` improves older-message loading; otherwise the load-older button will reload full history.
+
+## Next expected action
+
+- [Todo Next] Stage 7: Medical uploads, viewers & privacy controls — implement secure preview components, upload progress, and folder/asset management UI.
 
 ## Blockers
 

@@ -30,9 +30,11 @@ export const patientApi = {
   uploadMedicalImage: (formData) => apiClient.post('/api/medical_images/upload', formData, { retries: 0, auth: true }),
   uploadAssetV2: (formData) => apiClient.post('/api/v2/upload_asset', formData, { retries: 0, auth: true }),
   listConsultations: () => apiClient.get('/api/chat/consultations', { retries: 1, auth: true }),
+  getConsultation: (consultationId) => apiClient.get(`/api/chat/consultations/${encodeURIComponent(consultationId)}`, { retries: 1, auth: true }),
+  getConsultationMessages: (consultationId, page = 1, limit = 20) => apiClient.get(`/api/chat/consultations/${encodeURIComponent(consultationId)}/messages?page=${page}&limit=${limit}`, { retries: 1, auth: true }),
+  postConsultationMessage: (consultationId, message) => apiClient.post(`/api/chat/consultations/${encodeURIComponent(consultationId)}/messages`, { message }, { retries: 0, auth: true }),
+  createConsultation: (appointmentId) => apiClient.post('/api/chat/consultations', { appointment_id: appointmentId }, { retries: 0, auth: true }),
   requestAppointment: (body) => apiClient.post('/api/appointment_request', body, { retries: 0, auth: true }),
-  getDoctorPatientChat: (docId) => apiClient.get(`/api/doctor_patient_chat?other=${encodeURIComponent(docId)}`, { retries: 1, auth: true }),
-  postDoctorPatientChat: (payload) => apiClient.post('/api/doctor_patient_chat', payload, { retries: 0, auth: true }),
   // v2 asset ops (form-encoded)
   createFolderV2: (name) => apiClient.post('/api/v2/create_folder', new URLSearchParams({ name }), { retries: 0, auth: true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }),
   deleteAssetV2: (id, type) => apiClient.post('/api/v2/delete_asset', new URLSearchParams({ id, type }), { retries: 0, auth: true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }),

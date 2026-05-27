@@ -116,7 +116,7 @@ The goal is:
 - validation/testing goals:
   - Manual: doctor login -> view dashboard -> open patient chat -> confirm data matches backend.
 
-[Todo Next] [frontend] stage 6: ***Consultation & chat UI polish***
+[Completed] [frontend] stage 6: ***Consultation & chat UI polish***
 
 - objective: Build the consultation experience — threaded messages, attachments, message delivery UX, and chat history linking to consult records.
 - features:
@@ -137,7 +137,7 @@ The goal is:
   - Manual: long-history consultation loads; upload image and confirm server-side metadata appears.
   - Performance check: lazy-load older messages and verify render performance.
 
-[Incomplete] [frontend] stage 7: ***Medical uploads, viewers & privacy controls***
+[`Todo Next`] [frontend] stage 7: ***Medical uploads, viewers & privacy controls***
 
 - objective: Harden file upload, preview, and secure access patterns to match backend ownership checks and storage.
 - features:

@@ -42,6 +42,9 @@ export default function PatientDashboard() {
     };
  // 'explain' or 'prescription'
   const chatEndRef = useRef(null);
+  const docChatEndRef = useRef(null);
+  const docAutoScrollRef = useRef(false);
+  const [docInputFocused, setDocInputFocused] = useState(false);
 
   const [doctors, setDoctors] = useState([]);
   const [appointments, setAppointments] = useState([]);
@@ -56,7 +59,12 @@ export default function PatientDashboard() {
   // Patient-to-Doctor Chat System
   const [docChats, setDocChats] = useState([]); // List of doctors the patient has chatted with
   const [activeDocChat, setActiveDocChat] = useState(null);
+  const [consultations, setConsultations] = useState([]);
+  const [docMessagePage, setDocMessagePage] = useState(1);
   const [docMessages, setDocMessages] = useState([]);
+  const [docAttachmentFile, setDocAttachmentFile] = useState(null);
+  const [docSending, setDocSending] = useState(false);
+  const [activeConsultationId, setActiveConsultationId] = useState(null);
   const [docChatDisabled, setDocChatDisabled] = useState(false);
   const [docMsgInput, setDocMsgInput] = useState('');
   const [assets, setAssets] = useState({ folders: [], files: [] });
@@ -91,6 +99,7 @@ export default function PatientDashboard() {
         try { loadChatHistory(); } catch (e) { console.error(e); }
         try { loadAppointments(); } catch (e) { console.error(e); }
         try { loadDoctors(); } catch (e) { console.error(e); }
+        try { loadConsultations(); } catch (e) { console.error(e); }
       })
       .catch((err) => {
         console.error('Session fetch failed:', err);
@@ -208,39 +217,170 @@ export default function PatientDashboard() {
       });
   };
 
+  const normalizeChatMessage = (item) => ({
+    id: item?.id,
+    sender: item?.sender_role || item?.senderRole || item?.sender || '',
+    text: item?.message ?? item?.text ?? '',
+    timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
+  });
+
+  const loadConsultations = async () => {
+    try {
+      const data = await patientApi.listConsultations();
+      setConsultations(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error('Failed loading consultations', e);
+      setConsultations([]);
+    }
+  };
+
   useEffect(() => {
     if (!appointmentDraft.doctor_id && doctors.length > 0) {
       setAppointmentDraft(prev => prev.doctor_id ? prev : { ...prev, doctor_id: String(doctors[0].doctor_id || doctors[0].id || '') });
     }
   }, [doctors, appointmentDraft.doctor_id]);
 
-  const loadDocChat = async (docId) => {
+  const resolveConsultationForDoctor = (doctorId) => {
+    const matchId = String(doctorId || '');
+    return consultations.find((item) => String(item.doctor_id || item.doctorId || '') === matchId) || null;
+  };
+
+  const resolveAppointmentForDoctor = (doctorId) => {
+    const matchId = String(doctorId || '');
+    const candidates = appointments.filter((item) => String(item.doctor_id || item.doctorId || '') === matchId);
+    return candidates.sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0))[0] || null;
+  };
+
+  const getDoctorChatStatus = (doctorId) => {
+    const matchId = String(doctorId || '');
+    const scheduledAppointments = appointments
+      .filter((item) => String(item.doctor_id || item.doctorId || '') === matchId)
+      .filter((item) => item.status === 'scheduled' && item.scheduled_time);
+
+    if (scheduledAppointments.length === 0) {
+      return { label: 'No Active Consultation', color: '#94A3B8' };
+    }
+
+    const now = Date.now();
+    const liveAppointment = scheduledAppointments.find((item) => {
+      const scheduledAt = new Date(item.scheduled_time).getTime();
+      return now >= scheduledAt - 15 * 60 * 1000 && now <= scheduledAt + 30 * 60 * 1000;
+    });
+
+    if (liveAppointment) {
+      return { label: 'In Consultation', color: '#22C55E' };
+    }
+
+    return { label: 'Available for Consultation', color: '#0EA5E9' };
+  };
+
+  const ensureConsultationForDoctor = async (doctorId) => {
+    const existing = resolveConsultationForDoctor(doctorId);
+    if (existing?.id) return existing.id;
+
+    const appointment = resolveAppointmentForDoctor(doctorId);
+    if (!appointment?.id) return null;
+
+    const created = await patientApi.createConsultation(appointment.id);
+    const consultationId = created?.id || created?.consultation_id || created?.consultationId || null;
+    if (consultationId) {
+      setConsultations(prev => {
+        const next = prev.filter(item => String(item.id || '') !== String(consultationId));
+        return [...next, { id: consultationId, appointment_id: appointment.id, doctor_id: String(doctorId), patient_id: String(user?.user_id || '') }];
+      });
+    }
+    return consultationId;
+  };
+
+  const loadDocChat = async (consultationId, page = 1) => {
     try {
-      const data = await patientApi.getDoctorPatientChat(docId);
-      if (data && data.success) {
-        setDocMessages(data.messages || []);
-        setDocChatDisabled(data.disabled || false);
+      if (!consultationId) {
+        setDocMessages([]);
+        setActiveConsultationId(null);
+        return;
       }
+      docAutoScrollRef.current = true;
+      const data = await patientApi.getConsultationMessages(consultationId, page, 20);
+      const items = Array.isArray(data) ? data : (data.items || []);
+      setDocMessages(items.map(normalizeChatMessage));
+      setActiveConsultationId(consultationId);
+      setDocMessagePage(page);
+      setDocChatDisabled(false);
     } catch (e) { console.error('loadDocChat failed', e); }
   };
 
   useEffect(() => {
-    if(activePanel === 'docchat' && activeDocChat) {
-      loadDocChat(activeDocChat);
-      const interval = setInterval(() => loadDocChat(activeDocChat), 5000);
-      return () => clearInterval(interval);
-    }
-  }, [activePanel, activeDocChat]);
+    if (activePanel !== 'docchat' || !activeDocChat) return;
+    let mounted = true;
+    let intervalId = null;
+    (async () => {
+      const consultationId = await ensureConsultationForDoctor(activeDocChat);
+      if (!mounted) return;
+      if (!consultationId) {
+        setActiveConsultationId(null);
+        setDocMessages([]);
+        return;
+      }
+      await loadDocChat(consultationId, 1);
+      intervalId = setInterval(() => loadDocChat(consultationId, 1), 5000);
+    })();
+    return () => {
+      mounted = false;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [activePanel, activeDocChat, consultations]);
 
   const handleDocChatSubmit = async(e) => {
     e.preventDefault();
-    if(!docMsgInput.trim() || !activeDocChat) return;
+    const consultationId = activeConsultationId || await ensureConsultationForDoctor(activeDocChat);
+    if(!docMsgInput.trim() || !consultationId) return;
+    const localId = 'local-' + Date.now();
+    const optimistic = { sender: 'patient', text: docMsgInput, id: localId, sending: true, attachments: docAttachmentFile ? [{ name: docAttachmentFile.name }] : [] };
+    setDocMessages(prev => [...prev, optimistic]);
+    docAutoScrollRef.current = true;
+    setDocMsgInput('');
+    setDocAttachmentFile(null);
+    setDocSending(true);
     try {
-      await patientApi.postDoctorPatientChat({ other: activeDocChat, text: docMsgInput });
-      setDocMsgInput('');
-      loadDocChat(activeDocChat);
-    } catch(e) {}
+      await patientApi.postConsultationMessage(consultationId, docMsgInput);
+      // Refresh authoritative history from server
+      await loadDocChat(consultationId, docMessagePage);
+    } catch(e) {
+      console.error('postDocChat failed', e);
+      // mark last optimistic message as failed
+      setDocMessages(prev => prev.map(m => m.id === localId ? { ...m, sending: false, failed: true } : m));
+      alert('Failed to send message');
+    } finally {
+      setDocSending(false);
+    }
   };
+
+  const handleDocAttachChange = (e) => {
+    const f = e.target.files && e.target.files[0];
+    setDocAttachmentFile(f || null);
+    // clear input value to allow reselecting same file
+    if (e.target) e.target.value = null;
+  };
+
+  const handleLoadOlderDocMessages = async () => {
+    try {
+      if (!activeConsultationId) return;
+      const nextPage = docMessagePage + 1;
+      const data = await patientApi.getConsultationMessages(activeConsultationId, nextPage, 20);
+      const items = Array.isArray(data) ? data : (data.items || []);
+      if (items.length > 0) {
+        setDocMessages(prev => [...items.map(normalizeChatMessage), ...prev]);
+        setDocMessagePage(nextPage);
+      }
+    } catch (err) { console.error('load older messages failed', err); }
+  };
+
+  useEffect(() => {
+    if (docAutoScrollRef.current) {
+      docChatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      docAutoScrollRef.current = false;
+    }
+  }, [docMessages]);
 
   const handleSelectDoctorForAppointment = (docId) => {
     setActivePanel('appointments');
@@ -1055,11 +1195,14 @@ export default function PatientDashboard() {
                  <h2 style={{ margin: 0, fontSize: '11px', color: '#1E293B' }}>My Doctors</h2>
                </div>
                <div style={{ flex: 1, overflowY: 'auto' }}>
-                 {doctors.map(d => (
+                 {doctors.map(d => {
+                   const doctorId = String(d.doctor_id || d.id || d.username || '');
+                   const consultation = resolveConsultationForDoctor(doctorId);
+                   return (
                    <div 
-                     key={d.id} 
-                     onClick={() => setActiveDocChat(d.id)}
-                     style={{ padding: '16px 24px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', background: activeDocChat === d.id ? '#F3F0FF' : 'transparent', borderLeft: activeDocChat === d.id ? '4px solid #8B7EFF' : '4px solid transparent', display: 'flex', alignItems: 'center', gap: '16px' }}
+                     key={doctorId || d.name} 
+                     onClick={() => setActiveDocChat(doctorId)}
+                     style={{ padding: '16px 24px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', background: activeDocChat === doctorId ? '#F3F0FF' : 'transparent', borderLeft: activeDocChat === doctorId ? '4px solid #8B7EFF' : '4px solid transparent', display: 'flex', alignItems: 'center', gap: '16px' }}
                    >
                      <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', position: 'relative' }}>
                        
@@ -1068,9 +1211,11 @@ export default function PatientDashboard() {
                      <div>
                        <div style={{ fontWeight: '600', fontSize: '11px', color: '#1E293B' }}>Dr. {d.name}</div>
                        <div style={{ fontSize: '11px', color: '#64748B' }}>{d.category}</div>
+                       <div style={{ fontSize: '10px', color: '#94A3B8' }}>{consultation ? 'Consultation ready' : 'No consultation yet'}</div>
                      </div>
                    </div>
-                 ))}
+                   );
+                 })}
                </div>
             </div>
 
@@ -1082,8 +1227,9 @@ export default function PatientDashboard() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                         <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}></div>
                         <div>
-                           <div style={{ fontWeight: '700', fontSize: '11px', color: '#1E293B' }}>Dr. {doctors.find(d => d.id === activeDocChat)?.name}</div>
-                           <div style={{ fontSize: '11px', color: '#22C55E', fontWeight: '600' }}>Online</div>
+                           <div style={{ fontWeight: '700', fontSize: '11px', color: '#1E293B' }}>Dr. {doctors.find(d => String(d.doctor_id || d.id || d.username || '') === String(activeDocChat))?.name}</div>
+                        <div style={{ fontSize: '11px', color: getDoctorChatStatus(activeDocChat).color, fontWeight: '600' }}>{getDoctorChatStatus(activeDocChat).label}</div>
+                           <div style={{ fontSize: '10px', color: '#94A3B8' }}>{activeConsultationId ? `Consultation ${activeConsultationId}` : 'Waiting for consultation'}</div>
                         </div>
                       </div>
                       <div style={{ color: '#8B7EFF', cursor: 'pointer', fontWeight: '600', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', background: '#F3F0FF', borderRadius: '50px' }}>
@@ -1091,26 +1237,61 @@ export default function PatientDashboard() {
                       </div>
                    </div>
                    
-                   <div style={{ flex: 1, padding: '32px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', background: '#F8FAFC' }}>
+                   <div style={{ flex: 1, padding: '24px 28px 24px 28px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '18px', background: '#F8FAFC' }}>
+                     <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '8px' }}>
+                       <button onClick={handleLoadOlderDocMessages} style={{ fontSize: '12px', padding: '7px 14px', borderRadius: '999px', border: '1px solid #E2E8F0', background: '#FFF', color: '#334155', fontWeight: '600' }}>Load older messages</button>
+                     </div>
                      {docMessages.length === 0 && <div style={{textAlign: 'center', fontSize: '11px', color: '#94A3B8', marginTop: '40px'}}>Start a secure end-to-end conversation with your doctor.</div>}
-                     {docMessages.slice().reverse().map((m, idx) => (     
-                       <div key={idx} style={{
-                          alignSelf: m.sender === 'patient' ? 'flex-end' : 'flex-start',
-                          background: m.sender === 'patient' ? '#8B7EFF' : '#FFF',
-                          color: m.sender === 'patient' ? '#FFF' : '#1E293B',
-                          padding: '12px 18px', borderRadius: m.sender === 'patient' ? '16px 16px 0 16px' : '16px 16px 16px 0', maxWidth: '75%', fontSize: '11px',
-                          boxShadow: '0 2px 4px rgba(0,0,0,0.04)'
-                       }}>
-                         {m.text}
-                       </div>
-                     ))}
+                     {docMessages.map((m, idx) => {
+                       // render grouped/attachment-aware message
+                       const isPatient = String(m.sender || '').toLowerCase().includes('patient') || String(m.sender || '').toLowerCase() === 'user';
+                       return (
+                         <div key={m.id || idx} style={{ display: 'flex', flexDirection: 'column', alignItems: isPatient ? 'flex-end' : 'flex-start', gap: '4px' }}>
+                           <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '2px', width: '100%', justifyContent: isPatient ? 'flex-end' : 'flex-start' }}>
+                             <div style={{ maxWidth: '74%' , background: isPatient ? '#8B7EFF' : '#FFF', color: isPatient ? '#FFF' : '#1E293B', padding: '14px 16px', borderRadius: isPatient ? '18px 18px 4px 18px' : '18px 18px 18px 4px', boxShadow: '0 2px 8px rgba(15,23,42,0.06)', border: isPatient ? '1px solid rgba(139,126,255,0.18)' : '1px solid #E2E8F0' }}>
+                               <div style={{ fontSize: '14px', lineHeight: '1.55', fontWeight: '500', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.text}</div>
+                               {/* attachments preview */}
+                               {m.attachments && m.attachments.length > 0 && (
+                                 <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                   {m.attachments.map((a, ai) => (
+                                     <div key={ai} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                       {a.url && a.url.match(/\.pdf$/i) ? (
+                                         <a href={a.url} target="_blank" rel="noreferrer" style={{ color: isPatient ? '#FFF' : '#1E293B', textDecoration: 'underline', fontSize: '12px' }}>{a.name || 'Document'}</a>
+                                       ) : a.url && a.url.match(/\.(png|jpg|jpeg|gif)$/i) ? (
+                                         <img src={a.url} alt={a.name || 'img'} style={{ maxWidth: '220px', borderRadius: '8px', border: '1px solid #E2E8F0' }} />
+                                       ) : (
+                                         <div style={{ fontSize: '12px', color: isPatient ? '#FFF' : '#1E293B' }}>{a.name || 'Attachment'}</div>
+                                       )}
+                                     </div>
+                                   ))}
+                                 </div>
+                               )}
+                             </div>
+                           </div>
+                           <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px', paddingRight: isPatient ? '8px' : '0' }}>{m.sending ? 'Sending...' : m.failed ? 'Failed' : (m.timestamp ? new Date(m.timestamp).toLocaleString() : '')}</div>
+                         </div>
+                       );
+                     })}
+                     <div ref={docChatEndRef} />
                    </div>
 
                    <div style={{ padding: '12px 32px 32px 32px', background: 'transparent', flexShrink: 0 }}>
-                     <form onSubmit={handleDocChatSubmit} className="rich-input-row" style={{ display: 'flex', alignItems: 'center', padding: '8px 8px 8px 24px', background: '#F1F5F9', borderRadius: '50px', border: '1px solid #E2E8F0', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
-                        <div style={{ color: '#64748B', fontWeight: '300', fontSize: '18px', marginRight: '16px', cursor: 'pointer' }} title="Attach media">+</div>
-                        <input type="text" value={docMsgInput} onChange={e=>setDocMsgInput(e.target.value)} disabled={docChatDisabled} placeholder={docChatDisabled ? 'Chat disabled' : 'Type a secure message...'} style={{flex: 1, padding: '10px 0', border: 'none', background: 'transparent', outline: 'none', fontSize: '11px', color: '#1E293B'}} />
-                        <button disabled={docChatDisabled} type="submit" style={{ marginLeft: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '42px', height: '42px', borderRadius: '50%', background: docChatDisabled ? '#E2E8F0' : '#8B7EFF', color: docChatDisabled ? '#94A3B8' : '#FFF', border: 'none', cursor: docChatDisabled ? 'default' : 'pointer', fontWeight: '700', fontSize: '11px', transition: 'all 0.2s', boxShadow: docChatDisabled ? 'none' : '0 4px 12px rgba(139, 126, 255, 0.3)' }}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></button>
+                     <form onSubmit={handleDocChatSubmit} className="rich-input-row" style={{ display: 'flex', alignItems: 'center', padding: '8px 8px 8px 24px', background: '#F1F5F9', borderRadius: '50px', border: `1px solid ${docInputFocused ? 'rgba(139, 126, 255, 0.45)' : '#E2E8F0'}`, boxShadow: docInputFocused ? '0 0 0 3px rgba(139, 126, 255, 0.10), 0 8px 24px rgba(0,0,0,0.06)' : '0 8px 24px rgba(0,0,0,0.06)', transition: 'border-color 0.18s ease, box-shadow 0.18s ease' }}>
+                        <label title="Attach media" style={{ color: '#64748B', fontWeight: '300', fontSize: '18px', marginRight: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif" onChange={handleDocAttachChange} style={{ display: 'none' }} />
+                          +
+                        </label>
+                        <div style={{ display: 'flex', flexDirection: 'column', marginRight: '12px' }}>
+                          {docAttachmentFile && (
+                            <div style={{ fontSize: '11px', color: '#475569', background: '#FFF', padding: '6px 8px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>{docAttachmentFile.name}</div>
+                          )}
+                        </div>
+                        <input type="text" value={docMsgInput} onChange={e=>setDocMsgInput(e.target.value)} onFocus={() => setDocInputFocused(true)} onBlur={() => setDocInputFocused(false)} disabled={docChatDisabled || docSending} placeholder={docChatDisabled ? 'Chat disabled' : 'Type a secure message...'} style={{flex: 1, padding: '10px 0', border: 'none', background: 'transparent', outline: 'none', boxShadow: 'none', fontSize: '14px', lineHeight: '1.5', color: '#0F172A', caretColor: '#8B7EFF', borderRadius: '12px'}} />
+                        <button disabled={docChatDisabled || docSending || !activeConsultationId} type="submit" style={{ marginLeft: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '42px', height: '42px', borderRadius: '50%', background: docChatDisabled || !activeConsultationId ? '#E2E8F0' : '#8B7EFF', color: docChatDisabled || !activeConsultationId ? '#94A3B8' : '#FFF', border: 'none', cursor: docChatDisabled || !activeConsultationId ? 'default' : 'pointer', fontWeight: '700', fontSize: '11px', transition: 'all 0.2s', boxShadow: docChatDisabled || !activeConsultationId ? 'none' : '0 4px 12px rgba(139, 126, 255, 0.3)' }}>
+                          {docSending ? '...' : (
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                          )}
+                        </button>
                      </form>
                    </div>
                  </>
