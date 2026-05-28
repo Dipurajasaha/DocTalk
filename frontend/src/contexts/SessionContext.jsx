@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../lib/apiClient';
 import { authApi } from '../lib/api';
+import { useNotifications } from './NotificationContext';
 
 const SessionContext = createContext(null);
 
@@ -17,6 +18,7 @@ export function SessionProvider({ children }) {
       await apiClient.get('/health', { retries: 0 });
     } catch (err) {
       // backend may be down; still mark loaded so UI can render offline
+      try { addNotification && addNotification({ type: 'error', message: 'Backend unreachable (offline mode)' }); } catch (e) {}
       setLoaded(true);
       return;
     }
@@ -50,6 +52,15 @@ export function SessionProvider({ children }) {
     setSession(null);
     setLoaded(true);
   }, []);
+
+  // notifications
+  let addNotification = null;
+  try {
+    const notifs = useNotifications();
+    addNotification = notifs && notifs.addNotification;
+  } catch (e) {
+    // providers may not be wired; swallow
+  }
 
   useEffect(() => { bootstrap(); }, [bootstrap]);
 

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useAssetCache } from '../contexts';
 
 export default function FileViewer({ file, onClose }) {
   const [objectUrl, setObjectUrl] = useState(null);
   const [loadError, setLoadError] = useState('');
+  const { getAsset, setAsset } = useAssetCache();
 
   useEffect(() => {
     let active = true;
@@ -15,6 +17,14 @@ export default function FileViewer({ file, onClose }) {
       }
 
       try {
+        const cacheKey = `preview:${file.download_url}`;
+        const cachedBlob = getAsset && getAsset(cacheKey);
+        if (cachedBlob instanceof Blob) {
+          createdObjectUrl = URL.createObjectURL(cachedBlob);
+          if (active) setObjectUrl(createdObjectUrl);
+          return;
+        }
+
         const token = localStorage.getItem('doctalk_token');
         const response = await fetch(file.download_url, {
           credentials: 'include',
@@ -26,6 +36,7 @@ export default function FileViewer({ file, onClose }) {
         }
 
         const blob = await response.blob();
+  try { setAsset && setAsset(cacheKey, blob); } catch (e) {}
         createdObjectUrl = URL.createObjectURL(blob);
         if (active) setObjectUrl(createdObjectUrl);
       } catch (error) {

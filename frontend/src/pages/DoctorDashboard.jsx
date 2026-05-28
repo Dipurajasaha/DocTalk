@@ -7,6 +7,7 @@ import { createRealTimeClient } from '../lib/realTimeClient';
 import '../styles/doctor.css';
 import '../styles/chat.css';
 import CopilotPanel from '../components/CopilotPanel';
+import { useNotifications } from '../contexts';
 
 const timeSlots = [];
 for (let h = 0; h < 24; h++) {
@@ -159,9 +160,21 @@ export default function DoctorDashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const { markExpired, logout, session } = useSession();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      return localStorage.getItem('doctalk_doctor_active_tab') || 'dashboard';
+    } catch (e) {
+      return 'dashboard';
+    }
+  });
   const [dashboardData, setDashboardData] = useState(null);
-  const [manageSessionTab, setManageSessionTab] = useState('upcoming');
+  const [manageSessionTab, setManageSessionTab] = useState(() => {
+    try {
+      return localStorage.getItem('doctalk_doctor_manage_session_tab') || 'upcoming';
+    } catch (e) {
+      return 'upcoming';
+    }
+  });
   const [slotDateObj, setSlotDateObj] = useState(new Date());
   // Helper to format local date YYYY-MM-DD
   const formatObjToDate = (d) => {
@@ -170,6 +183,7 @@ export default function DoctorDashboard() {
   };
   const [slotDate, setSlotDate] = useState(formatObjToDate(new Date()));
   const [slotsData, setSlotsData] = useState({});
+  const { addNotification } = useNotifications();
 
   // Patient Chat States
   const [patientChatList, setPatientChatList] = useState([]);
@@ -184,6 +198,18 @@ export default function DoctorDashboard() {
   const patientAutoScrollRef = useRef(false);
   const patientChatRealtimeRef = useRef(null);
   const patientChatSnapshotRef = useRef({ consultationId: null, fingerprint: '' });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('doctalk_doctor_active_tab', activeTab);
+    } catch (e) {}
+  }, [activeTab]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('doctalk_doctor_manage_session_tab', manageSessionTab);
+    } catch (e) {}
+  }, [manageSessionTab]);
 
   // 1. Fetch Doctor Session on Mount
   useEffect(() => {
@@ -259,6 +285,7 @@ export default function DoctorDashboard() {
         .catch(err => {
           console.error('Failed loading doctor dashboard:', err);
           try { if (err && (err.status === 401 || err.status === 403)) markExpired(); } catch (e) {}
+          try { addNotification && addNotification({ type: 'error', message: 'Failed loading dashboard data' }); } catch (e) {}
         });
     }
   }, [user, activeTab]);
@@ -589,13 +616,13 @@ export default function DoctorDashboard() {
                     <input type="datetime-local" id={`time-${r.appointment_id}`} style={{padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: '50px', fontSize: '11px', marginRight: '8px'}} />
                     <button onClick={() => {
                        const t = document.getElementById(`time-${r.appointment_id}`).value;
-                       if(!t) return alert('Select time');
+                       if(!t) return addNotification && addNotification({ type: 'error', message: 'Select time' });
                        fetch('/api/doctor_schedule_request', {
                          method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include',
                          body: JSON.stringify({ appointment_id: r.appointment_id, scheduled_time: t, note: '' })
                        }).then(res=>res.json()).then(data=>{
                          if(data.success) {
-                           alert('Scheduled!');
+                           addNotification && addNotification({ type: 'success', message: 'Scheduled!' });
                            // Refresh dashboard data
                            fetch('/api/doctor_dashboard_data', {credentials: 'include'}).then(res=>res.json()).then(newData=>setDashboardData(newData));
                          }
@@ -779,7 +806,7 @@ export default function DoctorDashboard() {
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <button onClick={() => {
                         const t = document.getElementById(`time-manage-${r.appointment_id}`).value;
-                        if(!t) return alert('Please select a date and time slot first');
+                        if(!t) return addNotification && addNotification({ type: 'error', message: 'Please select a date and time slot first' });
                         fetch('/api/doctor_schedule_request', {
                           method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include',
                           body: JSON.stringify({ appointment_id: r.appointment_id, scheduled_time: t, note: '' })
@@ -789,7 +816,7 @@ export default function DoctorDashboard() {
                       }} style={{flex: 1, background:'#10b981', color:'#fff', border:'none', padding:'10px', borderRadius:'8px', cursor:'pointer', fontSize:'13px', fontWeight:'600'}}>Accept</button>
                       <button onClick={() => {
                           // Note: Implement decline logic in backend if needed. Here we just UI mock it or send a dummy status
-                         alert('Declining currently unsupported, would update backend status to declined');
+                         addNotification && addNotification({ type: 'info', message: 'Declining currently unsupported; backend update required' });
                       }} style={{flex: 1, background:'#f1f5f9', color:'#64748b', border:'1px solid #e2e8f0', padding:'10px', borderRadius:'8px', cursor:'pointer', fontSize:'13px', fontWeight:'600'}}>Decline</button>
                     </div>
                   </div>

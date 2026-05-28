@@ -6,32 +6,43 @@ import DoctorDashboard from './pages/DoctorDashboard';
 import ReportView from './pages/ReportView';
 import PrescriptionView from './pages/PrescriptionView';
 import { useSession } from './contexts/SessionContext';
+import { useEffect } from 'react';
+import { useNotifications } from './contexts';
+import NotificationTray from './components/NotificationTray';
+
+function RequirePatient({ children, loaded, session }) {
+  if (!loaded) return null;
+  if (!session) return <Navigate to="/login" replace />;
+  if (session.role !== 'patient') return <Navigate to="/login" replace />;
+  return children;
+}
+
+function RequireDoctor({ children, loaded, session }) {
+  if (!loaded) return null;
+  if (!session) return <Navigate to="/login" replace />;
+  if (session.role !== 'doctor') return <Navigate to="/login" replace />;
+  return children;
+}
+
+function RequireAuth({ children, loaded, session }) {
+  if (!loaded) return null;
+  if (!session) return <Navigate to="/login" replace />;
+  return children;
+}
 
 function App() {
   const { session, loaded, expired, justLoggedOut, startLogoutTimer, clearLogoutTimer } = useSession();
+  const { addNotification } = useNotifications();
 
-  const RequirePatient = ({ children }) => {
-    if (!loaded) return null; // wait for session bootstrap
-    if (!session) return <Navigate to="/login" replace />;
-    if (session.role !== 'patient') return <Navigate to="/login" replace />;
-    return children;
-  };
-
-  const RequireDoctor = ({ children }) => {
-    if (!loaded) return null;
-    if (!session) return <Navigate to="/login" replace />;
-    if (session.role !== 'doctor') return <Navigate to="/login" replace />;
-    return children;
-  };
-
-  const RequireAuth = ({ children }) => {
-    if (!loaded) return null;
-    if (!session) return <Navigate to="/login" replace />;
-    return children;
-  };
+  useEffect(() => {
+    if (expired) {
+      try { addNotification({ type: 'error', message: 'Session expired — please log in again.' }); } catch (e) {}
+    }
+  }, [expired, addNotification]);
 
   return (
     <BrowserRouter>
+      <NotificationTray />
       {justLoggedOut && (
         <div
           onMouseEnter={() => { try { clearLogoutTimer(); } catch (e) {} }}
@@ -62,10 +73,10 @@ function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/patient/dashboard" element={<RequirePatient><PatientDashboard /></RequirePatient>} />
-        <Route path="/doctor/dashboard" element={<RequireDoctor><DoctorDashboard /></RequireDoctor>} />
-        <Route path="/reports/:id" element={<RequireAuth><ReportView /></RequireAuth>} />
-        <Route path="/prescriptions/:id" element={<RequireAuth><PrescriptionView /></RequireAuth>} />
+        <Route path="/patient/dashboard" element={<RequirePatient loaded={loaded} session={session}><PatientDashboard /></RequirePatient>} />
+        <Route path="/doctor/dashboard" element={<RequireDoctor loaded={loaded} session={session}><DoctorDashboard /></RequireDoctor>} />
+        <Route path="/reports/:id" element={<RequireAuth loaded={loaded} session={session}><ReportView /></RequireAuth>} />
+        <Route path="/prescriptions/:id" element={<RequireAuth loaded={loaded} session={session}><PrescriptionView /></RequireAuth>} />
       </Routes>
     </BrowserRouter>
   );

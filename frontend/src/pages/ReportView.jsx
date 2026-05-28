@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
+import { useNotifications, useAssetCache } from '../contexts';
 import { patientApi } from '../lib/api';
 import FileViewer from '../components/FileViewer';
 
@@ -8,6 +9,8 @@ export default function ReportView() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { markExpired } = useSession();
+  const { addNotification } = useNotifications();
+  const { getAsset, setAsset } = useAssetCache();
   const [report, setReport] = useState(null);
   const [consultations, setConsultations] = useState([]);
   const [selectedConsultation, setSelectedConsultation] = useState('');
@@ -20,8 +23,15 @@ export default function ReportView() {
 
     (async () => {
       try {
-        const data = await patientApi.getReport(id);
-        setReport(data || null);
+        const cacheKey = `report:${id}`;
+        const cached = getAsset && getAsset(cacheKey);
+        if (cached) {
+          setReport(cached);
+        } else {
+          const data = await patientApi.getReport(id);
+          setReport(data || null);
+          try { setAsset && setAsset(cacheKey, data || null); } catch (e) {}
+        }
       } catch (err) {
         console.error('Failed fetching report', err);
         if (err?.status === 401 || err?.status === 403) { try { markExpired(); } catch (e) {} navigate('/login'); return; }
@@ -40,18 +50,18 @@ export default function ReportView() {
   }, [id, navigate, markExpired]);
 
   const handleAttach = async () => {
-    if (!selectedConsultation) { alert('Choose a consultation to attach to'); return; }
+    if (!selectedConsultation) { try { addNotification({ type: 'error', message: 'Choose a consultation to attach to' }); } catch (e) {} return; }
     try {
       const res = await patientApi.attachReportToConsultation(id, selectedConsultation);
       if (res && (res.success || res.message)) {
-        alert('Report attached to consultation');
+        try { addNotification({ type: 'success', message: 'Report attached to consultation' }); } catch (e) {}
       } else {
-        alert('Attach succeeded');
+        try { addNotification({ type: 'success', message: 'Attach succeeded' }); } catch (e) {}
       }
     } catch (err) {
       console.error('Attach failed', err);
-      if (err?.status === 404) alert('Attach not supported by backend');
-      else alert('Attach failed: ' + (err?.message || 'server error'));
+      if (err?.status === 404) try { addNotification({ type: 'info', message: 'Attach not supported by backend' }); } catch (e) {}
+      else try { addNotification({ type: 'error', message: 'Attach failed: ' + (err?.message || 'server error') }); } catch (e) {}
     }
   };
 

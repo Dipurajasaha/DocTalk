@@ -1,5 +1,6 @@
 ﻿import { useState, useEffect, useRef } from 'react';
 import { useSession } from '../contexts/SessionContext';
+import { useNotifications, useAssetCache } from '../contexts';
 import { useNavigate } from 'react-router-dom';
 import { authApi, patientApi, resolvePatientUploadTarget, resolvePatientAssetKind } from '../lib/api';
 import { createRealTimeClient } from '../lib/realTimeClient';
@@ -14,9 +15,23 @@ export default function PatientDashboard() {
   const [messages, setMessages] = useState([]);
   const [inputMsg, setInputMsg] = useState('');
   const [language, setLanguage] = useState('en');
-  const [activePanel, setActivePanel] = useState('explain');
+  const [activePanel, setActivePanel] = useState(() => {
+    try {
+      return localStorage.getItem('doctalk_patient_active_panel') || 'explain';
+    } catch (e) {
+      return 'explain';
+    }
+  });
 
     const [isUploadingProfile, setIsUploadingProfile] = useState(false);
+    const { addNotification } = useNotifications();
+    const { getAsset, setAsset, removeAsset } = useAssetCache();
+
+    useEffect(() => {
+      try {
+        localStorage.setItem('doctalk_patient_active_panel', activePanel);
+      } catch (e) {}
+    }, [activePanel]);
     
     const handleProfileUpdate = async (e) => {
       e.preventDefault();
@@ -31,13 +46,13 @@ export default function PatientDashboard() {
         const data = await res.json();
         if (data.success) {
           setUser(prev => ({ ...prev, name: data.display_name, display_name: data.display_name, profile_pic: data.profile_pic }));
-          alert('Profile updated successfully!');
+          try { addNotification({ type: 'success', message: 'Profile updated successfully' }); } catch (e) {}
         } else {
-          alert('Failed to update profile: ' + data.error);
+          try { addNotification({ type: 'error', message: 'Failed to update profile: ' + (data.error || 'unknown') }); } catch (e) {}
         }
       } catch (err) {
         console.error(err);
-        alert('Error updating profile');
+        try { addNotification({ type: 'error', message: 'Error updating profile' }); } catch (e) {}
       } finally {
         setIsUploadingProfile(false);
       }
@@ -75,6 +90,8 @@ export default function PatientDashboard() {
   const [currentFolder, setCurrentFolder] = useState(null);
   const [uploadQueue, setUploadQueue] = useState([]);
   const [previewFile, setPreviewFile] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
   
   // Upload state for explain panel
   const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -114,7 +131,7 @@ export default function PatientDashboard() {
       });
   }, [navigate]);
 
-  const loadAssets = () => {
+  const loadAssets = (options = {}) => {
     const normalizeAssets = (items, assetKind) => (Array.isArray(items) ? items : []).map((item) => ({
       ...item,
       id: item.id,
@@ -123,6 +140,12 @@ export default function PatientDashboard() {
       folder: item.folder || '',
       uploaded_at: item.created_at || item.createdAt || item.uploaded_at || '',
     }));
+
+    const cached = !options.forceRefresh && getAsset && getAsset('assets_files');
+    if (cached) {
+      setAssets(cached);
+      return;
+    }
 
     Promise.allSettled([
       patientApi.listMedicalImages(),
@@ -134,10 +157,13 @@ export default function PatientDashboard() {
         const reportItems = reports.status === 'fulfilled' ? normalizeAssets(reports.value, 'report') : [];
         const prescriptionItems = prescriptions.status === 'fulfilled' ? normalizeAssets(prescriptions.value, 'prescription') : [];
 
-        setAssets({
+        const assetsObj = {
           folders: [],
           files: [...imageItems, ...reportItems, ...prescriptionItems],
-        });
+        };
+
+        setAssets(assetsObj);
+        try { setAsset && setAsset('assets_files', assetsObj); } catch (e) {}
       })
       .catch(e => console.error(e));
     };
@@ -164,8 +190,8 @@ export default function PatientDashboard() {
       // Basic client-side validation
       const maxSize = 15 * 1024 * 1024; // 15MB
       const allowedTypes = ['application/pdf', 'image/png', 'image/jpg', 'image/jpeg', 'image/webp', 'image/gif'];
-      if (file.size > maxSize) { alert('File too large. Max 15MB allowed.'); e.target.value = null; return; }
-      if (!allowedTypes.includes(file.type) && !file.name.toLowerCase().endsWith('.pdf')) { alert('Unsupported file type. Use PDF or images.'); e.target.value = null; return; }
+      if (file.size > maxSize) { try { addNotification({ type: 'error', message: 'File too large. Max 15MB allowed.' }); } catch (e) {} e.target.value = null; return; }
+      if (!allowedTypes.includes(file.type) && !file.name.toLowerCase().endsWith('.pdf')) { try { addNotification({ type: 'error', message: 'Unsupported file type. Use PDF or images.' }); } catch (e) {} e.target.value = null; return; }
 
       const uploadId = 'u-' + Date.now();
       setUploadQueue(prev => [...prev, { id: uploadId, name: file.name, progress: 0, status: 'uploading' }]);
@@ -194,20 +220,22 @@ export default function PatientDashboard() {
           const data = JSON.parse(xhr.responseText || '{}');
           if (xhr.status >= 200 && xhr.status < 300 && data && (data.success || data.id)) {
             setUploadQueue(prev => prev.map(u => u.id === uploadId ? { ...u, progress: 100, status: 'done' } : u));
-            loadAssets();
+            try { addNotification({ type: 'success', message: 'File uploaded successfully' }); } catch (e) {}
+            try { removeAsset && removeAsset('assets_files'); } catch (e) {}
+            loadAssets({ forceRefresh: true });
           } else {
-            setUploadQueue(prev => prev.map(u => u.id === uploadId ? { ...u, status: 'error' } : u));
-            alert('Upload failed: ' + (data && (data.error || data.detail) || xhr.statusText));
+              setUploadQueue(prev => prev.map(u => u.id === uploadId ? { ...u, status: 'error' } : u));
+              try { addNotification({ type: 'error', message: 'Upload failed: ' + (data && (data.error || data.detail) || xhr.statusText) }); } catch (e) {}
           }
         } catch (err) {
           setUploadQueue(prev => prev.map(u => u.id === uploadId ? { ...u, status: 'error' } : u));
-          alert('Upload failed');
+            try { addNotification({ type: 'error', message: 'Upload failed' }); } catch (e) {}
         }
       };
 
       xhr.onerror = () => {
         setUploadQueue(prev => prev.map(u => u.id === uploadId ? { ...u, status: 'error' } : u));
-        alert('Upload failed: network error');
+          try { addNotification({ type: 'error', message: 'Upload failed: network error' }); } catch (e) {}
       };
 
       xhr.send(formData);
@@ -226,28 +254,43 @@ export default function PatientDashboard() {
       deleteRequest
       .then(data => {
         if (data && (data.success || data.message)) {
-          loadAssets();
+          try { addNotification({ type: 'success', message: 'File deleted successfully' }); } catch (e) {}
+          try { removeAsset && removeAsset('assets_files'); } catch (e) {}
+          loadAssets({ forceRefresh: true });
         } else {
-          alert('Delete failed: ' + (data && (data.error || data.detail)));
+          try { addNotification({ type: 'error', message: 'Delete failed: ' + (data && (data.error || data.detail) || 'unknown') }); } catch (e) {}
         }
-      }).catch(err => { console.error('Delete error', err); alert('Delete failed: ' + (err?.message || 'unknown')) });
+      }).catch(err => { console.error('Delete error', err); try { addNotification({ type: 'error', message: 'Delete failed: ' + (err?.message || 'unknown') }); } catch (e) {} });
     };
     
     const handleCreateFolder = () => {
-      alert('Folder management is not supported by the current backend for medical images.');
+      try { addNotification({ type: 'info', message: 'Folder management is not supported by the current backend' }); } catch (e) {}
     };
 
     const handleRenameAsset = (file) => {
-      const newName = window.prompt("Enter new name for file:", file?.name || file?.original_name || '');
-      if (!newName) return;
-      patientApi.renameAsset({ ...file, asset_kind: resolvePatientAssetKind(file) }, newName)
-      .then(data => {
+      setRenameTarget(file);
+      setRenameValue(file?.name || file?.original_name || '');
+    };
+
+    const submitRenameAsset = async () => {
+      const target = renameTarget;
+      const newName = renameValue.trim();
+      if (!target || !newName) return;
+      try {
+        const data = await patientApi.renameAsset({ ...target, asset_kind: resolvePatientAssetKind(target) }, newName);
         if (data && (data.id || data.original_name || data.originalName)) {
-          loadAssets();
+          try { addNotification({ type: 'success', message: 'File renamed successfully' }); } catch (e) {}
+          try { removeAsset && removeAsset('assets_files'); } catch (e) {}
+          loadAssets({ forceRefresh: true });
+          setRenameTarget(null);
+          setRenameValue('');
         } else {
-          alert('Renaming failed: ' + (data && (data.error || data.detail)));
+          try { addNotification({ type: 'error', message: 'Renaming failed: ' + (data && (data.error || data.detail) || 'unknown') }); } catch (e) {}
         }
-      }).catch(err => { console.error('Rename error', err); alert('Renaming failed: ' + (err?.message || 'unknown')) });
+      } catch (err) {
+        console.error('Rename error', err);
+        try { addNotification({ type: 'error', message: 'Renaming failed: ' + (err?.message || 'unknown') }); } catch (e) {}
+      }
     };
 
     const loadAppointments = async () => {
@@ -490,7 +533,7 @@ export default function PatientDashboard() {
       docAutoScrollRef.current = true;
     } catch(e) {
       console.error('postDocChat failed', e);
-      alert('Failed to send message');
+      try { addNotification({ type: 'error', message: 'Failed to send message' }); } catch (e) {}
     } finally {
       setDocSending(false);
     }
@@ -531,7 +574,7 @@ export default function PatientDashboard() {
   const handleCreateAppointment = async (e) => {
     e.preventDefault();
     if (!appointmentDraft.doctor_id || !appointmentDraft.date || !appointmentDraft.time || !appointmentDraft.reason.trim()) {
-      alert('Choose a doctor, date, time, and reason before booking.');
+      try { addNotification({ type: 'error', message: 'Choose a doctor, date, time, and reason before booking.' }); } catch (e) {}
       return;
     }
 
@@ -545,7 +588,7 @@ export default function PatientDashboard() {
       });
 
       if (data && (data.id || data.success)) {
-        alert('Appointment requested successfully!');
+        try { addNotification({ type: 'success', message: 'Appointment requested successfully' }); } catch (e) {}
         setAppointmentDraft(prev => ({
           ...prev,
           date: '',
@@ -555,11 +598,11 @@ export default function PatientDashboard() {
         }));
         loadAppointments();
       } else {
-        alert('Error creating appointment: ' + (data && (data.error || data.detail)));
+        try { addNotification({ type: 'error', message: 'Error creating appointment: ' + (data && (data.error || data.detail) || 'unknown') }); } catch (e) {}
       }
     } catch (err) {
       console.error('create appointment failed', err);
-      alert('Error creating appointment: ' + (err?.message || 'server error'));
+      try { addNotification({ type: 'error', message: 'Error creating appointment: ' + (err?.message || 'server error') }); } catch (e) {}
     }
   };
 
@@ -571,11 +614,11 @@ export default function PatientDashboard() {
       if (data && (data.success || data.message)) {
         loadAppointments();
       } else {
-        alert('Error cancelling appointment: ' + (data && (data.error || data.detail)));
+        try { addNotification({ type: 'error', message: 'Error cancelling appointment: ' + (data && (data.error || data.detail) || 'unknown') }); } catch (e) {}
       }
     } catch (err) {
       console.error('cancel appointment failed', err);
-      alert('Error cancelling appointment: ' + (err?.message || 'server error'));
+      try { addNotification({ type: 'error', message: 'Error cancelling appointment: ' + (err?.message || 'server error') }); } catch (e) {}
     }
   };
 
@@ -659,7 +702,7 @@ export default function PatientDashboard() {
       });
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== 'loading'));
-      alert("Failed to send message: " + err.message);
+      try { addNotification({ type: 'error', message: "Failed to send message: " + err.message }); } catch (e) {}
     }
   };
 
@@ -688,7 +731,7 @@ export default function PatientDashboard() {
     e.preventDefault();
     
     if (uploadedFiles.length === 0) {
-      alert("Please select at least one file to analyze.");
+      try { addNotification({ type: 'error', message: 'Please select at least one file to analyze.' }); } catch (e) {}
       return;
     }
     
@@ -755,13 +798,13 @@ export default function PatientDashboard() {
       setUploadedFiles([]);
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== 'loading'));
-      alert("Analysis failed: " + err.message);
+      try { addNotification({ type: 'error', message: 'Analysis failed: ' + err.message }); } catch (e) {}
     }
   };
 
   const handleAnalyzeSelected = async () => {
     if (!selectedDocForAnalysis) {
-      alert("Please select a document to analyze.");
+      try { addNotification({ type: 'error', message: 'Please select a document to analyze.' }); } catch (e) {}
       return;
     }
 
@@ -790,7 +833,7 @@ export default function PatientDashboard() {
       });
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== 'loading'));
-      alert("Analysis failed: " + err.message);
+      try { addNotification({ type: 'error', message: 'Analysis failed: ' + err.message }); } catch (e) {}
     }
   };
 
@@ -847,24 +890,28 @@ export default function PatientDashboard() {
                 My Documents
               </button>
             <button 
+              type="button"
               className={activePanel === 'xray' ? 'active' : ''}
               onClick={() => setActivePanel('xray')}
             >
               X-Ray Analysis
             </button>
             <button 
+              type="button"
               className={activePanel === 'appointments' ? 'active' : ''}
               onClick={() => setActivePanel('appointments')}
             >
               Appointments
             </button>
             <button 
+              type="button"
               className={activePanel === 'docchat' ? 'active' : ''}
               onClick={() => setActivePanel('docchat')}
             >
               Doctor Chat
             </button>
             <button 
+              type="button"
               className={activePanel === 'profile' ? 'active' : ''}
               onClick={() => setActivePanel('profile')}
             >
@@ -1166,10 +1213,10 @@ export default function PatientDashboard() {
                 </div>
                 <div style={{display: 'flex', gap: '8px'}}>
                   {currentFolder === null && (
-                      <button onClick={handleCreateFolder} style={{ background: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>+ New Folder</button>
+                      <button type="button" onClick={handleCreateFolder} style={{ background: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>+ New Folder</button>
                   )}
                   <input type="file" id="upload-doc-v2" style={{display: 'none'}} onChange={handleUploadAssetV2} />
-                  <button onClick={() => document.getElementById('upload-doc-v2').click()} style={{ background: '#6C5CE7', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Upload Here</button>
+                  <button type="button" onClick={() => document.getElementById('upload-doc-v2').click()} style={{ background: '#6C5CE7', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Upload Here</button>
                 </div>
               </div>
 
@@ -1194,6 +1241,31 @@ export default function PatientDashboard() {
 
                   {previewFile && (
                     <FileViewer file={previewFile} onClose={() => setPreviewFile(null)} />
+                  )}
+                  {renameTarget && (
+                    <div
+                      style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(15,23,42,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+                      onClick={() => { setRenameTarget(null); setRenameValue(''); }}
+                    >
+                      <div
+                        onClick={(event) => event.stopPropagation()}
+                        style={{ width: 'min(92vw, 420px)', background: '#fff', borderRadius: 16, boxShadow: '0 20px 60px rgba(15,23,42,0.25)', padding: 20, border: '1px solid #E2E8F0' }}
+                      >
+                        <div style={{ fontSize: 16, fontWeight: 700, color: '#1E293B', marginBottom: 8 }}>Rename file</div>
+                        <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>Enter a new file name for {renameTarget?.name || renameTarget?.original_name || 'this document'}.</div>
+                        <input
+                          type="text"
+                          value={renameValue}
+                          onChange={(event) => setRenameValue(event.target.value)}
+                          style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 10, border: '1px solid #CBD5E1', outline: 'none', fontSize: 14, marginBottom: 16 }}
+                          autoFocus
+                        />
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                          <button type="button" onClick={() => { setRenameTarget(null); setRenameValue(''); }} style={{ padding: '8px 14px', borderRadius: 999, border: '1px solid #E2E8F0', background: '#F8FAFC', color: '#475569', cursor: 'pointer' }}>Cancel</button>
+                          <button type="button" onClick={submitRenameAsset} disabled={!renameValue.trim()} style={{ padding: '8px 14px', borderRadius: 999, border: '1px solid #C4B5FD', background: renameValue.trim() ? '#6C5CE7' : '#C7D2FE', color: '#fff', cursor: renameValue.trim() ? 'pointer' : 'not-allowed' }}>Save</button>
+                        </div>
+                      </div>
+                    </div>
                   )}
                   {(() => {
                     const getAssetIcon = (file) => {
@@ -1227,11 +1299,11 @@ export default function PatientDashboard() {
                             <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>Folder</div>
                           </div>
                           
-                          <button onClick={() => setCurrentFolder(folderName)} style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>Open</button>
+                          <button type="button" onClick={() => setCurrentFolder(folderName)} style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>Open</button>
 
-                          <button disabled title="Folder rename is not supported by the backend" style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'not-allowed', transition: '0.2s', border: '1px solid #FEF3C7', opacity: 0.6 }}>Rename</button>
+                          <button type="button" disabled title="Folder rename is not supported by the backend" style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'not-allowed', transition: '0.2s', border: '1px solid #FEF3C7', opacity: 0.6 }}>Rename</button>
 
-                          <button disabled title="Folder delete is not supported by the backend" style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'not-allowed', transition: '0.2s', border: '1px solid #fecaca', opacity: 0.6 }}>Delete</button>
+                          <button type="button" disabled title="Folder delete is not supported by the backend" style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'not-allowed', transition: '0.2s', border: '1px solid #fecaca', opacity: 0.6 }}>Delete</button>
                         </div>
                     ))}
 
@@ -1259,11 +1331,11 @@ export default function PatientDashboard() {
                             <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>{file?.asset_kind ? String(file.asset_kind).replace('_', ' ') : 'medical image'}{file?.uploaded_at ? ` · ${new Date(file.uploaded_at).toLocaleString()}` : ''}</div>
                           </div>
 
-                          <button onClick={() => setPreviewFile(file)} style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>View</button>
+                          <button type="button" onClick={() => setPreviewFile(file)} style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>View</button>
                           
-                          <button onClick={() => handleRenameAsset(file)} title="Rename this file" style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #FEF3C7' }}>Rename</button>
+                          <button type="button" onClick={() => handleRenameAsset(file)} title="Rename this file" style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #FEF3C7' }}>Rename</button>
 
-                          <button onClick={() => handleDeleteAssetV2(file)} style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #fecaca' }} onMouseEnter={(e)=> {e.target.style.background='#ef4444'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#fee2e2'; e.target.style.color='#ef4444';}}>Delete</button>
+                          <button type="button" onClick={() => handleDeleteAssetV2(file)} style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #fecaca' }} onMouseEnter={(e)=> {e.target.style.background='#ef4444'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#fee2e2'; e.target.style.color='#ef4444';}}>Delete</button>
                         </div>
                     ))}
 

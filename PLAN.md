@@ -216,7 +216,7 @@ The goal is:
   - Manual: verify message arrives within target timeframe with SSE and falls back to polling when SSE fails.
   - Load test: basic concurrency check for real-time endpoint.
 
-[Todo Next] [frontend] stage 11: ***frontend architecture cleanup & state management***
+[Completed] [frontend] stage 11: ***frontend architecture cleanup & state management***
 
 - objective: Consolidate state and patterns into maintainable structure suitable for solo development and incremental scaling.
 - features:
@@ -233,7 +233,7 @@ The goal is:
   - Manual smoke tests across the app to ensure no regressions.
   - Add a few snapshot tests for critical components and basic lint/format verification.
 
-[Incomplete] [frontend] stage 12: ***security, error handling, responsive polish & deployment readiness***
+[Todo Next] [frontend] stage 12: ***security, error handling, responsive polish & deployment readiness***
 
 - objective: Final pass for UX polish, security hardening, accessibility, and production build readiness.
 - features:
