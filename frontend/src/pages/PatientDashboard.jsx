@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect, useRef } from 'react';
 import { useSession } from '../contexts/SessionContext';
 import { useNotifications, useAssetCache } from '../contexts';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { authApi, patientApi, resolvePatientUploadTarget, resolvePatientAssetKind } from '../lib/api';
 import { createRealTimeClient } from '../lib/realTimeClient';
 import '../styles/patient.css'; // Uses your existing patient CSS
@@ -10,6 +10,7 @@ import FileViewer from '../components/FileViewer';
 
 export default function PatientDashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState(null);
   const { markExpired, logout } = useSession();
   const [messages, setMessages] = useState([]);
@@ -17,21 +18,30 @@ export default function PatientDashboard() {
   const [language, setLanguage] = useState('en');
   const [activePanel, setActivePanel] = useState(() => {
     try {
-      return localStorage.getItem('doctalk_patient_active_panel') || 'explain';
+      const panel = new URLSearchParams(window.location.search).get('panel');
+      return ['explain', 'documents', 'xray', 'appointments', 'docchat', 'profile'].includes(panel) ? panel : 'explain';
     } catch (e) {
       return 'explain';
     }
   });
 
+  const setActivePanelFromNav = (panel) => {
+    const nextPanel = ['explain', 'documents', 'xray', 'appointments', 'docchat', 'profile'].includes(panel) ? panel : 'explain';
+    setActivePanel(nextPanel);
+    navigate(`/patient/dashboard?panel=${encodeURIComponent(nextPanel)}`);
+  };
+
+  useEffect(() => {
+    try {
+      const panel = new URLSearchParams(location.search).get('panel');
+      const nextPanel = ['explain', 'documents', 'xray', 'appointments', 'docchat', 'profile'].includes(panel) ? panel : 'explain';
+      setActivePanel((current) => (current === nextPanel ? current : nextPanel));
+    } catch (e) {}
+  }, [location.search]);
+
     const [isUploadingProfile, setIsUploadingProfile] = useState(false);
     const { addNotification } = useNotifications();
     const { getAsset, setAsset, removeAsset } = useAssetCache();
-
-    useEffect(() => {
-      try {
-        localStorage.setItem('doctalk_patient_active_panel', activePanel);
-      } catch (e) {}
-    }, [activePanel]);
     
     const handleProfileUpdate = async (e) => {
       e.preventDefault();
@@ -567,7 +577,7 @@ export default function PatientDashboard() {
   }, [docMessages]);
 
   const handleSelectDoctorForAppointment = (docId) => {
-    setActivePanel('appointments');
+    setActivePanelFromNav('appointments');
     setAppointmentDraft(prev => ({ ...prev, doctor_id: String(docId) }));
   };
 
@@ -879,41 +889,37 @@ export default function PatientDashboard() {
 
             <button 
               className={activePanel === 'explain' ? 'active' : ''}
-              onClick={() => setActivePanel('explain')}
+              onClick={() => setActivePanelFromNav('explain')}
             >
               Analyze Report
             </button>
               <button
                 className={activePanel === 'documents' ? 'active' : ''}
-                onClick={() => setActivePanel('documents')}
+                onClick={() => setActivePanelFromNav('documents')}
               >
                 My Documents
               </button>
             <button 
-              type="button"
               className={activePanel === 'xray' ? 'active' : ''}
-              onClick={() => setActivePanel('xray')}
+              onClick={() => setActivePanelFromNav('xray')}
             >
               X-Ray Analysis
             </button>
             <button 
-              type="button"
               className={activePanel === 'appointments' ? 'active' : ''}
-              onClick={() => setActivePanel('appointments')}
+              onClick={() => setActivePanelFromNav('appointments')}
             >
               Appointments
             </button>
             <button 
-              type="button"
               className={activePanel === 'docchat' ? 'active' : ''}
-              onClick={() => setActivePanel('docchat')}
+              onClick={() => setActivePanelFromNav('docchat')}
             >
               Doctor Chat
             </button>
             <button 
-              type="button"
               className={activePanel === 'profile' ? 'active' : ''}
-              onClick={() => setActivePanel('profile')}
+              onClick={() => setActivePanelFromNav('profile')}
             >
               Profile
             </button>
@@ -1213,10 +1219,10 @@ export default function PatientDashboard() {
                 </div>
                 <div style={{display: 'flex', gap: '8px'}}>
                   {currentFolder === null && (
-                      <button type="button" onClick={handleCreateFolder} style={{ background: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>+ New Folder</button>
+                      <button onClick={handleCreateFolder} style={{ background: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>+ New Folder</button>
                   )}
                   <input type="file" id="upload-doc-v2" style={{display: 'none'}} onChange={handleUploadAssetV2} />
-                  <button type="button" onClick={() => document.getElementById('upload-doc-v2').click()} style={{ background: '#6C5CE7', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Upload Here</button>
+                  <button onClick={() => document.getElementById('upload-doc-v2').click()} style={{ background: '#6C5CE7', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Upload Here</button>
                 </div>
               </div>
 
@@ -1261,8 +1267,8 @@ export default function PatientDashboard() {
                           autoFocus
                         />
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-                          <button type="button" onClick={() => { setRenameTarget(null); setRenameValue(''); }} style={{ padding: '8px 14px', borderRadius: 999, border: '1px solid #E2E8F0', background: '#F8FAFC', color: '#475569', cursor: 'pointer' }}>Cancel</button>
-                          <button type="button" onClick={submitRenameAsset} disabled={!renameValue.trim()} style={{ padding: '8px 14px', borderRadius: 999, border: '1px solid #C4B5FD', background: renameValue.trim() ? '#6C5CE7' : '#C7D2FE', color: '#fff', cursor: renameValue.trim() ? 'pointer' : 'not-allowed' }}>Save</button>
+                          <button onClick={() => { setRenameTarget(null); setRenameValue(''); }} style={{ padding: '8px 14px', borderRadius: 999, border: '1px solid #E2E8F0', background: '#F8FAFC', color: '#475569', cursor: 'pointer' }}>Cancel</button>
+                          <button onClick={submitRenameAsset} disabled={!renameValue.trim()} style={{ padding: '8px 14px', borderRadius: 999, border: '1px solid #C4B5FD', background: renameValue.trim() ? '#6C5CE7' : '#C7D2FE', color: '#fff', cursor: renameValue.trim() ? 'pointer' : 'not-allowed' }}>Save</button>
                         </div>
                       </div>
                     </div>
@@ -1299,11 +1305,11 @@ export default function PatientDashboard() {
                             <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>Folder</div>
                           </div>
                           
-                          <button type="button" onClick={() => setCurrentFolder(folderName)} style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>Open</button>
+                          <button onClick={() => setCurrentFolder(folderName)} style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>Open</button>
 
-                          <button type="button" disabled title="Folder rename is not supported by the backend" style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'not-allowed', transition: '0.2s', border: '1px solid #FEF3C7', opacity: 0.6 }}>Rename</button>
+                          <button disabled title="Folder rename is not supported by the backend" style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'not-allowed', transition: '0.2s', border: '1px solid #FEF3C7', opacity: 0.6 }}>Rename</button>
 
-                          <button type="button" disabled title="Folder delete is not supported by the backend" style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'not-allowed', transition: '0.2s', border: '1px solid #fecaca', opacity: 0.6 }}>Delete</button>
+                          <button disabled title="Folder delete is not supported by the backend" style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'not-allowed', transition: '0.2s', border: '1px solid #fecaca', opacity: 0.6 }}>Delete</button>
                         </div>
                     ))}
 
@@ -1331,11 +1337,11 @@ export default function PatientDashboard() {
                             <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>{file?.asset_kind ? String(file.asset_kind).replace('_', ' ') : 'medical image'}{file?.uploaded_at ? ` · ${new Date(file.uploaded_at).toLocaleString()}` : ''}</div>
                           </div>
 
-                          <button type="button" onClick={() => setPreviewFile(file)} style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>View</button>
+                          <button onClick={() => setPreviewFile(file)} style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>View</button>
                           
-                          <button type="button" onClick={() => handleRenameAsset(file)} title="Rename this file" style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #FEF3C7' }}>Rename</button>
+                          <button onClick={() => handleRenameAsset(file)} title="Rename this file" style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #FEF3C7' }}>Rename</button>
 
-                          <button type="button" onClick={() => handleDeleteAssetV2(file)} style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #fecaca' }} onMouseEnter={(e)=> {e.target.style.background='#ef4444'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#fee2e2'; e.target.style.color='#ef4444';}}>Delete</button>
+                          <button onClick={() => handleDeleteAssetV2(file)} style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #fecaca' }} onMouseEnter={(e)=> {e.target.style.background='#ef4444'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#fee2e2'; e.target.style.color='#ef4444';}}>Delete</button>
                         </div>
                     ))}
 

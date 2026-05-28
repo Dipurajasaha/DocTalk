@@ -38,3 +38,18 @@ Frontend architecture cleanup & state management
 
 ## Next Expected Action
 - None. Stage 11 is complete and the affected frontend flows were smoke-tested in-browser.
+
+## Conformance to PLAN.md
+
+- **Implemented:**
+	- **State management:** React Contexts and hooks added via `frontend/src/contexts/SessionContext.jsx`, `frontend/src/contexts/NotificationContext.jsx`, and `frontend/src/contexts/AssetCacheContext.jsx`.
+	- **Providers wired:** Context providers are mounted in `frontend/src/main.jsx` and `NotificationTray` is rendered in `frontend/src/App.jsx`.
+	- **Reorganization:** Primary folders (`pages/`, `components/`, `lib/`, `contexts/`, `styles/`) were created and consumers migrated where noted in "Changed Files."
+	- **Manual validation:** `npm run build` succeeded and browser smoke tests covered patient flows, uploads, rename, and delete.
+
+- **Pending / Not Verified:**
+	- **Lint/format scripts & README:** The PLAN requested adding lint/format scripts and a frontend README; these files were not present in the reported "Changed Files" and should be added or confirmed.
+	- **Snapshot tests:** PLAN suggested adding snapshot tests for critical components; no test files were listed in "Changed Files" and their presence wasn't verified.
+	- **Full repo verification:** A quick pass confirms many Stage 11 changes, but please authorize a repo scan if you want exhaustive verification (adds/renames across `frontend/src`).
+
+If you want, I can (1) add the missing lint/format scripts and README, (2) run a quick workspace search to list any files still in old locations, or (3) add the suggested snapshot tests. Which should I do next?

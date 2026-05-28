@@ -233,7 +233,7 @@ The goal is:
   - Manual smoke tests across the app to ensure no regressions.
   - Add a few snapshot tests for critical components and basic lint/format verification.
 
-[Todo Next] [frontend] stage 12: ***security, error handling, responsive polish & deployment readiness***
+[Completed] [frontend] stage 12: ***security, error handling, responsive polish & deployment readiness***
 
 - objective: Final pass for UX polish, security hardening, accessibility, and production build readiness.
 - features:

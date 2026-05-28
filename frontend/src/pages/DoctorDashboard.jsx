@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useRef } from 'react';
 import { useSession } from '../contexts/SessionContext';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { authApi, doctorApi, patientApi } from '../lib/api';
 import { createRealTimeClient } from '../lib/realTimeClient';
@@ -158,10 +158,13 @@ const CustomCalendar = ({ selectedDate, onDateSelect, dashboardData, slotsData }
 
 export default function DoctorDashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState(null);
   const { markExpired, logout, session } = useSession();
   const [activeTab, setActiveTab] = useState(() => {
     try {
+      const tab = new URLSearchParams(window.location.search).get('tab');
+      if (['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].includes(tab)) return tab;
       return localStorage.getItem('doctalk_doctor_active_tab') || 'dashboard';
     } catch (e) {
       return 'dashboard';
@@ -184,6 +187,21 @@ export default function DoctorDashboard() {
   const [slotDate, setSlotDate] = useState(formatObjToDate(new Date()));
   const [slotsData, setSlotsData] = useState({});
   const { addNotification } = useNotifications();
+
+  const setActiveTabFromNav = (tab) => {
+    const nextTab = ['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].includes(tab) ? tab : 'dashboard';
+    setActiveTab(nextTab);
+    navigate(`/doctor/dashboard?tab=${encodeURIComponent(nextTab)}`);
+  };
+
+  useEffect(() => {
+    try {
+      const tab = new URLSearchParams(location.search).get('tab');
+      if (['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].includes(tab)) {
+        setActiveTab((current) => (current === tab ? current : tab));
+      }
+    } catch (e) {}
+  }, [location.search]);
 
   // Patient Chat States
   const [patientChatList, setPatientChatList] = useState([]);
@@ -532,7 +550,7 @@ export default function DoctorDashboard() {
             {/* Header Row */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                 <h3 style={{ margin: 0, color: '#6C5CE7', fontSize: '18px', fontWeight: '700' }}>Sessions</h3>
-                <a href="#" onClick={(e) => { e.preventDefault(); setActiveTab('sessions'); setManageSessionTab('upcoming'); }} style={{ color: '#0ea5e9', textDecoration: 'none', fontSize: '14px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <a href="#" onClick={(e) => { e.preventDefault(); setActiveTabFromNav('sessions'); setManageSessionTab('upcoming'); }} style={{ color: '#0ea5e9', textDecoration: 'none', fontSize: '14px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '4px' }}>
                   View all Sessions <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
                 </a>
             </div>
@@ -1049,7 +1067,7 @@ export default function DoctorDashboard() {
           {['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].map(tab => (
             <button 
               key={tab} 
-              onClick={() => setActiveTab(tab)}
+              onClick={() => setActiveTabFromNav(tab)}
               className={activeTab === tab ? 'active' : ''}
               style={tab === 'sessions' ? {textTransform: 'capitalize'} : {}}
             >
