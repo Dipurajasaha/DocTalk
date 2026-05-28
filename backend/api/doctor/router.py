@@ -18,6 +18,14 @@ def get_doctor_service() -> DoctorService:
     return DoctorService()
 
 
+def _consultation_attr(consultation: Any, *names: str) -> str:
+    for name in names:
+        value = getattr(consultation, name, None)
+        if value is not None and value != '':
+            return str(value)
+    return ''
+
+
 class DoctorCopilotResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     patient_summary: dict[str, Any]
@@ -74,7 +82,8 @@ async def doctor_copilot_for_consultation(
     consultation = await prisma.consultation.find_unique(where={"id": consultation_id})
     if consultation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consultation not found")
-    if str(getattr(consultation, "doctorId", "")) != current_user.user_id:
+    consultation_doctor_id = _consultation_attr(consultation, "doctorId", "doctor_id")
+    if consultation_doctor_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to access this consultation")
     payload = await doctor_copilot_workflow.run(
         requester_id=current_user.user_id,
@@ -99,7 +108,9 @@ async def doctor_copilot_for_patient(
         consultation = await prisma.consultation.find_unique(where={"id": consultation_id})
         if consultation is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consultation not found")
-        if str(getattr(consultation, "doctorId", "")) != current_user.user_id or str(getattr(consultation, "patientUsername", "")) != patient_id:
+        consultation_doctor_id = _consultation_attr(consultation, "doctorId", "doctor_id")
+        consultation_patient_id = _consultation_attr(consultation, "patientUsername", "patient_username")
+        if consultation_doctor_id != current_user.user_id or consultation_patient_id != patient_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to access this patient's consultation")
     else:
         permitted = await prisma.consultation.find_first(where={"doctorId": current_user.user_id, "patientUsername": patient_id})

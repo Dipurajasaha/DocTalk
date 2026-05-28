@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { authApi, doctorApi, patientApi } from '../lib/api';
 import '../styles/doctor.css';
+import CopilotPanel from '../components/CopilotPanel';
 
 const timeSlots = [];
 for (let h = 0; h < 24; h++) {
@@ -180,10 +181,6 @@ export default function DoctorDashboard() {
   const patientChatEndRef = useRef(null);
   const patientAutoScrollRef = useRef(false);
 
-  // Assistant Chat States
-  const [assistantMessages, setAssistantMessages] = useState([]);
-  const [assistantInput, setAssistantInput] = useState('');
-
   // 1. Fetch Doctor Session on Mount
   useEffect(() => {
     // Prefer session from central provider when available
@@ -335,74 +332,6 @@ export default function DoctorDashboard() {
       patientAutoScrollRef.current = false;
     }
   }, [patientMessages]);
-
-  // Assistant Chat Logic
-  useEffect(() => {
-    if(activeTab === 'assistant') {
-      fetch('/api/doctor_assistant_history', { credentials: 'include' })
-        .then(res => res.json())
-        .then(data => {
-          if(data.success) {
-            setAssistantMessages(data.history || []);
-          }
-        });
-    }
-  }, [activeTab]);
-
-  const handleAssistantSubmit = async (e) => {
-    e.preventDefault();
-    if(!assistantInput.trim()) return;
-    
-    const newMsg = { role: 'user', content: assistantInput };
-    setAssistantMessages(prev => [...prev, newMsg, { role: 'assistant', content: 'Typing...', id: 'loading' }]);
-    setAssistantInput('');
-
-    try {
-      const res = await fetch('/api/doctor_assistant_chat', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        credentials: 'include',
-        body: JSON.stringify({messages: [newMsg]})
-      });
-      const data = await res.json();
-      setAssistantMessages(prev => {
-        const filtered = prev.filter(m => m.id !== 'loading');
-        if (data.success) {
-          const reply = data.reply;
-          // Convert any structured response to plain text string
-          let textReply = '';
-          if (typeof reply === 'object' && reply) {
-            // Flatten structured object into readable text
-            const parts = [];
-            if (reply.summary) parts.push(reply.summary);
-            if (reply.key_findings && Array.isArray(reply.key_findings)) {
-              parts.push('Key Findings: ' + reply.key_findings.join(', '));
-            }
-            if (reply.observations && Array.isArray(reply.observations)) {
-              parts.push('Observations: ' + reply.observations.join(', '));
-            }
-            if (reply.risks && Array.isArray(reply.risks)) {
-              parts.push('Risks: ' + reply.risks.join(', '));
-            }
-            if (reply.recommendations && Array.isArray(reply.recommendations)) {
-              parts.push('Recommendations: ' + reply.recommendations.join(', '));
-            }
-            if (reply.notes) {
-              const notesText = Array.isArray(reply.notes) ? reply.notes.join('. ') : reply.notes;
-              parts.push('Notes: ' + notesText);
-            }
-            textReply = parts.filter(p => p).join('\n\n');
-          } else {
-            textReply = String(reply);
-          }
-          return [...filtered, { role: 'assistant', content: textReply }];
-        }
-        return [...filtered, { role: 'assistant', content: 'Error: ' + data.error }];
-      });
-    } catch (err) {
-      setAssistantMessages(prev => prev.filter(m => m.id !== 'loading'));
-    }
-  };
 
   // 3. Handle Logout
   const handleLogout = async () => {
@@ -885,31 +814,14 @@ export default function DoctorDashboard() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <h1 className="doc-h1">AI Medical Assistant</h1>
           <div className="doc-section" style={{ display: 'flex', flexDirection: 'column', height: '80vh', padding: 0 }}>
-          <div style={{ padding: '20px', borderBottom: '1px solid #f0f0f0', fontWeight: '700', color: '#8B7EFF', fontSize: '16px' }}>AI Medical Assistant</div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '15px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {assistantMessages.map((m, i) => (
-              <div key={i} style={{ 
-                alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-                color: '#333', maxWidth: '80%', fontSize: '14px'
-              }}>
-                {m.structured ? (
-                  <div style={{ background: '#f9f9f9', border: '1px solid #f0f0f0', padding: '10px 14px', borderRadius: '14px' }} dangerouslySetInnerHTML={{ __html: String(m.content || '').replace(/\n/g, '<br/>') }} />
-                ) : (
-                  <div style={{ background: m.role === 'user' ? '#f3f0ff' : '#f9f9f9', border: m.role === 'user' ? '1px solid #8B7EFF' : '1px solid #f0f0f0', padding: '10px 14px', borderRadius: '14px' }} dangerouslySetInnerHTML={{ __html: String(m.content || '').replace(/\n/g, '<br/>') }} />
-                )}
+            <div style={{ padding: '20px', borderBottom: '1px solid #f0f0f0', fontWeight: '700', color: '#8B7EFF', fontSize: '16px' }}>AI Medical Assistant</div>
+            <div style={{ padding: '16px' }}>
+              <CopilotPanel defaultPatientId={dashboardData?.upcoming_schedules?.[0]?.patient || ''} />
+              <div style={{ marginTop: '12px', fontSize: '12px', color: '#64748B' }}>
+                Read-only copilot output only. No assistant chat or write actions are exposed here.
               </div>
-            ))}
+            </div>
           </div>
-          <form onSubmit={handleAssistantSubmit} style={{ display: 'flex', padding: '15px', borderTop: '1px solid #eee', gap: '10px' }}>
-            <input 
-              type="text" 
-              value={assistantInput} onChange={e=>setAssistantInput(e.target.value)}
-              placeholder="Ask assistant to schedule an appointment..."
-              style={{ flex: 1, padding: '12px 18px', border: '1px solid #e2e8f0', borderRadius: '50px', outline: 'none' }}
-            />
-            <button className="doc-btn doc-btn-primary" style={{ padding: '10px 24px', borderRadius: '50px', background: '#8B7EFF', color: '#fff', border: 'none', fontWeight: '600', cursor: 'pointer' }}>Send</button>
-          </form>
-        </div>
         </div>
       );
       case 'payments': return (

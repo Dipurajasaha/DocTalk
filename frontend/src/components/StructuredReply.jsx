@@ -1,8 +1,25 @@
 import React from 'react';
 
+const toText = (value) => {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+};
+
+const toArray = (value) => (Array.isArray(value) ? value : []);
+
 export default function StructuredReply({ data }) {
-  if (!data) return null;
-  const { title, description, key_points, observations, recommendations } = data;
+  if (!data || typeof data !== 'object') {
+    return <pre style={{ whiteSpace: 'pre-wrap', margin: 0, color: '#0f172a' }}>{toText(data) || 'No structured data available.'}</pre>;
+  }
+
+  const title = toText(data.title);
+  const description = toText(data.description);
+  const keyPoints = toArray(data.key_points).map((item) => toText(item)).filter(Boolean);
+  const observations = toArray(data.observations).map((item) => toText(item)).filter(Boolean);
+  const recommendations = toArray(data.recommendations).map((item) => toText(item)).filter(Boolean);
+  const fallbackJson = JSON.stringify(data?.raw ?? data, null, 2);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -14,11 +31,11 @@ export default function StructuredReply({ data }) {
         <div style={{ fontSize: '13px', color: '#334155' }}>{description}</div>
       )}
 
-      {key_points && key_points.length > 0 && (
+      {keyPoints.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <div style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>Key points</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
-            {key_points.map((kp, i) => (
+            {keyPoints.map((kp, i) => (
               <div key={i} style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '10px', padding: '8px', fontSize: '12px', color: '#0F172A' }}>
                 {kp}
               </div>
@@ -27,7 +44,7 @@ export default function StructuredReply({ data }) {
         </div>
       )}
 
-      {observations && observations.length > 0 && (
+      {observations.length > 0 && (
         <div>
           <div style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B', marginBottom: '6px' }}>Observations</div>
           <ul style={{ margin: 0, paddingLeft: '18px', color: '#334155' }}>
@@ -38,7 +55,7 @@ export default function StructuredReply({ data }) {
         </div>
       )}
 
-      {recommendations && recommendations.length > 0 && (
+      {recommendations.length > 0 && (
         <div>
           <div style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B', marginBottom: '6px' }}>Recommendations</div>
           <ul style={{ margin: 0, paddingLeft: '18px', color: '#334155' }}>
@@ -48,6 +65,11 @@ export default function StructuredReply({ data }) {
           </ul>
         </div>
       )}
+
+      <details style={{ marginTop: '4px' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '12px', color: '#475569' }}>Raw JSON</summary>
+        <pre style={{ whiteSpace: 'pre-wrap', margin: '8px 0 0', color: '#0f172a', fontSize: '12px' }}>{fallbackJson}</pre>
+      </details>
     </div>
   );
 }

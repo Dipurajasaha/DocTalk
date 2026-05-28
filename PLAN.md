@@ -176,7 +176,7 @@ The goal is:
 - validation/testing goals:
   - Manual: open report -> see metadata and content; attach to consultation and verify backend link.
 
-[Todo Next] [frontend] stage 9: ***AI / Copilot integration (read-first then action)***
+[Completed] [frontend] stage 9: ***AI / Copilot integration (read-first then action)***
 
 - objective: Integrate the frontend with the existing copilot/AI workflows in a conservative, auditable way (read-only outputs first).
 - features:
@@ -196,7 +196,7 @@ The goal is:
   - Manual: run copilot for sample patient; verify provenance fields and no write actions occur without explicit doctor action.
   - UX test: ensure outputs are readable on mobile and accessible.
 
-[Incomplete] [frontend] stage 10: ***real-time communication & notifications (incremental)***
+[Todo Next] [frontend] stage 10: ***real-time communication & notifications (incremental)***
 
 - objective: Add near-real-time chat updates and in-app notifications with a progressive enhancement approach (polling → SSE/WebSocket).
 - features:

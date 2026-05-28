@@ -99,7 +99,7 @@ class RetrievalService:
 		memory_cutoff = self._memory_cutoff()
 		if memory_cutoff is not None:
 			args.append(memory_cutoff)
-			clauses.append(f"created_at >= ${len(args)}")
+			clauses.append(f"created_at >= ${len(args)}::timestamp")
 		if consultation_id is not None:
 			args.append(consultation_id)
 			clauses.append(f"consultation_id = ${len(args)}")
@@ -137,7 +137,7 @@ class RetrievalService:
 		memory_cutoff = self._memory_cutoff()
 		if memory_cutoff is not None:
 			args.append(memory_cutoff)
-			clauses.append(f"created_at >= ${len(args)}")
+			clauses.append(f"created_at >= ${len(args)}::timestamp")
 		if consultation_id is not None:
 			args.append(consultation_id)
 			clauses.append(f"consultation_id = ${len(args)}")

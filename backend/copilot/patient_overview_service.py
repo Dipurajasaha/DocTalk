@@ -221,9 +221,17 @@ class PatientOverviewService:
         if role != "doctor":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid role")
 
-        where: dict[str, Any] = {"patientUsername": patient_id, "doctorId": requester_id}
         if consultation_id:
-            where["id"] = consultation_id
+            consultation = await prisma.consultation.find_unique(where={"id": consultation_id})
+            if consultation is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consultation not found")
+            consultation_doctor_id = self._consultation_attr(consultation, "doctorId", "doctor_id")
+            consultation_patient_id = self._consultation_attr(consultation, "patientUsername", "patient_username")
+            if consultation_doctor_id != requester_id or consultation_patient_id != patient_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to access this patient's overview")
+            return
+
+        where: dict[str, Any] = {"patientUsername": patient_id, "doctorId": requester_id}
         consultation = await prisma.consultation.find_first(where=where)
         if consultation is None:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to access this patient's overview")
@@ -262,6 +270,14 @@ class PatientOverviewService:
         if len(value) <= limit:
             return value
         return value[:limit].rstrip() + "..."
+
+    @staticmethod
+    def _consultation_attr(consultation: Any, *names: str) -> str:
+        for name in names:
+            value = getattr(consultation, name, None)
+            if value is not None and value != "":
+                return str(value)
+        return ""
 
 
 patient_overview_service = PatientOverviewService()

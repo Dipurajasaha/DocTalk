@@ -42,7 +42,7 @@ export async function apiRequest(path, options = {}) {
     token,
     retries = 1,
     retryDelayMs = 250,
-    credentials = 'include',
+    credentials = 'same-origin',
     auth = false,
     signal,
   } = options;

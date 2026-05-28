@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const PROXY_TIMEOUT_MS = 60000;
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -8,9 +10,8 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
-        // reduce wait and handle backend-down errors gracefully to avoid noisy ECONNREFUSED logs
-        timeout: 2000,
-        proxyTimeout: 2000,
+        timeout: PROXY_TIMEOUT_MS,
+        proxyTimeout: PROXY_TIMEOUT_MS,
         onError(err, req, res) {
           try {
             if (!res.headersSent) {
@@ -23,8 +24,8 @@ export default defineConfig({
       '/static': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
-        timeout: 2000,
-        proxyTimeout: 2000,
+        timeout: PROXY_TIMEOUT_MS,
+        proxyTimeout: PROXY_TIMEOUT_MS,
         onError(err, req, res) {
           try {
             if (!res.headersSent) {
@@ -37,8 +38,8 @@ export default defineConfig({
       '/me': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
-        timeout: 2000,
-        proxyTimeout: 2000,
+        timeout: PROXY_TIMEOUT_MS,
+        proxyTimeout: PROXY_TIMEOUT_MS,
         onError(err, req, res) {
           try {
             if (!res.headersSent) {

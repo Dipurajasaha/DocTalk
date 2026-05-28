@@ -60,6 +60,7 @@ export const patientApi = {
   listAppointments: () => apiClient.get('/api/appointments', { retries: 1, auth: true }),
   listMyAppointments: () => apiClient.get('/api/my_appointments', { retries: 1, auth: true }),
   listDoctors: () => apiClient.get('/api/doctor/list', { retries: 1, auth: true }),
+  getConsultation: (consultationId) => apiClient.get(`/api/chat/consultations/${encodeURIComponent(consultationId)}`, { retries: 1, auth: true }),
   createAppointment: (body) => apiClient.post('/api/appointments', body, { retries: 0, auth: true }),
   cancelAppointment: (appointmentId) => apiClient.patch(`/api/appointments/${appointmentId}/cancel`, {}, { retries: 0, auth: true }),
   listMedicalImages: () => apiClient.get('/api/medical_images', { retries: 1, auth: true }),
@@ -152,4 +153,9 @@ export const doctorApi = {
       throw err;
     }
   },
+  getCopilotForPatient: (patientId, consultationId = '') => {
+    const query = consultationId ? `?consultation_id=${encodeURIComponent(consultationId)}` : '';
+    return apiClient.get(`/api/doctor/copilot/patients/${encodeURIComponent(patientId)}${query}`, { retries: 1, auth: true });
+  },
+  getCopilotForConsultation: (consultationId) => apiClient.get(`/api/doctor/copilot/consultations/${encodeURIComponent(consultationId)}`, { retries: 1, auth: true }),
 };
