@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect, useRef } from 'react';
 import { useSession } from '../contexts/SessionContext';
 import { useNavigate } from 'react-router-dom';
-import { authApi, patientApi } from '../lib/api';
+import { authApi, patientApi, resolvePatientUploadTarget, resolvePatientAssetKind } from '../lib/api';
 import '../styles/patient.css'; // Uses your existing patient CSS
 import XrayAnalyzerPanel from '../components/XrayAnalyzerPanel';
 import FileViewer from '../components/FileViewer';
@@ -112,24 +112,31 @@ export default function PatientDashboard() {
   }, [navigate]);
 
   const loadAssets = () => {
-    patientApi.listMedicalImages()
-    .then(data => {
-      // adapt response shape if backend uses list of assets
-      if(Array.isArray(data)) {
+    const normalizeAssets = (items, assetKind) => (Array.isArray(items) ? items : []).map((item) => ({
+      ...item,
+      id: item.id,
+      asset_kind: item.file_type || item.asset_kind || assetKind,
+      name: item.original_name || item.originalName || item.name || 'Document',
+      folder: item.folder || '',
+      uploaded_at: item.created_at || item.createdAt || item.uploaded_at || '',
+    }));
+
+    Promise.allSettled([
+      patientApi.listMedicalImages(),
+      patientApi.listReports(),
+      patientApi.listPrescriptions(),
+    ])
+      .then(([images, reports, prescriptions]) => {
+        const imageItems = images.status === 'fulfilled' ? normalizeAssets(images.value, 'medical_image') : [];
+        const reportItems = reports.status === 'fulfilled' ? normalizeAssets(reports.value, 'report') : [];
+        const prescriptionItems = prescriptions.status === 'fulfilled' ? normalizeAssets(prescriptions.value, 'prescription') : [];
+
         setAssets({
           folders: [],
-          files: data.map((item) => ({
-            ...item,
-            id: item.id,
-            name: item.original_name || item.originalName || item.name || 'Document',
-            folder: item.folder || '',
-            uploaded_at: item.created_at || item.createdAt || item.uploaded_at || '',
-          })),
+          files: [...imageItems, ...reportItems, ...prescriptionItems],
         });
-      } else if (data.success && data.assets) {
-        setAssets(data.assets || { folders: [], files: [] });
-      }
-    }).catch(e => console.error(e));
+      })
+      .catch(e => console.error(e));
     };
 
     useEffect(() => {
@@ -153,7 +160,7 @@ export default function PatientDashboard() {
 
       // Basic client-side validation
       const maxSize = 15 * 1024 * 1024; // 15MB
-      const allowedTypes = ['application/pdf', 'image/png', 'image/jpg', 'image/jpeg', 'image/gif'];
+      const allowedTypes = ['application/pdf', 'image/png', 'image/jpg', 'image/jpeg', 'image/webp', 'image/gif'];
       if (file.size > maxSize) { alert('File too large. Max 15MB allowed.'); e.target.value = null; return; }
       if (!allowedTypes.includes(file.type) && !file.name.toLowerCase().endsWith('.pdf')) { alert('Unsupported file type. Use PDF or images.'); e.target.value = null; return; }
 
@@ -168,7 +175,8 @@ export default function PatientDashboard() {
       // Use XMLHttpRequest to support progress events and Authorization header
       const xhr = new XMLHttpRequest();
       const token = localStorage.getItem('doctalk_token');
-      xhr.open('POST', '/api/medical_images/upload');
+      const uploadTarget = resolvePatientUploadTarget(file);
+      xhr.open('POST', uploadTarget.endpoint);
       if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
 
       xhr.upload.onprogress = (event) => {
@@ -203,9 +211,16 @@ export default function PatientDashboard() {
       if (e.target) e.target.value = null;
     };
 
-    const handleDeleteAssetV2 = (id, type) => {
-      if (!window.confirm("Are you sure you want to delete this " + type + "?")) return;
-      patientApi.deleteMedicalImage(id)
+    const handleDeleteAssetV2 = (file) => {
+      if (!window.confirm("Are you sure you want to delete this file?")) return;
+      const kind = String(file?.asset_kind || 'medical_image');
+      const deleteRequest = kind === 'report'
+        ? patientApi.deleteReport(file.id)
+        : kind === 'prescription'
+          ? patientApi.deletePrescription(file.id)
+          : patientApi.deleteMedicalImage(file.id);
+
+      deleteRequest
       .then(data => {
         if (data && (data.success || data.message)) {
           loadAssets();
@@ -219,10 +234,10 @@ export default function PatientDashboard() {
       alert('Folder management is not supported by the current backend for medical images.');
     };
 
-    const handleRenameAsset = (id, oldName, type) => {
-      const newName = window.prompt("Enter new name for " + type + ":", type === 'folder' ? oldName : '');
+    const handleRenameAsset = (file) => {
+      const newName = window.prompt("Enter new name for file:", file?.name || file?.original_name || '');
       if (!newName) return;
-      patientApi.renameMedicalImage(id, newName)
+      patientApi.renameAsset({ ...file, asset_kind: resolvePatientAssetKind(file) }, newName)
       .then(data => {
         if (data && (data.id || data.original_name || data.originalName)) {
           loadAssets();
@@ -1094,6 +1109,25 @@ export default function PatientDashboard() {
                   {previewFile && (
                     <FileViewer file={previewFile} onClose={() => setPreviewFile(null)} />
                   )}
+                  {(() => {
+                    const getAssetIcon = (file) => {
+                      const kind = String(file?.asset_kind || 'medical_image');
+                      const mime = String(file?.mime_type || '').toLowerCase();
+                      const baseStyle = { width: '20px', height: '20px' };
+                      if (kind === 'report') {
+                        return <svg {...baseStyle} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><path d="M8 13h8" /><path d="M8 17h8" /></svg>;
+                      }
+                      if (kind === 'prescription') {
+                        return <svg {...baseStyle} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h9l7 7v9H4z" /><path d="M13 4v7h7" /><path d="M8 14h8" /><path d="M10 10a2 2 0 1 1 0 4" /><path d="M12 10v4" /></svg>;
+                      }
+                      if (mime.startsWith('image/')) {
+                        return <svg {...baseStyle} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>;
+                      }
+                      return <svg {...baseStyle} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>;
+                    };
+
+                    return null;
+                  })()}
                   {/* UNIFIED 1D LIST VIEW */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {/* Folders (only in root) */}
@@ -1118,19 +1152,32 @@ export default function PatientDashboard() {
                     {/* Files */}
                     {assets.files.filter(f => (f.folder || '') === (currentFolder || '')).map((file, i) => (
                         <div key={'file'+i} style={{ display: 'flex', alignItems: 'center', padding: '16px', border: '1px solid #E2E8F0', borderRadius: '12px', background: '#FFF' }}>
-                          <div style={{ width: '40px', height: '40px', background: '#EEF2FF', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '16px', color: '#6366F1' }}>
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                          <div style={{ width: '40px', height: '40px', background: file?.asset_kind === 'report' ? '#EEF2FF' : file?.asset_kind === 'prescription' ? '#ECFDF5' : '#F8FAFC', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '16px', color: file?.asset_kind === 'report' ? '#6366F1' : file?.asset_kind === 'prescription' ? '#16A34A' : '#475569' }}>
+                            {(() => {
+                              const kind = String(file?.asset_kind || 'medical_image');
+                              const mime = String(file?.mime_type || '').toLowerCase();
+                              if (kind === 'report') {
+                                return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><path d="M8 13h8" /><path d="M8 17h8" /></svg>;
+                              }
+                              if (kind === 'prescription') {
+                                return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h9l7 7v9H4z" /><path d="M13 4v7h7" /><path d="M8 14h8" /><path d="M10 10a2 2 0 1 1 0 4" /><path d="M12 10v4" /></svg>;
+                              }
+                              if (mime.startsWith('image/')) {
+                                return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>;
+                              }
+                              return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>;
+                            })()}
                           </div>
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: '600', fontSize: '12px', color: '#1E293B' }}>{file?.name || file?.original_name || `File ${i+1}`} </div>
-                            <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>{file?.uploaded_at ? new Date(file.uploaded_at).toLocaleString() : 'Unknown Date'}</div>
+                            <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>{file?.asset_kind ? String(file.asset_kind).replace('_', ' ') : 'medical image'}{file?.uploaded_at ? ` · ${new Date(file.uploaded_at).toLocaleString()}` : ''}</div>
                           </div>
 
                           <button onClick={() => setPreviewFile(file)} style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>View</button>
                           
-                          <button onClick={() => handleRenameAsset(file.id, file.name || file.original_name, 'file')} style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #FEF3C7' }}>Rename</button>
+                          <button onClick={() => handleRenameAsset(file)} title="Rename this file" style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #FEF3C7' }}>Rename</button>
 
-                          <button onClick={() => handleDeleteAssetV2(file?.id, 'file')} style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #fecaca' }} onMouseEnter={(e)=> {e.target.style.background='#ef4444'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#fee2e2'; e.target.style.color='#ef4444';}}>Delete</button>
+                          <button onClick={() => handleDeleteAssetV2(file)} style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #fecaca' }} onMouseEnter={(e)=> {e.target.style.background='#ef4444'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#fee2e2'; e.target.style.color='#ef4444';}}>Delete</button>
                         </div>
                     ))}
 

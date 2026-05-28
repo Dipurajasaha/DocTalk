@@ -69,3 +69,16 @@ async def delete_prescription(
 ) -> OperationResponse:
     await prescription_service.delete_asset(current_user.user_id, current_user.role, prescription_id)
     return OperationResponse(message="Prescription deleted")
+
+
+@router.patch("/{prescription_id}", response_model=MedicalAssetResponse)
+async def rename_prescription(
+    prescription_id: str,
+    payload: dict[str, str],
+    current_user: CurrentUser = Depends(get_current_user),
+    prescription_service: PrescriptionService = Depends(get_prescription_service),
+) -> MedicalAssetResponse:
+    new_name = payload.get("new_name", "").strip()
+    return MedicalAssetResponse.model_validate(
+        await prescription_service.rename_asset(current_user.user_id, current_user.role, prescription_id, new_name)
+    )

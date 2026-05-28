@@ -2,13 +2,17 @@ import { useEffect, useState } from 'react';
 
 export default function FileViewer({ file, onClose }) {
   const [objectUrl, setObjectUrl] = useState(null);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     let active = true;
     let createdObjectUrl = null;
 
     const loadPreview = async () => {
-      if (!file?.download_url) return;
+      if (!file?.download_url) {
+        if (active) setLoadError('Preview unavailable: missing file URL.');
+        return;
+      }
 
       try {
         const token = localStorage.getItem('doctalk_token');
@@ -26,11 +30,15 @@ export default function FileViewer({ file, onClose }) {
         if (active) setObjectUrl(createdObjectUrl);
       } catch (error) {
         console.error('Failed to load preview', error);
-        if (active) setObjectUrl(null);
+        if (active) {
+          setObjectUrl(null);
+          setLoadError('Preview unavailable: the file could not be loaded.');
+        }
       }
     };
 
     setObjectUrl(null);
+    setLoadError('');
     loadPreview();
 
     return () => {
@@ -55,10 +63,22 @@ export default function FileViewer({ file, onClose }) {
         <div style={{ flex: 1, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }}>
           {isImage && objectUrl && <img src={objectUrl} alt={file?.original_name || file?.name || 'Document'} style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8 }} />}
           {isPdf && objectUrl && <iframe title={file?.original_name || file?.name || 'Document'} src={objectUrl} style={{ width: '100%', height: '100%', border: 'none' }} />}
-          {(isImage || isPdf) && !objectUrl && <div style={{ color: '#64748B' }}>Loading preview...</div>}
+          {(isImage || isPdf) && !objectUrl && !loadError && <div style={{ color: '#64748B' }}>Loading preview...</div>}
+          {(isImage || isPdf) && loadError && (
+            <div style={{ padding: 20, color: '#64748B', textAlign: 'center' }}>
+              <div style={{ marginBottom: 8 }}>{loadError}</div>
+              {file?.download_url && (
+                <a href={file.download_url} target="_blank" rel="noreferrer" style={{ color: '#2b6cb0' }}>Open file in new tab</a>
+              )}
+            </div>
+          )}
           {!isImage && !isPdf && (
             <div style={{ padding: 20 }}>
-              <a href={file.download_url} target="_blank" rel="noreferrer" style={{ color: '#2b6cb0' }}>Open {file?.original_name || file?.name || 'file'} in new tab</a>
+              {file?.download_url ? (
+                <a href={file.download_url} target="_blank" rel="noreferrer" style={{ color: '#2b6cb0' }}>Open {file?.original_name || file?.name || 'file'} in new tab</a>
+              ) : (
+                <span style={{ color: '#64748B' }}>Preview unavailable: missing file URL.</span>
+              )}
             </div>
           )}
         </div>

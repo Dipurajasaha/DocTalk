@@ -3,6 +3,8 @@ import Home from './pages/Home';
 import Login from './pages/Login';
 import PatientDashboard from './pages/PatientDashboard';
 import DoctorDashboard from './pages/DoctorDashboard';
+import ReportView from './pages/ReportView';
+import PrescriptionView from './pages/PrescriptionView';
 import { useSession } from './contexts/SessionContext';
 
 function App() {
@@ -19,6 +21,12 @@ function App() {
     if (!loaded) return null;
     if (!session) return <Navigate to="/login" replace />;
     if (session.role !== 'doctor') return <Navigate to="/login" replace />;
+    return children;
+  };
+
+  const RequireAuth = ({ children }) => {
+    if (!loaded) return null;
+    if (!session) return <Navigate to="/login" replace />;
     return children;
   };
 
@@ -56,6 +64,8 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/patient/dashboard" element={<RequirePatient><PatientDashboard /></RequirePatient>} />
         <Route path="/doctor/dashboard" element={<RequireDoctor><DoctorDashboard /></RequireDoctor>} />
+        <Route path="/reports/:id" element={<RequireAuth><ReportView /></RequireAuth>} />
+        <Route path="/prescriptions/:id" element={<RequireAuth><PrescriptionView /></RequireAuth>} />
       </Routes>
     </BrowserRouter>
   );

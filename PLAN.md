@@ -158,7 +158,7 @@ The goal is:
   - Manual: upload a variety of files; preview in-browser; verify access denied for other users.
   - Security: attempt file access without credentials and confirm 401/403 responses.
 
-[Todo Next] [frontend] stage 8: ***Reports & prescriptions viewer and record linking***
+[Completed] [frontend] stage 8: ***Reports & prescriptions viewer and record linking***
 
 - objective: Provide dedicated viewers for reports and prescriptions and link them to consultations and copilot summaries.
 - features:
@@ -176,7 +176,7 @@ The goal is:
 - validation/testing goals:
   - Manual: open report -> see metadata and content; attach to consultation and verify backend link.
 
-[Incomplete] [frontend] stage 9: ***AI / Copilot integration (read-first then action)***
+[Todo Next] [frontend] stage 9: ***AI / Copilot integration (read-first then action)***
 
 - objective: Integrate the frontend with the existing copilot/AI workflows in a conservative, auditable way (read-only outputs first).
 - features:

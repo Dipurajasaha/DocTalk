@@ -67,3 +67,16 @@ async def delete_report(
 ) -> OperationResponse:
     await report_service.delete_asset(current_user.user_id, current_user.role, report_id)
     return OperationResponse(message="Report deleted")
+
+
+@router.patch("/{report_id}", response_model=MedicalAssetResponse)
+async def rename_report(
+    report_id: str,
+    payload: dict[str, str],
+    current_user: CurrentUser = Depends(get_current_user),
+    report_service: ReportService = Depends(get_report_service),
+) -> MedicalAssetResponse:
+    new_name = payload.get("new_name", "").strip()
+    return MedicalAssetResponse.model_validate(
+        await report_service.rename_asset(current_user.user_id, current_user.role, report_id, new_name)
+    )

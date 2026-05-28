@@ -128,6 +128,8 @@ DocTalk is a healthcare platform implemented as a Python FastAPI backend plus a 
 - LangGraph workflows active
 - Doctor copilot active
 - Current focus: frontend integration
+- Frontend integration status: stages 1-8 are complete; stage 9 is the next active stage.
+- Patient dashboard now supports routed uploads, document viewers, and rename flows for medical images, reports, and prescriptions.
 ---
 
 *Generated as a workspace-wide context summary for DocTalk.*
