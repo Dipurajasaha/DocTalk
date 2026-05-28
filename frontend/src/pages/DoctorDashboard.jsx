@@ -3,7 +3,9 @@ import { useSession } from '../contexts/SessionContext';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { authApi, doctorApi, patientApi } from '../lib/api';
+import { createRealTimeClient } from '../lib/realTimeClient';
 import '../styles/doctor.css';
+import '../styles/chat.css';
 import CopilotPanel from '../components/CopilotPanel';
 
 const timeSlots = [];
@@ -180,6 +182,8 @@ export default function DoctorDashboard() {
   const [chatDisabled, setChatDisabled] = useState(false);
   const patientChatEndRef = useRef(null);
   const patientAutoScrollRef = useRef(false);
+  const patientChatRealtimeRef = useRef(null);
+  const patientChatSnapshotRef = useRef({ consultationId: null, fingerprint: '' });
 
   // 1. Fetch Doctor Session on Mount
   useEffect(() => {
@@ -226,13 +230,23 @@ export default function DoctorDashboard() {
           if (data.success) {
             setDashboardData(data);
             
-            // Build patient chat list
+            // Build patient chat list (skip empty/invalid ids)
             const pSet = new Map();
-            (data.upcoming_schedules||[]).forEach(s=>{ if(!pSet.has(s.patient)) pSet.set(s.patient,{id:s.patient, display:s.patient, lastStatus:'scheduled'}); });
-            (data.requests||[]).forEach(r=>{ if(!pSet.has(r.patient)) pSet.set(r.patient,{id:r.patient, display:r.patient_display||r.patient, lastStatus:r.status}); });
+            (data.upcoming_schedules||[]).forEach(s=>{
+              const pid = String(s.patient || s.patient_id || '').trim();
+              if(!pid) return;
+              if(!pSet.has(pid)) pSet.set(pid,{id:pid, display: s.patient || s.patient_display || pid, lastStatus:'scheduled'});
+            });
+            (data.requests||[]).forEach(r=>{
+              const pid = String(r.patient || r.patient_id || '').trim();
+              if(!pid) return;
+              if(!pSet.has(pid)) pSet.set(pid,{id:pid, display: r.patient_display || r.patient || pid, lastStatus: r.status || 'requested'});
+            });
             (data.patient_chat_patients||[]).forEach(p=>{
-               if(!pSet.has(p)) pSet.set(p,{id:p, display:p, lastStatus: (data.closed_chats||[]).includes(p)?'closed':'chat'});
-               else { if((data.closed_chats||[]).includes(p)) pSet.get(p).lastStatus = 'closed'; }
+               const pid = String(p || '').trim();
+               if(!pid) return;
+               if(!pSet.has(pid)) pSet.set(pid,{id:pid, display:pid, lastStatus: (data.closed_chats||[]).includes(pid)?'closed':'chat'});
+               else { if((data.closed_chats||[]).includes(pid)) pSet.get(pid).lastStatus = 'closed'; }
             });
 
             const plist = Array.from(pSet.values()).sort((a,b)=>a.id.localeCompare(b.id));
@@ -249,12 +263,47 @@ export default function DoctorDashboard() {
     }
   }, [user, activeTab]);
 
-  const normalizeChatMessage = (item) => ({
-    id: item?.id,
-    sender: item?.sender_role || item?.senderRole || item?.sender || '',
-    text: item?.message ?? item?.text ?? '',
-    timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
-  });
+  function normalizeChatMessage(item) {
+    return {
+      id: item?.id,
+      sender: item?.sender_role || item?.senderRole || item?.sender || '',
+      text: item?.message ?? item?.text ?? '',
+      timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
+    };
+  }
+
+  const normalizeChatMessages = (data) => {
+    const items = Array.isArray(data) ? data : (data?.items || []);
+    return items.map(normalizeChatMessage);
+  };
+
+  const getChatMessageKey = (message, index = 0) => {
+    if (message?.id) return `id:${String(message.id)}`;
+    return `fallback:${String(message?.sender || '')}:${String(message?.timestamp || '')}:${String(message?.text || '')}:${index}`;
+  };
+
+  const mergeChronologicalMessages = (currentMessages, incomingMessages) => {
+    const current = Array.isArray(currentMessages) ? currentMessages : [];
+    const incoming = Array.isArray(incomingMessages) ? incomingMessages : [];
+    const merged = [];
+    const seen = new Set();
+
+    const append = (message, index) => {
+      const key = getChatMessageKey(message, index);
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(message);
+    };
+
+    current.forEach(append);
+    incoming.forEach(append);
+
+    if (merged.length === current.length && merged.every((message, index) => message === current[index])) {
+      return current;
+    }
+
+    return merged;
+  };
 
   const resolveConsultationForPatient = (patientId) => {
     const matchId = String(patientId || '');
@@ -281,23 +330,69 @@ export default function DoctorDashboard() {
 
   // Handle Loading Patient Chat
   useEffect(() => {
-    if(activeTab === 'patientchats' && activePatient) {
-       let mounted = true;
-       let intervalId = null;
-       (async () => {
-         const consultationId = await ensureConsultationForPatient(activePatient);
-         if (!mounted) return;
-         if (consultationId) {
-           await loadPatientChat(consultationId, 1);
-           intervalId = setInterval(() => loadPatientChat(consultationId, 1), 5000);
-         }
-       })();
-       return () => {
-         mounted = false;
-         if (intervalId) clearInterval(intervalId);
-       };
+    if (activeTab !== 'patientchats' || !activePatient) {
+      patientChatRealtimeRef.current?.stop();
+      patientChatRealtimeRef.current = null;
+      patientChatSnapshotRef.current = { consultationId: null, fingerprint: '' };
+      return;
     }
-  }, [activeTab, activePatient, consultations]);
+
+    let cancelled = false;
+
+    const bootstrapPatientChat = async () => {
+      const consultationId = await ensureConsultationForPatient(activePatient);
+      if (cancelled) return;
+
+      if (!consultationId) {
+        patientChatRealtimeRef.current?.stop();
+        patientChatRealtimeRef.current = null;
+        patientChatSnapshotRef.current = { consultationId: null, fingerprint: '' };
+        setPatientMessages([]);
+        return;
+      }
+
+      const client = createRealTimeClient({
+        url: `/api/chat/consultations/${encodeURIComponent(consultationId)}/messages`,
+        mode: 'auto',
+        pollInterval: 5000,
+        pollRequest: () => patientApi.getConsultationMessages(consultationId, 1, 20),
+        getSnapshotKey: (payload) => normalizeChatMessages(payload).map((message, index) => getChatMessageKey(message, index)).join('|'),
+        onMessage: (payload) => {
+          if (cancelled) return;
+          const latestMessages = normalizeChatMessages(payload);
+          patientChatSnapshotRef.current = {
+            consultationId,
+            fingerprint: latestMessages.map((message, index) => getChatMessageKey(message, index)).join('|'),
+          };
+          setPatientMessages((currentMessages) => mergeChronologicalMessages(currentMessages, latestMessages));
+          setPatientMessagePage(1);
+          setChatDisabled(false);
+          patientAutoScrollRef.current = true;
+        },
+        onError: (error) => {
+          if (!cancelled) {
+            console.error('Doctor chat realtime error:', error);
+          }
+        },
+      });
+
+      patientChatRealtimeRef.current?.stop();
+      patientChatRealtimeRef.current = client;
+
+      await loadPatientChat(consultationId, 1);
+      if (!cancelled && patientChatRealtimeRef.current === client) {
+        client.start();
+      }
+    };
+
+    bootstrapPatientChat();
+
+    return () => {
+      cancelled = true;
+      patientChatRealtimeRef.current?.stop();
+      patientChatRealtimeRef.current = null;
+    };
+  }, [activeTab, activePatient, consultations, dashboardData]);
 
   const loadPatientChat = async (consultationId, page = 1) => {
     try {
@@ -307,10 +402,16 @@ export default function DoctorDashboard() {
       }
       patientAutoScrollRef.current = true;
       const data = await patientApi.getConsultationMessages(consultationId, page, 20);
-      const items = Array.isArray(data) ? data : (data.items || []);
-      setPatientMessages(items.map(normalizeChatMessage));
+      const items = normalizeChatMessages(data);
+      setPatientMessages((currentMessages) => page === 1
+        ? mergeChronologicalMessages(currentMessages, items)
+        : mergeChronologicalMessages(items, currentMessages));
       setPatientMessagePage(page);
       setChatDisabled(false);
+      patientChatSnapshotRef.current = {
+        consultationId,
+        fingerprint: items.map((message, index) => getChatMessageKey(message, index)).join('|'),
+      };
     } catch (err) { console.error(err); }
   };
 
@@ -750,7 +851,6 @@ export default function DoctorDashboard() {
       );
       case 'patientchats': return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <h1 className="doc-h1">Patient Chats</h1>
             <div className="doc-section" style={{ display: 'flex', height: '80vh', padding: 0, overflow: 'hidden' }}>
               {/* Patient List Sidebar */}
           <div style={{ width: '250px', borderRight: '1px solid #eee', background: '#fafafa', display: 'flex', flexDirection: 'column' }}>
@@ -775,24 +875,27 @@ export default function DoctorDashboard() {
           </div>
           {/* Chat Area */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '20px', borderBottom: '1px solid #f0f0f0', fontWeight: '700', color: '#8B7EFF', fontSize: '16px' }}>
-              Chat with {activePatient || '...'}
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {patientMessages.map((m, i) => (
-                <div key={m.id || i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.sender === 'doctor' ? 'flex-end' : 'flex-start', gap: '3px' }}>
-                  <div style={{ 
-                    alignSelf: m.sender === 'doctor' ? 'flex-end' : 'flex-start',
-                    background: m.sender === 'doctor' ? '#8B7EFF' : '#FFFFFF',
-                    color: m.sender === 'doctor' ? '#fff' : '#1E293B',
-                    padding: '14px 16px', borderRadius: m.sender === 'doctor' ? '18px 18px 4px 18px' : '18px 18px 18px 4px', maxWidth: '72%', fontSize: '14px', lineHeight: '1.55', fontWeight: '500', border: m.sender === 'doctor' ? '1px solid rgba(139,126,255,0.18)' : '1px solid #E2E8F0', boxShadow: '0 2px 8px rgba(15,23,42,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word'
-                  }}>
-                    {m.text}
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#94A3B8' }}>{m.timestamp ? new Date(m.timestamp).toLocaleString() : ''}</div>
+            <div className="chat-main">
+              <div className="chat-header">
+                <div>
+                  <div className="chat-title">Chat with {activePatient || '...'}</div>
+                  <div className="chat-subtitle">{/* subtitle can show status */}</div>
                 </div>
-              ))}
-              <div ref={patientChatEndRef} />
+              </div>
+              <div className="chat-list">
+                {patientMessages.map((m, i) => {
+                  const isOutgoing = String(m.sender || '').toLowerCase() === 'doctor';
+                  return (
+                    <div className={`chat-row ${isOutgoing ? 'outgoing' : 'incoming'}`} key={m.id || i}>
+                      <div className={`chat-bubble ${isOutgoing ? 'outgoing' : 'incoming'}`}>
+                        <div className="chat-text">{m.text}</div>
+                        <div className="chat-meta"><span className="chat-time">{m.timestamp ? new Date(m.timestamp).toLocaleString() : ''}</span></div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={patientChatEndRef} />
+              </div>
             </div>
             <form onSubmit={handlePatientChatSubmit} style={{ display: 'flex', padding: '15px', borderTop: '1px solid #eee', gap: '10px', border: `1px solid ${patientInputFocused ? 'rgba(139,126,255,0.35)' : '#e2e8f0'}`, borderRadius: '50px', background: '#fff', boxShadow: patientInputFocused ? '0 0 0 3px rgba(139,126,255,0.12)' : 'none', transition: 'border-color 0.18s ease, box-shadow 0.18s ease' }}>
               <input 

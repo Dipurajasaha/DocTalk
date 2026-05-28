@@ -196,7 +196,7 @@ The goal is:
   - Manual: run copilot for sample patient; verify provenance fields and no write actions occur without explicit doctor action.
   - UX test: ensure outputs are readable on mobile and accessible.
 
-[Todo Next] [frontend] stage 10: ***real-time communication & notifications (incremental)***
+[Completed] [frontend] stage 10: ***real-time communication & notifications (incremental)***
 
 - objective: Add near-real-time chat updates and in-app notifications with a progressive enhancement approach (polling → SSE/WebSocket).
 - features:
@@ -216,7 +216,7 @@ The goal is:
   - Manual: verify message arrives within target timeframe with SSE and falls back to polling when SSE fails.
   - Load test: basic concurrency check for real-time endpoint.
 
-[Incomplete] [frontend] stage 11: ***frontend architecture cleanup & state management***
+[Todo Next] [frontend] stage 11: ***frontend architecture cleanup & state management***
 
 - objective: Consolidate state and patterns into maintainable structure suitable for solo development and incremental scaling.
 - features:

@@ -2,6 +2,7 @@
 import { useSession } from '../contexts/SessionContext';
 import { useNavigate } from 'react-router-dom';
 import { authApi, patientApi, resolvePatientUploadTarget, resolvePatientAssetKind } from '../lib/api';
+import { createRealTimeClient } from '../lib/realTimeClient';
 import '../styles/patient.css'; // Uses your existing patient CSS
 import XrayAnalyzerPanel from '../components/XrayAnalyzerPanel';
 import FileViewer from '../components/FileViewer';
@@ -46,6 +47,8 @@ export default function PatientDashboard() {
   const docChatEndRef = useRef(null);
   const docAutoScrollRef = useRef(false);
   const [docInputFocused, setDocInputFocused] = useState(false);
+  const docChatRealtimeRef = useRef(null);
+  const docChatSnapshotRef = useRef({ consultationId: null, fingerprint: '' });
 
   const [doctors, setDoctors] = useState([]);
   const [appointments, setAppointments] = useState([]);
@@ -272,12 +275,47 @@ export default function PatientDashboard() {
       });
   };
 
-  const normalizeChatMessage = (item) => ({
-    id: item?.id,
-    sender: item?.sender_role || item?.senderRole || item?.sender || '',
-    text: item?.message ?? item?.text ?? '',
-    timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
-  });
+  function normalizeChatMessage(item) {
+    return {
+      id: item?.id,
+      sender: item?.sender_role || item?.senderRole || item?.sender || '',
+      text: item?.message ?? item?.text ?? '',
+      timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
+    };
+  }
+
+  const normalizeChatMessages = (data) => {
+    const items = Array.isArray(data) ? data : (data?.items || []);
+    return items.map(normalizeChatMessage);
+  };
+
+  const getChatMessageKey = (message, index = 0) => {
+    if (message?.id) return `id:${String(message.id)}`;
+    return `fallback:${String(message?.sender || '')}:${String(message?.timestamp || '')}:${String(message?.text || '')}:${index}`;
+  };
+
+  const mergeChronologicalMessages = (currentMessages, incomingMessages) => {
+    const current = Array.isArray(currentMessages) ? currentMessages : [];
+    const incoming = Array.isArray(incomingMessages) ? incomingMessages : [];
+    const merged = [];
+    const seen = new Set();
+
+    const append = (message, index) => {
+      const key = getChatMessageKey(message, index);
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(message);
+    };
+
+    current.forEach(append);
+    incoming.forEach(append);
+
+    if (merged.length === current.length && merged.every((message, index) => message === current[index])) {
+      return current;
+    }
+
+    return merged;
+  };
 
   const loadConsultations = async () => {
     try {
@@ -356,54 +394,102 @@ export default function PatientDashboard() {
       }
       docAutoScrollRef.current = true;
       const data = await patientApi.getConsultationMessages(consultationId, page, 20);
-      const items = Array.isArray(data) ? data : (data.items || []);
-      setDocMessages(items.map(normalizeChatMessage));
+      const items = normalizeChatMessages(data);
+      setDocMessages((currentMessages) => page === 1
+        ? mergeChronologicalMessages(currentMessages, items)
+        : mergeChronologicalMessages(items, currentMessages));
       setActiveConsultationId(consultationId);
       setDocMessagePage(page);
       setDocChatDisabled(false);
+      docChatSnapshotRef.current = {
+        consultationId,
+        fingerprint: items.map((message, index) => getChatMessageKey(message, index)).join('|'),
+      };
     } catch (e) { console.error('loadDocChat failed', e); }
   };
 
   useEffect(() => {
-    if (activePanel !== 'docchat' || !activeDocChat) return;
-    let mounted = true;
-    let intervalId = null;
-    (async () => {
+    if (activePanel !== 'docchat' || !activeDocChat) {
+      docChatRealtimeRef.current?.stop();
+      docChatRealtimeRef.current = null;
+      docChatSnapshotRef.current = { consultationId: null, fingerprint: '' };
+      return;
+    }
+
+    let cancelled = false;
+
+    const bootstrapDocChat = async () => {
       const consultationId = await ensureConsultationForDoctor(activeDocChat);
-      if (!mounted) return;
+      if (cancelled) return;
+
       if (!consultationId) {
+        docChatRealtimeRef.current?.stop();
+        docChatRealtimeRef.current = null;
+        docChatSnapshotRef.current = { consultationId: null, fingerprint: '' };
         setActiveConsultationId(null);
         setDocMessages([]);
         return;
       }
+
+      const client = createRealTimeClient({
+        url: `/api/chat/consultations/${encodeURIComponent(consultationId)}/messages`,
+        mode: 'auto',
+        pollInterval: 5000,
+        pollRequest: () => patientApi.getConsultationMessages(consultationId, 1, 20),
+        getSnapshotKey: (payload) => normalizeChatMessages(payload).map((message, index) => getChatMessageKey(message, index)).join('|'),
+        onMessage: (payload) => {
+          if (cancelled) return;
+          const latestMessages = normalizeChatMessages(payload);
+          docChatSnapshotRef.current = {
+            consultationId,
+            fingerprint: latestMessages.map((message, index) => getChatMessageKey(message, index)).join('|'),
+          };
+          setDocMessages((currentMessages) => mergeChronologicalMessages(currentMessages, latestMessages));
+          setActiveConsultationId(consultationId);
+          setDocMessagePage(1);
+          setDocChatDisabled(false);
+          docAutoScrollRef.current = true;
+        },
+        onError: (error) => {
+          if (!cancelled) {
+            console.error('Patient chat realtime error:', error);
+          }
+        },
+      });
+
+      docChatRealtimeRef.current?.stop();
+      docChatRealtimeRef.current = client;
+
       await loadDocChat(consultationId, 1);
-      intervalId = setInterval(() => loadDocChat(consultationId, 1), 5000);
-    })();
-    return () => {
-      mounted = false;
-      if (intervalId) clearInterval(intervalId);
+      if (!cancelled && docChatRealtimeRef.current === client) {
+        client.start();
+      }
     };
-  }, [activePanel, activeDocChat, consultations]);
+
+    bootstrapDocChat();
+
+    return () => {
+      cancelled = true;
+      docChatRealtimeRef.current?.stop();
+      docChatRealtimeRef.current = null;
+    };
+  }, [activePanel, activeDocChat, consultations, appointments]);
 
   const handleDocChatSubmit = async(e) => {
     e.preventDefault();
     const consultationId = activeConsultationId || await ensureConsultationForDoctor(activeDocChat);
     if(!docMsgInput.trim() || !consultationId) return;
-    const localId = 'local-' + Date.now();
-    const optimistic = { sender: 'patient', text: docMsgInput, id: localId, sending: true, attachments: docAttachmentFile ? [{ name: docAttachmentFile.name }] : [] };
-    setDocMessages(prev => [...prev, optimistic]);
-    docAutoScrollRef.current = true;
-    setDocMsgInput('');
-    setDocAttachmentFile(null);
     setDocSending(true);
     try {
-      await patientApi.postConsultationMessage(consultationId, docMsgInput);
+      const messageText = docMsgInput;
+      await patientApi.postConsultationMessage(consultationId, messageText);
       // Refresh authoritative history from server
       await loadDocChat(consultationId, docMessagePage);
+      setDocMsgInput('');
+      setDocAttachmentFile(null);
+      docAutoScrollRef.current = true;
     } catch(e) {
       console.error('postDocChat failed', e);
-      // mark last optimistic message as failed
-      setDocMessages(prev => prev.map(m => m.id === localId ? { ...m, sending: false, failed: true } : m));
       alert('Failed to send message');
     } finally {
       setDocSending(false);
@@ -422,9 +508,9 @@ export default function PatientDashboard() {
       if (!activeConsultationId) return;
       const nextPage = docMessagePage + 1;
       const data = await patientApi.getConsultationMessages(activeConsultationId, nextPage, 20);
-      const items = Array.isArray(data) ? data : (data.items || []);
+      const items = normalizeChatMessages(data);
       if (items.length > 0) {
-        setDocMessages(prev => [...items.map(normalizeChatMessage), ...prev]);
+        setDocMessages(prev => mergeChronologicalMessages(items, prev));
         setDocMessagePage(nextPage);
       }
     } catch (err) { console.error('load older messages failed', err); }
