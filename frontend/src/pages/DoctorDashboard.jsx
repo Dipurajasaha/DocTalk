@@ -172,7 +172,7 @@ const hydrateSlotsData = (slots = []) => {
     const label = `${displayHour}:${mins} ${ampm}`;
 
     if (!nextSlotsData[dayKey]) nextSlotsData[dayKey] = {};
-    nextSlotsData[dayKey][label] = slot?.isBooked ? 'booked' : slot?.isActive === false ? 'inactive' : 'open';
+    nextSlotsData[dayKey][label] = slot?.isBooked ? 'booked' : slot?.isActive === false ? 'none' : 'open';
   });
 
   return nextSlotsData;
@@ -823,8 +823,6 @@ export default function DoctorDashboard() {
                   let bg = '#fff', border = '1px dashed #cbd5e1', color = '#64748b', text = `+ ${time}`, cursor = 'pointer';
                   if (state === 'open') {
                     bg = '#ecfdf5'; border = '1px solid #10b981'; color = '#059669'; text = time;
-                  } else if (state === 'inactive') {
-                    bg = '#f8fafc'; border = '1px solid #cbd5e1'; color = '#64748b'; text = time; cursor = 'pointer';
                   } else if (state === 'booked') {
                     bg = '#f1f5f9'; border = '1px solid #e2e8f0'; color = '#94a3b8'; text = time; cursor = 'not-allowed';
                   } else if (state === 'disabled') {
@@ -840,7 +838,6 @@ export default function DoctorDashboard() {
                     }}>
                       {text}
                       {state === 'open' && <span style={{fontSize:'10px', fontWeight: '500'}}>Open</span>}
-                      {state === 'inactive' && <span style={{fontSize:'10px', fontWeight: '500'}}>Inactive</span>}
                       {state === 'booked' && <span style={{fontSize:'10px', fontWeight: '500'}}>Booked</span>}
                     </button>
                   );

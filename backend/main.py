@@ -7,6 +7,8 @@ from .api.auth import profile_router, router as auth_router
 from .api.appointments import compat_router as appointments_compat_router, router as appointments_router
 from .api.users import doctor_router as user_doctor_router, router as users_router
 from .core.database import connect_prisma, disconnect_prisma
+from .api import medical_assets
+
 
 
 app = FastAPI(title="DocTalk Backend", version="1.0.0")
@@ -36,6 +38,10 @@ app.include_router(users_router, prefix="/api/users", tags=["users"])
 app.include_router(user_doctor_router, prefix="/api/doctor", tags=["users"])
 app.include_router(appointments_router, prefix="/api/appointments", tags=["appointments"])
 app.include_router(appointments_compat_router, prefix="/api", tags=["appointments"])
+
+# Medical assets router (mounted at /api for compatibility and /api/assets as requested)
+app.include_router(medical_assets.router, prefix="/api", tags=["assets"])
+app.include_router(medical_assets.router, prefix="/api/assets", tags=["assets"])
 
 
 @app.get("/health", tags=["system"])

@@ -86,6 +86,7 @@ export default function PatientDashboard() {
   const [availableSlots, setAvailableSlots] = useState([]);
   const [selectedSlotId, setSelectedSlotId] = useState('');
   const [slotLoading, setSlotLoading] = useState(false);
+  const [bookingInProgress, setBookingInProgress] = useState(false);
   
   // Patient-to-Doctor Chat System
   const [docChats, setDocChats] = useState([]); // List of doctors the patient has chatted with
@@ -279,17 +280,30 @@ export default function PatientDashboard() {
       try { addNotification({ type: 'info', message: 'Folder management is not supported by the current backend' }); } catch (e) {}
     };
 
+    const getAssetFilenameParts = (file) => {
+      const fullName = String(file?.name || file?.original_name || '');
+      const lastDot = fullName.lastIndexOf('.');
+      if (lastDot > 0) {
+        return { baseName: fullName.slice(0, lastDot), extension: fullName.slice(lastDot) };
+      }
+      return { baseName: fullName, extension: '' };
+    };
+
     const handleRenameAsset = (file) => {
       setRenameTarget(file);
-      setRenameValue(file?.name || file?.original_name || '');
+        setRenameValue(getAssetFilenameParts(file).baseName);
     };
 
     const submitRenameAsset = async () => {
       const target = renameTarget;
-      const newName = renameValue.trim();
-      if (!target || !newName) return;
+        const newName = renameValue.trim();
+        if (!target || !newName) return;
       try {
-        const data = await patientApi.renameAsset({ ...target, asset_kind: resolvePatientAssetKind(target) }, newName);
+          const { extension } = getAssetFilenameParts(target);
+          const sanitizedName = extension && newName.toLowerCase().endsWith(extension.toLowerCase())
+            ? newName.slice(0, -extension.length).trim()
+            : newName;
+          const data = await patientApi.renameAsset({ ...target, asset_kind: resolvePatientAssetKind(target) }, sanitizedName);
         if (data && (data.id || data.original_name || data.originalName)) {
           try { addNotification({ type: 'success', message: 'File renamed successfully' }); } catch (e) {}
           try { removeAsset && removeAsset('assets_files'); } catch (e) {}
@@ -622,8 +636,39 @@ export default function PatientDashboard() {
     setSelectedSlotId('');
   };
 
+  const refreshAvailableSlotsForDoctor = async (doctorId) => {
+    const nextDoctorId = String(doctorId || '').trim();
+    if (!nextDoctorId) {
+      setAvailableSlots([]);
+      setSelectedSlotId('');
+      return [];
+    }
+
+    setSlotLoading(true);
+    try {
+      const slots = await patientApi.getAvailableSlots(nextDoctorId);
+      const nextSlots = Array.isArray(slots) ? slots : [];
+      setAvailableSlots(nextSlots);
+      setSelectedSlotId((current) => {
+        if (current && nextSlots.some((slot) => String(slot.id) === String(current))) {
+          return current;
+        }
+        return '';
+      });
+      return nextSlots;
+    } catch (e) {
+      setAvailableSlots([]);
+      setSelectedSlotId('');
+      return [];
+    } finally {
+      setSlotLoading(false);
+    }
+  };
+
   const handleCreateAppointment = async (e) => {
     e.preventDefault();
+
+    if (bookingInProgress) return;
 
     const doctorId = String(appointmentDraft.doctor_id || '').trim();
     const reason = String(appointmentDraft.reason || '').trim();
@@ -633,6 +678,7 @@ export default function PatientDashboard() {
       return;
     }
 
+    setBookingInProgress(true);
     try {
       const data = bookingMode === 'direct'
         ? await patientApi.bookDirectAppointment(selectedSlotId, reason, appointmentDraft.note.trim())
@@ -640,19 +686,27 @@ export default function PatientDashboard() {
 
       if (data && (data.id || data.success)) {
         try { addNotification({ type: 'success', message: bookingMode === 'direct' ? 'Appointment booked successfully' : 'Open request sent successfully' }); } catch (e) {}
+        await refreshAvailableSlotsForDoctor(doctorId);
         setAppointmentDraft(prev => ({
           ...prev,
           reason: 'General consultation',
           note: '',
         }));
-        setSelectedSlotId('');
         loadAppointments();
       } else {
         try { addNotification({ type: 'error', message: 'Error creating appointment: ' + (data && (data.error || data.detail) || 'unknown') }); } catch (e) {}
       }
     } catch (err) {
       console.error('create appointment failed', err);
-      try { addNotification({ type: 'error', message: 'Error creating appointment: ' + (err?.message || 'server error') }); } catch (e) {}
+      if (err?.status === 409) {
+        await refreshAvailableSlotsForDoctor(doctorId);
+        try { addNotification({ type: 'error', message: 'That slot was just booked by someone else. Please choose another available slot.' }); } catch (e) {}
+      } else {
+        try { addNotification({ type: 'error', message: 'Error creating appointment: ' + (err?.message || 'server error') }); } catch (e) {}
+      }
+    }
+    finally {
+      setBookingInProgress(false);
     }
   };
 
@@ -1308,7 +1362,7 @@ export default function PatientDashboard() {
                         style={{ width: 'min(92vw, 420px)', background: '#fff', borderRadius: 16, boxShadow: '0 20px 60px rgba(15,23,42,0.25)', padding: 20, border: '1px solid #E2E8F0' }}
                       >
                         <div style={{ fontSize: 16, fontWeight: 700, color: '#1E293B', marginBottom: 8 }}>Rename file</div>
-                        <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>Enter a new file name for {renameTarget?.name || renameTarget?.original_name || 'this document'}.</div>
+                        <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>Rename the file name only for {renameTarget?.name || renameTarget?.original_name || 'this document'}. The extension stays unchanged.</div>
                         <input
                           type="text"
                           value={renameValue}
@@ -1495,8 +1549,11 @@ export default function PatientDashboard() {
                       <textarea value={appointmentDraft.note} onChange={e => setAppointmentDraft(prev => ({ ...prev, note: e.target.value }))} placeholder="Optional context for the doctor" rows="3" style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF', resize: 'vertical' }} />
                     </label>
                     <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
-                      <button type="submit" style={{ padding: '12px 18px', borderRadius: '999px', border: 'none', background: '#8B7EFF', color: '#FFF', fontSize: '11px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 8px 18px rgba(139,126,255,0.28)' }}>
-                        {bookingMode === 'direct' ? 'Book Slot' : 'Send Request'}
+                      <button
+                        type="submit"
+                        disabled={bookingInProgress || (bookingMode === 'direct' && (!selectedSlotId || slotLoading))}
+                        style={{ padding: '12px 18px', borderRadius: '999px', border: 'none', background: bookingInProgress || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? '#C4B5FD' : '#8B7EFF', color: '#FFF', fontSize: '11px', fontWeight: '700', cursor: bookingInProgress || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? 'not-allowed' : 'pointer', boxShadow: '0 8px 18px rgba(139,126,255,0.28)' }}>
+                        {bookingInProgress ? 'Booking...' : bookingMode === 'direct' ? 'Book Slot' : 'Send Request'}
                       </button>
                     </div>
                   </form>

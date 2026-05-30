@@ -247,10 +247,14 @@ class AppointmentService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Appointment cannot be cancelled in its current state")
 
         if getattr(appointment, "slotId", None):
-            slot_update = {"isBooked": False, "isActive": actor_role != "doctor"}
+            slot_update = self._slot_reset_payload(actor_role)
             await self.client.doctorslot.update(where={"id": appointment.slotId}, data=slot_update)
 
-        updated = await self.client.appointment.update(where={"id": appointment_id}, data={"status": "CANCELLED"}, include={"patient": True, "doctor": True, "slot": True})
+        updated = await self.client.appointment.update(
+            where={"id": appointment_id},
+            data={"status": "CANCELLED", "slotId": None},
+            include={"patient": True, "doctor": True, "slot": True},
+        )
         return self._serialize_appointment(updated)
 
     async def _require_doctor_owned_appointment(self, doctor_id: str, appointment_id: str) -> Any:
@@ -313,6 +317,10 @@ class AppointmentService:
             "CANCELLED": "CANCELLED",
         }
         return mapping.get(status_text, status_text or "PENDING")
+
+    @staticmethod
+    def _slot_reset_payload(actor_role: str) -> dict[str, bool]:
+        return {"isBooked": False, "isActive": False}
 
     @staticmethod
     def _serialize_slot(slot: Any) -> dict[str, Any]:

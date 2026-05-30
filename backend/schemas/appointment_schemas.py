@@ -25,6 +25,7 @@ class SlotResponse(BaseModel):
     startTime: datetime
     endTime: datetime
     isBooked: bool = False
+    isActive: bool = True
 
 
 class DirectBookingRequest(BaseModel):
@@ -32,6 +33,7 @@ class DirectBookingRequest(BaseModel):
 
     slotId: str = Field(min_length=1)
     reason: str = Field(min_length=1)
+    note: str | None = None
 
 
 class OpenBookingRequest(BaseModel):
@@ -39,6 +41,7 @@ class OpenBookingRequest(BaseModel):
 
     doctorId: str = Field(min_length=1)
     reason: str = Field(min_length=1)
+    note: str | None = None
 
 
 class DoctorActionRequest(BaseModel):
@@ -69,6 +72,7 @@ class AppointmentResponse(BaseModel):
     note: str | None = None
     doctorMessage: str | None = None
     doctor_message: str | None = None
+    isActive: bool = True
     status: AppointmentStatus
     requested_at: datetime
     created_at: datetime
