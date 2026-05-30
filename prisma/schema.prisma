@@ -42,9 +42,6 @@ model Patient {
   appointments        Appointment[]
   consultations       Consultation[]
   ragDocuments        RagDocument[]
-  reports             Report[]
-  prescriptions       Prescription[]
-  medicalImages       MedicalImage[]
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
@@ -145,9 +142,6 @@ model Consultation {
   patient       Patient        @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
   doctor        Doctor         @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
   messages      Message[]
-  reports       Report[]
-  prescriptions Prescription[]
-  medicalImages MedicalImage[]
   ragDocuments  RagDocument[]
 
   @@index([patientUsername])
@@ -188,73 +182,31 @@ model FileKey {
   @@map("file_keys")
 }
 
-model Report {
-  id              String   @id @default(uuid())
-  patientUsername String
-  uploadedBy      String
-  uploadedByRole  Role
-  consultationId  String?
-  fileType        String
-  originalName    String
-  storedPath      String
-  mimeType        String
-  fileSize        Int
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+model User {
+  id            String         @id @default(uuid())
+  medicalAssets MedicalAsset[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
-  patient      Patient       @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
-  consultation Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
-
-  @@index([patientUsername])
-  @@index([uploadedBy])
-  @@index([consultationId])
-  @@map("reports")
+  @@map("users")
 }
 
-model Prescription {
-  id              String   @id @default(uuid())
-  patientUsername String
-  uploadedBy      String
-  uploadedByRole  Role
-  consultationId  String?
-  fileType        String
-  originalName    String
-  storedPath      String
-  mimeType        String
-  fileSize        Int
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+model MedicalAsset {
+  id               String   @id @default(uuid())
+  userId           String
+  fileName         String
+  fileType         String
+  folderPath       String   @default("/my_documents/unclassified/")
+  assetCategory    String   @default("UNCLASSIFIED")
+  processingStatus  String   @default("PENDING")
+  extractedText    String?  @db.Text
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  patient      Patient       @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
-  consultation Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([patientUsername])
-  @@index([uploadedBy])
-  @@index([consultationId])
-  @@map("prescriptions")
-}
-
-model MedicalImage {
-  id              String   @id @default(uuid())
-  patientUsername String
-  uploadedBy      String
-  uploadedByRole  Role
-  consultationId  String?
-  fileType        String
-  originalName    String
-  storedPath      String
-  mimeType        String
-  fileSize        Int
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  patient      Patient       @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
-  consultation Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
-
-  @@index([patientUsername])
-  @@index([uploadedBy])
-  @@index([consultationId])
-  @@map("medical_images")
+  @@index([userId])
+  @@map("medical_assets")
 }
 
 model RagDocument {

@@ -1,31 +1,25 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel
 
 
-class AssetItem(BaseModel):
+class AssetResponse(BaseModel):
     id: str
-    patient_id: str
-    uploaded_by: str
-    consultation_id: Optional[str] = None
+    user_id: str
+    file_name: str
     file_type: str
-    original_name: str
-    stored_path: str
-    mime_type: str
-    file_size: int
-    download_url: str
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    folder_path: str
+    asset_category: str
+    processing_status: str
+    extracted_text: str | None = None
+    download_url: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
-class UploadResponse(BaseModel):
+class AssetUploadResponse(BaseModel):
     success: bool = True
-    id: Optional[str] = None
-    message: Optional[str] = None
-
-
-class ListResponse(BaseModel):
-    files: list[AssetItem]
+    id: str | None = None
+    message: str | None = None

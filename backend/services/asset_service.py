@@ -18,12 +18,8 @@ AuthRole = Literal["patient", "doctor"]
 
 @dataclass(frozen=True, slots=True)
 class AssetConfig:
-    model_name: str
-    storage_folder: str
-    api_prefix: str
-    file_type: str
-    allowed_mime_types: frozenset[str]
-    allowed_extensions: frozenset[str]
+    storage_folder: str = "unclassified"
+    api_prefix: str = "/api/assets"
     max_file_size_bytes: int = 25 * 1024 * 1024
 
 
@@ -31,7 +27,6 @@ class AssetService:
     def __init__(self, config: AssetConfig, client: Any = prisma) -> None:
         self.client = client
         self.config = config
-        self.model = getattr(self.client, config.model_name)
         # data_root provided by backend.core.config (backwards-compatible)
         self.upload_root = DATA_ROOT / "uploads" / config.storage_folder
         self.upload_root.mkdir(parents=True, exist_ok=True)
@@ -39,17 +34,14 @@ class AssetService:
     async def upload_asset(
         self,
         user_id: str,
-        role: AuthRole,
-        patient_id: str,
-        consultation_id: str | None,
         upload_file: UploadFile,
     ) -> dict[str, Any]:
-        patient_id = self._normalize_identifier(patient_id, "patient_id")
-        consultation = await self._resolve_upload_context(user_id, role, patient_id, consultation_id)
-        await self._ensure_patient_exists(patient_id)
-        original_name, extension = self._validate_upload_file(upload_file)
+        file_name, extension, content_type = self._validate_upload_file(upload_file)
+        asset_id = uuid4().hex
 
-        relative_path = Path("uploads") / self.config.storage_folder / patient_id / f"{uuid4().hex}{extension}"
+        await self._ensure_user_exists(user_id)
+
+        relative_path = self._build_storage_path(asset_id, extension)
         stored_path = DATA_ROOT / relative_path
         stored_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -66,154 +58,91 @@ class AssetService:
             self._safe_unlink(stored_path)
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Uploaded file appears to be invalid or corrupted") from exc
 
-        record = await self.model.create(
+        record = await self.client.medicalasset.create(
             data={
-                "patientUsername": patient_id,
-                "uploadedBy": user_id,
-                "uploadedByRole": role,
-                "consultationId": consultation.id if consultation is not None else None,
-                "fileType": self.config.file_type,
-                "originalName": original_name,
-                "storedPath": relative_path.as_posix(),
-                "mimeType": upload_file.content_type,
-                "fileSize": file_size,
+                "id": asset_id,
+                "userId": user_id,
+                "fileName": file_name,
+                "fileType": content_type,
+                "folderPath": "/my_documents/unclassified/",
+                "assetCategory": "UNCLASSIFIED",
+                "processingStatus": "PENDING",
+                "extractedText": None,
             },
-            include={"consultation": True},
+            include={"user": True},
         )
 
         # TODO: Trigger background AI processing here
 
-        return self._serialize_record(record)
+        return self._serialize_record(record, relative_path.as_posix(), file_size)
 
-    async def list_assets(self, user_id: str, role: AuthRole, patient_id: str | None = None) -> list[dict[str, Any]]:
-        if role == "patient":
-            target_patient = self._normalize_list_patient_filter(user_id, patient_id)
-            records = await self.model.find_many(
-                where={"patientUsername": target_patient},
-                order={"createdAt": "desc"},
-                include={"consultation": True},
-            )
-            return [self._serialize_record(record) for record in records]
-
-        consultation_ids = await self._doctor_consultation_ids(user_id, patient_id)
-        if not consultation_ids:
-            return []
-
-        where: dict[str, Any] = {"consultationId": {"in": consultation_ids}}
-        records = await self.model.find_many(where=where, order={"createdAt": "desc"}, include={"consultation": True})
+    async def list_assets(self, user_id: str, folder: str | None = None) -> list[dict[str, Any]]:
+        where: dict[str, Any] = {"userId": user_id}
+        if folder:
+            where["folderPath"] = folder
+        records = await self.client.medicalasset.find_many(where=where, order={"createdAt": "desc"})
         return [self._serialize_record(record) for record in records]
 
-    async def get_asset(self, user_id: str, role: AuthRole, asset_id: str) -> dict[str, Any]:
+    async def get_asset(self, user_id: str, asset_id: str) -> dict[str, Any]:
         record = await self._load_record(asset_id)
-        self._assert_access(record, user_id, role)
+        self._assert_access(record, user_id)
         return self._serialize_record(record)
 
-    async def get_asset_file_path(self, user_id: str, role: AuthRole, asset_id: str) -> tuple[Path, str, str]:
+    async def get_asset_file_path(self, user_id: str, asset_id: str) -> tuple[Path, str, str]:
         record = await self._load_record(asset_id)
-        self._assert_access(record, user_id, role)
-        file_path = self._resolve_disk_path(record.storedPath)
+        self._assert_access(record, user_id)
+        file_path = self._resolve_disk_path(self._build_storage_path(asset_id, Path(record.fileName).suffix.lower()))
         if not file_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-        return file_path, record.originalName, record.mimeType
+        return file_path, record.fileName, record.fileType
 
-    async def delete_asset(self, user_id: str, role: AuthRole, asset_id: str) -> None:
+    async def delete_asset(self, user_id: str, asset_id: str) -> None:
         record = await self._load_record(asset_id)
-        self._assert_access(record, user_id, role)
-        stored_path = record.storedPath
-        await self.model.delete(where={"id": asset_id})
+        self._assert_access(record, user_id)
+        stored_path = self._build_storage_path(asset_id, Path(record.fileName).suffix.lower())
+        await self.client.medicalasset.delete(where={"id": asset_id})
         try:
             self._safe_unlink(self._resolve_disk_path(stored_path))
         except HTTPException:
             raise
 
-    async def rename_asset(self, user_id: str, role: AuthRole, asset_id: str, new_name: str) -> dict[str, Any]:
+    async def rename_asset(self, user_id: str, asset_id: str, new_name: str) -> dict[str, Any]:
         record = await self._load_record(asset_id)
-        self._assert_access(record, user_id, role)
+        self._assert_access(record, user_id)
         normalized_name = self._normalize_renamed_name(record, new_name)
-        updated = await self.model.update(
+        updated = await self.client.medicalasset.update(
             where={"id": asset_id},
-            data={"originalName": normalized_name},
-            include={"consultation": True},
+            data={"fileName": normalized_name},
+            include={"user": True},
         )
         return self._serialize_record(updated)
 
-    async def _resolve_upload_context(
-        self,
-        user_id: str,
-        role: AuthRole,
-        patient_id: str,
-        consultation_id: str | None,
-    ) -> Any:
-        if role == "patient":
-            if patient_id != user_id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to upload for another patient")
-            if consultation_id is None:
-                return None
-            consultation = await self._load_consultation(consultation_id)
-            if consultation.patientUsername != user_id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to attach this file to the consultation")
-            return consultation
-
-        if role == "doctor":
-            if consultation_id is None:
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="consultation_id is required for doctor uploads")
-            consultation = await self._load_consultation(consultation_id)
-            if consultation.doctorId != user_id or consultation.patientUsername != patient_id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to upload for this consultation")
-            return consultation
-
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid role")
-
-    async def _doctor_consultation_ids(self, doctor_id: str, patient_id: str | None) -> list[str]:
-        where: dict[str, Any] = {"doctorId": doctor_id}
-        if patient_id is not None:
-            where["patientUsername"] = self._normalize_identifier(patient_id, "patient_id")
-
-        consultations = await self.client.consultation.find_many(where=where)
-        return [item.id for item in consultations]
-
     async def _load_record(self, asset_id: str) -> Any:
-        record = await self.model.find_unique(where={"id": asset_id}, include={"consultation": True})
+        record = await self.client.medicalasset.find_unique(where={"id": asset_id}, include={"user": True})
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         return record
 
-    async def _load_consultation(self, consultation_id: str) -> Any:
-        consultation = await self.client.consultation.find_unique(where={"id": consultation_id})
-        if consultation is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consultation not found")
-        return consultation
+    async def _ensure_user_exists(self, user_id: str) -> None:
+        existing_user = await self.client.user.find_unique(where={"id": user_id})
+        if existing_user is None:
+            await self.client.user.create(data={"id": user_id})
 
-    async def _ensure_patient_exists(self, patient_id: str) -> None:
-        patient = await self.client.patient.find_unique(where={"username": patient_id})
-        if patient is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
+    def _assert_access(self, record: Any, user_id: str) -> None:
+        if record.userId != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to access this file")
 
-    def _assert_access(self, record: Any, user_id: str, role: AuthRole) -> None:
-        if role == "patient" and record.patientUsername == user_id:
-            return
-
-        if role == "doctor" and record.consultationId:
-            consultation = getattr(record, "consultation", None)
-            if consultation is not None and consultation.doctorId == user_id:
-                return
-
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to access this file")
-
-    def _validate_upload_file(self, upload_file: UploadFile) -> tuple[str, str]:
+    def _validate_upload_file(self, upload_file: UploadFile) -> tuple[str, str, str]:
         original_name = Path(upload_file.filename or "").name.strip()
         if not original_name:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Missing file name")
 
         extension = Path(original_name).suffix.lower()
-        if extension not in self.config.allowed_extensions:
-            raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Unsupported file type")
-
         content_type = (upload_file.content_type or "").lower()
-        if content_type not in self.config.allowed_mime_types:
+        if not content_type:
             raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Unsupported file content type")
 
-        return original_name, extension
+        return original_name, extension, content_type
 
     def _normalize_renamed_name(self, record: Any, new_name: str) -> str:
         raw_name = self._normalize_identifier(new_name, "new_name")
@@ -221,8 +150,8 @@ class AssetService:
         if not clean_name:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Missing new_name")
 
-        original_name = str(getattr(record, "originalName", "") or "")
-        original_extension = Path(original_name).suffix.lower() or Path(str(getattr(record, "storedPath", "") or "")).suffix.lower()
+        original_name = str(getattr(record, "fileName", "") or "")
+        original_extension = Path(original_name).suffix.lower()
 
         if original_extension:
             lower_name = clean_name.lower()
@@ -279,22 +208,27 @@ class AssetService:
         except Exception:
             raise
 
-    def _serialize_record(self, record: Any) -> dict[str, Any]:
+    def _build_storage_path(self, asset_id: str, extension: str) -> Path:
+        normalized_extension = extension.lower() if extension.startswith(".") else f"{extension.lower()}" if extension else ""
+        return Path("uploads") / self.config.storage_folder / f"{asset_id}{normalized_extension}"
+
+    def _serialize_record(self, record: Any, file_path: str | None = None, file_size: int | None = None) -> dict[str, Any]:
         data = record.model_dump() if hasattr(record, "model_dump") else dict(record)
         asset_id = data.get("id")
         return {
             "id": asset_id,
-            "patient_id": data.get("patientUsername"),
-            "uploaded_by": data.get("uploadedBy"),
-            "consultation_id": data.get("consultationId"),
+            "user_id": data.get("userId"),
+            "file_name": data.get("fileName"),
             "file_type": data.get("fileType"),
-            "original_name": data.get("originalName"),
-            "stored_path": data.get("storedPath"),
-            "mime_type": data.get("mimeType"),
-            "file_size": data.get("fileSize"),
-            "download_url": f"{self.config.api_prefix}/{asset_id}/download",
+            "folder_path": data.get("folderPath"),
+            "asset_category": data.get("assetCategory"),
+            "processing_status": data.get("processingStatus"),
+            "extracted_text": data.get("extractedText"),
+            "download_url": f"{self.config.api_prefix}/{asset_id}/download" if asset_id else None,
             "created_at": data.get("createdAt"),
             "updated_at": data.get("updatedAt"),
+            "file_path": file_path,
+            "file_size": file_size,
         }
 
     @staticmethod
@@ -302,17 +236,6 @@ class AssetService:
         normalized = str(value or "").strip()
         if not normalized:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Missing {label}")
-        return normalized
-
-    @staticmethod
-    def _normalize_list_patient_filter(user_id: str, patient_id: str | None) -> str:
-        if patient_id is None:
-            return user_id
-        normalized = str(patient_id or "").strip()
-        if not normalized:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Missing patient_id")
-        if normalized != user_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to list another patient's files")
         return normalized
 
     @staticmethod
