@@ -21,19 +21,19 @@ export const resolvePatientUploadTarget = (file) => {
   const mimeType = String(file?.type || '').toLowerCase();
   const isImage = mimeType.startsWith('image/') || IMAGE_EXTENSIONS.some((ext) => fileName.endsWith(ext));
   if (isImage) {
-    return { endpoint: '/api/medical_images/upload', kind: 'medical_image' };
+    return { endpoint: '/api/assets/medical_images/upload', kind: 'medical_image' };
   }
 
   const isPdf = mimeType === 'application/pdf' || fileName.endsWith('.pdf');
   if (isPdf) {
     const isPrescription = PRESCRIPTION_HINTS.some((hint) => fileName.includes(hint));
     return {
-      endpoint: isPrescription ? '/api/prescriptions/upload' : '/api/reports/upload',
+      endpoint: isPrescription ? '/api/assets/prescriptions/upload' : '/api/assets/reports/upload',
       kind: isPrescription ? 'prescription' : 'report',
     };
   }
 
-  return { endpoint: '/api/medical_images/upload', kind: 'medical_image' };
+  return { endpoint: '/api/assets/medical_images/upload', kind: 'medical_image' };
 };
 
 export const authApi = {
@@ -74,14 +74,14 @@ export const patientApi = {
     return apiClient.post('/api/appointments', body, { retries: 0, auth: true });
   },
   cancelAppointment: (appointmentId) => apiClient.patch(`/api/appointments/${appointmentId}/cancel`, {}, { retries: 0, auth: true }),
-  listMedicalImages: () => apiClient.get('/api/medical_images', { retries: 1, auth: true }),
-  uploadMedicalImage: (formData) => apiClient.post('/api/medical_images/upload', formData, { retries: 0, auth: true }),
-  deleteMedicalImage: (medicalImageId) => apiClient.delete(`/api/medical_images/${encodeURIComponent(medicalImageId)}`, { retries: 0, auth: true }),
-  renameMedicalImage: (medicalImageId, newName) => apiClient.patch(`/api/medical_images/${encodeURIComponent(medicalImageId)}`, { new_name: newName }, { retries: 0, auth: true }),
-  renameReport: (reportId, newName) => apiClient.patch(`/api/reports/${encodeURIComponent(reportId)}`, { new_name: newName }, { retries: 0, auth: true }),
-  renamePrescription: (prescriptionId, newName) => apiClient.patch(`/api/prescriptions/${encodeURIComponent(prescriptionId)}`, { new_name: newName }, { retries: 0, auth: true }),
-  deleteReport: (reportId) => apiClient.delete(`/api/reports/${encodeURIComponent(reportId)}`, { retries: 0, auth: true }),
-  deletePrescription: (prescriptionId) => apiClient.delete(`/api/prescriptions/${encodeURIComponent(prescriptionId)}`, { retries: 0, auth: true }),
+  listMedicalImages: () => apiClient.get('/api/assets/medical_images', { retries: 1, auth: true }),
+  uploadMedicalImage: (formData) => apiClient.post('/api/assets/medical_images/upload', formData, { retries: 0, auth: true }),
+  deleteMedicalImage: (medicalImageId) => apiClient.delete(`/api/assets/medical_images/${encodeURIComponent(medicalImageId)}`, { retries: 0, auth: true }),
+  renameMedicalImage: (medicalImageId, newName) => apiClient.patch(`/api/assets/medical_images/${encodeURIComponent(medicalImageId)}`, { new_name: newName }, { retries: 0, auth: true }),
+  renameReport: (reportId, newName) => apiClient.patch(`/api/assets/reports/${encodeURIComponent(reportId)}`, { new_name: newName }, { retries: 0, auth: true }),
+  renamePrescription: (prescriptionId, newName) => apiClient.patch(`/api/assets/prescriptions/${encodeURIComponent(prescriptionId)}`, { new_name: newName }, { retries: 0, auth: true }),
+  deleteReport: (reportId) => apiClient.delete(`/api/assets/reports/${encodeURIComponent(reportId)}`, { retries: 0, auth: true }),
+  deletePrescription: (prescriptionId) => apiClient.delete(`/api/assets/prescriptions/${encodeURIComponent(prescriptionId)}`, { retries: 0, auth: true }),
   renameAsset: async (file, newName) => {
     const kind = resolvePatientAssetKind(file);
     const assetId = file?.id;
@@ -90,10 +90,10 @@ export const patientApi = {
     }
 
     const attempts = kind === 'report'
-      ? [() => apiClient.patch(`/api/reports/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true }), () => apiClient.patch(`/api/prescriptions/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true }), () => apiClient.patch(`/api/medical_images/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true })]
+      ? [() => apiClient.patch(`/api/assets/reports/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true }), () => apiClient.patch(`/api/assets/prescriptions/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true }), () => apiClient.patch(`/api/assets/medical_images/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true })]
       : kind === 'prescription'
-        ? [() => apiClient.patch(`/api/prescriptions/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true }), () => apiClient.patch(`/api/reports/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true }), () => apiClient.patch(`/api/medical_images/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true })]
-        : [() => apiClient.patch(`/api/medical_images/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true }), () => apiClient.patch(`/api/reports/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true }), () => apiClient.patch(`/api/prescriptions/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true })];
+        ? [() => apiClient.patch(`/api/assets/prescriptions/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true }), () => apiClient.patch(`/api/assets/reports/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true }), () => apiClient.patch(`/api/assets/medical_images/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true })]
+        : [() => apiClient.patch(`/api/assets/medical_images/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true }), () => apiClient.patch(`/api/assets/reports/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true }), () => apiClient.patch(`/api/assets/prescriptions/${encodeURIComponent(assetId)}`, { new_name: newName }, { retries: 0, auth: true })];
 
     let lastError = null;
     for (const attempt of attempts) {
@@ -115,12 +115,12 @@ export const patientApi = {
   createConsultation: (appointmentId) => apiClient.post('/api/chat/consultations', { appointment_id: appointmentId }, { retries: 0, auth: true }),
   requestAppointment: (body) => apiClient.post('/api/appointment_request', body, { retries: 0, auth: true }),
   // Reports & prescriptions
-  listReports: () => apiClient.get('/api/reports', { retries: 1, auth: true }),
-  getReport: (reportId) => apiClient.get(`/api/reports/${encodeURIComponent(reportId)}`, { retries: 1, auth: true }),
-  listPrescriptions: () => apiClient.get('/api/prescriptions', { retries: 1, auth: true }),
-  getPrescription: (prescriptionId) => apiClient.get(`/api/prescriptions/${encodeURIComponent(prescriptionId)}`, { retries: 1, auth: true }),
-  attachReportToConsultation: (reportId, consultationId) => apiClient.post(`/api/reports/${encodeURIComponent(reportId)}/attach`, { consultation_id: consultationId }, { retries: 0, auth: true }),
-  attachPrescriptionToConsultation: (prescriptionId, consultationId) => apiClient.post(`/api/prescriptions/${encodeURIComponent(prescriptionId)}/attach`, { consultation_id: consultationId }, { retries: 0, auth: true }),
+  listReports: () => apiClient.get('/api/assets/reports', { retries: 1, auth: true }),
+  getReport: (reportId) => apiClient.get(`/api/assets/reports/${encodeURIComponent(reportId)}`, { retries: 1, auth: true }),
+  listPrescriptions: () => apiClient.get('/api/assets/prescriptions', { retries: 1, auth: true }),
+  getPrescription: (prescriptionId) => apiClient.get(`/api/assets/prescriptions/${encodeURIComponent(prescriptionId)}`, { retries: 1, auth: true }),
+  attachReportToConsultation: (reportId, consultationId) => apiClient.post(`/api/assets/reports/${encodeURIComponent(reportId)}/attach`, { consultation_id: consultationId }, { retries: 0, auth: true }),
+  attachPrescriptionToConsultation: (prescriptionId, consultationId) => apiClient.post(`/api/assets/prescriptions/${encodeURIComponent(prescriptionId)}/attach`, { consultation_id: consultationId }, { retries: 0, auth: true }),
 };
 
 export const doctorApi = {

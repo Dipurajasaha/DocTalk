@@ -14,7 +14,7 @@ def _image_config() -> AssetConfig:
     return AssetConfig(
         model_name="medicalimage",
         storage_folder="medical_images",
-        api_prefix="/api/medical_images",
+        api_prefix="/api/assets/medical_images",
         file_type="medical_image",
         allowed_mime_types=frozenset({"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}),
         allowed_extensions=frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif"}),
@@ -25,7 +25,7 @@ def _report_config() -> AssetConfig:
     return AssetConfig(
         model_name="report",
         storage_folder="reports",
-        api_prefix="/api/reports",
+        api_prefix="/api/assets/reports",
         file_type="report",
         allowed_mime_types=frozenset({"application/pdf"}),
         allowed_extensions=frozenset({".pdf"}),
@@ -36,7 +36,7 @@ def _prescription_config() -> AssetConfig:
     return AssetConfig(
         model_name="prescription",
         storage_folder="prescriptions",
-        api_prefix="/api/prescriptions",
+        api_prefix="/api/assets/prescriptions",
         file_type="prescription",
         allowed_mime_types=frozenset({"application/pdf"}),
         allowed_extensions=frozenset({".pdf"}),

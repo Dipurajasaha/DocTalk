@@ -41,8 +41,6 @@ app.include_router(user_doctor_router, prefix="/api/doctor", tags=["users"])
 app.include_router(appointments_router, prefix="/api/appointments", tags=["appointments"])
 app.include_router(appointments_compat_router, prefix="/api", tags=["appointments"])
 
-# Medical assets router (mounted at /api for compatibility and /api/assets as requested)
-app.include_router(medical_assets.router, prefix="/api", tags=["assets"])
 app.include_router(medical_assets.router, prefix="/api/assets", tags=["assets"])
 
 
