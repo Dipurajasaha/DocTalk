@@ -41,18 +41,12 @@ def _require_doctor_id(payload: LoginRequest | UserRegistrationRequest) -> str:
     return payload.doctor_id
 
 
-@router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, auth_service: AuthService = Depends(get_auth_service)) -> TokenResponse:
-    if payload.username:
-        return _token_response(await auth_service.login_patient(payload.username, payload.password))
-    return _token_response(await auth_service.login_doctor(payload.doctor_id or "", payload.password))
-
-
-@router.post("/register", response_model=TokenResponse)
-async def register(payload: UserRegistrationRequest, auth_service: AuthService = Depends(get_auth_service)) -> TokenResponse:
-    if payload.username:
-        return _token_response(await auth_service.register_patient(payload.username, payload.name, payload.password))
-    return _token_response(await auth_service.register_doctor(payload.doctor_id or "", payload.name, payload.password))
+# Note: generic `/login` and `/register` endpoints removed in favor of explicit
+# patient/doctor endpoints to avoid ambiguity. Use the following instead:
+# - POST /api/auth/patient/login
+# - POST /api/auth/patient/signup
+# - POST /api/auth/doctor/login
+# - POST /api/auth/doctor/signup
 
 
 @router.post("/patient/login", response_model=TokenResponse)
