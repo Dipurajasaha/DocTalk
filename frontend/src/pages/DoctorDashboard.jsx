@@ -86,8 +86,8 @@ const CustomCalendar = ({ selectedDate, onDateSelect, dashboardData, slotsData }
           const isPast = dateStr < todayStr;
           const isSelected = formatObjToDate(selectedDate) === dateStr;
           
-          const hasSession = dashboardData?.upcoming_schedules?.some(s => formatObjToDate(new Date(s.scheduled_time)) === dateStr);
-          const hasRequest = dashboardData?.requests?.some(r => formatObjToDate(new Date(r.requested_at)) === dateStr); 
+          const hasSession = dashboardData?.upcoming_schedules?.some(s => formatObjToDate(new Date(s.appointmentDate || s.scheduled_time)) === dateStr);
+          const hasRequest = dashboardData?.requests?.some(r => formatObjToDate(new Date(r.requested_at || r.created_at || r.appointmentDate || Date.now())) === dateStr); 
           const hasOpen = slotsData && slotsData[dateStr] && Object.values(slotsData[dateStr]).includes('open');
           
           const hasPending = hasRequest || hasOpen;
@@ -154,6 +154,28 @@ const CustomCalendar = ({ selectedDate, onDateSelect, dashboardData, slotsData }
       </div>
     </div>
   );
+};
+
+const hydrateSlotsData = (slots = []) => {
+  const nextSlotsData = {};
+
+  (Array.isArray(slots) ? slots : []).forEach((slot) => {
+    const start = new Date(slot?.startTime);
+    if (Number.isNaN(start.getTime())) return;
+    const tzOffset = start.getTimezoneOffset() * 60000;
+    const dayKey = new Date(start.getTime() - tzOffset).toISOString().split('T')[0];
+    const hour = start.getHours();
+    const minute = start.getMinutes();
+    const displayHour = hour === 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    const ampm = hour < 12 ? 'AM' : 'PM';
+    const mins = minute === 0 ? '00' : String(minute).padStart(2, '0');
+    const label = `${displayHour}:${mins} ${ampm}`;
+
+    if (!nextSlotsData[dayKey]) nextSlotsData[dayKey] = {};
+    nextSlotsData[dayKey][label] = slot?.isBooked ? 'booked' : slot?.isActive === false ? 'inactive' : 'open';
+  });
+
+  return nextSlotsData;
 };
 
 export default function DoctorDashboard() {
@@ -261,51 +283,75 @@ export default function DoctorDashboard() {
 
   // 2. Fetch Dashboard Data
   useEffect(() => {
-    if (user) {
-      patientApi.listConsultations()
-        .then(data => setConsultations(Array.isArray(data) ? data : []))
-        .catch(err => console.error('Failed loading doctor consultations:', err));
-      doctorApi.dashboardData()
-        .then(data => {
-          if (!data) {
-            console.error('Doctor dashboard returned empty/malformed payload');
-            return;
-          }
-          if (data.success) {
-            setDashboardData(data);
-            
-            // Build patient chat list (skip empty/invalid ids)
-            const pSet = new Map();
-            (data.upcoming_schedules||[]).forEach(s=>{
-              const pid = String(s.patient || s.patient_id || '').trim();
-              if(!pid) return;
-              if(!pSet.has(pid)) pSet.set(pid,{id:pid, display: s.patient || s.patient_display || pid, lastStatus:'scheduled'});
-            });
-            (data.requests||[]).forEach(r=>{
-              const pid = String(r.patient || r.patient_id || '').trim();
-              if(!pid) return;
-              if(!pSet.has(pid)) pSet.set(pid,{id:pid, display: r.patient_display || r.patient || pid, lastStatus: r.status || 'requested'});
-            });
-            (data.patient_chat_patients||[]).forEach(p=>{
-               const pid = String(p || '').trim();
-               if(!pid) return;
-               if(!pSet.has(pid)) pSet.set(pid,{id:pid, display:pid, lastStatus: (data.closed_chats||[]).includes(pid)?'closed':'chat'});
-               else { if((data.closed_chats||[]).includes(pid)) pSet.get(pid).lastStatus = 'closed'; }
-            });
+    if (!user) return;
 
-            const plist = Array.from(pSet.values()).sort((a,b)=>a.id.localeCompare(b.id));
-            setPatientChatList(plist);
-            if(plist.length > 0 && !activePatient) {
-               setActivePatient(plist[0].id);
-            }
+    let cancelled = false;
+
+    const loadDashboard = async () => {
+      try {
+        const [consultationResult, dashboardResult] = await Promise.allSettled([
+          patientApi.listConsultations(),
+          doctorApi.dashboardData(),
+        ]);
+
+        if (cancelled) return;
+
+        const consultationData = consultationResult.status === 'fulfilled' ? consultationResult.value : [];
+        const dashboardDataResponse = dashboardResult.status === 'fulfilled' ? dashboardResult.value : null;
+
+        setConsultations(Array.isArray(consultationData) ? consultationData : []);
+
+        if (!dashboardDataResponse) {
+          if (dashboardResult.status === 'rejected') {
+            console.error('Failed loading doctor dashboard:', dashboardResult.reason);
           }
-        })
-        .catch(err => {
-          console.error('Failed loading doctor dashboard:', err);
-          try { if (err && (err.status === 401 || err.status === 403)) markExpired(); } catch (e) {}
-          try { addNotification && addNotification({ type: 'error', message: 'Failed loading dashboard data' }); } catch (e) {}
-        });
-    }
+          console.error('Doctor dashboard returned empty/malformed payload');
+          return;
+        }
+
+        if (dashboardDataResponse.success) {
+          setDashboardData(dashboardDataResponse);
+          setSlotsData(hydrateSlotsData(dashboardDataResponse.slots || []));
+
+          const pSet = new Map();
+          (dashboardDataResponse.upcoming_schedules || []).forEach(s => {
+            const pid = String(s.patient || s.patient_id || '').trim();
+            if (!pid) return;
+            if (!pSet.has(pid)) pSet.set(pid, { id: pid, display: s.patient || s.patient_display || pid, lastStatus: 'scheduled' });
+          });
+          (dashboardDataResponse.requests || []).forEach(r => {
+            const pid = String(r.patient || r.patient_id || '').trim();
+            if (!pid) return;
+            if (!pSet.has(pid)) pSet.set(pid, { id: pid, display: r.patient_display || r.patient || pid, lastStatus: r.status || 'requested' });
+          });
+          (dashboardDataResponse.patient_chat_patients || []).forEach(p => {
+            const pid = String(p || '').trim();
+            if (!pid) return;
+            if (!pSet.has(pid)) pSet.set(pid, { id: pid, display: pid, lastStatus: (dashboardDataResponse.closed_chats || []).includes(pid) ? 'closed' : 'chat' });
+            else if ((dashboardDataResponse.closed_chats || []).includes(pid)) pSet.get(pid).lastStatus = 'closed';
+          });
+
+          const plist = Array.from(pSet.values()).sort((a, b) => a.id.localeCompare(b.id));
+          setPatientChatList(plist);
+          if (plist.length > 0 && !activePatient) {
+            setActivePatient(plist[0].id);
+          }
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.error('Failed loading doctor dashboard:', err);
+        try { if (err && (err.status === 401 || err.status === 403)) markExpired(); } catch (e) {}
+        try { addNotification && addNotification({ type: 'error', message: 'Failed loading dashboard data' }); } catch (e) {}
+      }
+    };
+
+    loadDashboard();
+    const refreshTimer = setInterval(loadDashboard, 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(refreshTimer);
+    };
   }, [user, activeTab]);
 
   function normalizeChatMessage(item) {
@@ -629,17 +675,17 @@ export default function DoctorDashboard() {
                 <tr key={i}>
                   <td>{r.patient_display || r.patient}</td>
                   <td>{new Date(r.requested_at).toLocaleString()}</td>
-                  <td><span className="doc-badge">{r.status}</span></td>
+                  <td><span className="doc-badge">{String(r.status || '').toUpperCase()}</span></td>
                   <td>
-                    <input type="datetime-local" id={`time-${r.appointment_id}`} style={{padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: '50px', fontSize: '11px', marginRight: '8px'}} />
+                    <input type="datetime-local" id={`time-${r.id || r.appointment_id}`} style={{padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: '50px', fontSize: '11px', marginRight: '8px'}} />
                     <button onClick={() => {
-                       const t = document.getElementById(`time-${r.appointment_id}`).value;
+                       const t = document.getElementById(`time-${r.id || r.appointment_id}`).value;
                        if(!t) return addNotification && addNotification({ type: 'error', message: 'Select time' });
-                       fetch('/api/doctor_schedule_request', {
-                         method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include',
-                         body: JSON.stringify({ appointment_id: r.appointment_id, scheduled_time: t, note: '' })
+                       fetch(`/api/appointments/${r.id || r.appointment_id}/action`, {
+                         method: 'PUT', headers: {'Content-Type':'application/json'}, credentials: 'include',
+                         body: JSON.stringify({ status: 'ACCEPT', assignedDate: t, doctorMessage: '' })
                        }).then(res=>res.json()).then(data=>{
-                         if(data.success) {
+                         if(data && (data.id || data.success)) {
                            addNotification && addNotification({ type: 'success', message: 'Scheduled!' });
                            // Refresh dashboard data
                            fetch('/api/doctor_dashboard_data', {credentials: 'include'}).then(res=>res.json()).then(newData=>setDashboardData(newData));
@@ -753,7 +799,7 @@ export default function DoctorDashboard() {
                   if (state !== 'disabled') {
                       const mappedSchedules = dashboardData?.upcoming_schedules || [];
                       const isRealBooked = mappedSchedules.some(s => {
-                        const sDate = new Date(s.scheduled_time);
+                        const sDate = new Date(s.appointmentDate || s.scheduled_time);
                         if (formatObjToDate(sDate) === slotDate) {
                             const h = sDate.getHours();
                             const m = sDate.getMinutes();
@@ -770,13 +816,15 @@ export default function DoctorDashboard() {
                   const toggleSlot = () => {
                     if (state === 'booked' || state === 'disabled') return;
                     setSlotsData(prev => ({
-                      ...prev, [slotDate]: { ...(prev[slotDate] || {}), [time]: state === 'none' ? 'open' : 'none' }
+                      ...prev, [slotDate]: { ...(prev[slotDate] || {}), [time]: state === 'open' ? 'none' : 'open' }
                     }));
                   };
 
                   let bg = '#fff', border = '1px dashed #cbd5e1', color = '#64748b', text = `+ ${time}`, cursor = 'pointer';
                   if (state === 'open') {
                     bg = '#ecfdf5'; border = '1px solid #10b981'; color = '#059669'; text = time;
+                  } else if (state === 'inactive') {
+                    bg = '#f8fafc'; border = '1px solid #cbd5e1'; color = '#64748b'; text = time; cursor = 'pointer';
                   } else if (state === 'booked') {
                     bg = '#f1f5f9'; border = '1px solid #e2e8f0'; color = '#94a3b8'; text = time; cursor = 'not-allowed';
                   } else if (state === 'disabled') {
@@ -792,10 +840,35 @@ export default function DoctorDashboard() {
                     }}>
                       {text}
                       {state === 'open' && <span style={{fontSize:'10px', fontWeight: '500'}}>Open</span>}
+                      {state === 'inactive' && <span style={{fontSize:'10px', fontWeight: '500'}}>Inactive</span>}
                       {state === 'booked' && <span style={{fontSize:'10px', fontWeight: '500'}}>Booked</span>}
                     </button>
                   );
                 })}
+                <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', paddingTop: '10px' }}>
+                  <button onClick={() => {
+                    const openSlots = Object.entries(slotsData).flatMap(([day, times]) => Object.entries(times || {}).filter(([, state]) => state === 'open').map(([time]) => ({ day, time })));
+                    const payload = openSlots.map(({ day, time }) => {
+                      const [t, ampm] = time.split(' ');
+                      let [h, m] = t.split(':').map(Number);
+                      if (ampm === 'PM' && h !== 12) h += 12;
+                      if (ampm === 'AM' && h === 12) h = 0;
+                      const start = new Date(`${day}T00:00:00`);
+                      start.setHours(h, m, 0, 0);
+                      const end = new Date(start.getTime() + 30 * 60 * 1000);
+                      return { startTime: start.toISOString(), endTime: end.toISOString() };
+                    });
+                    doctorApi.createSlots(payload).then(() => doctorApi.dashboardData()).then((freshData) => {
+                      if (freshData && freshData.success) {
+                        setDashboardData(freshData);
+                        setSlotsData(hydrateSlotsData(freshData.slots || []));
+                      }
+                      addNotification && addNotification({ type: 'success', message: 'Slots saved' });
+                    }).catch(() => {
+                      addNotification && addNotification({ type: 'error', message: 'Failed to save slots' });
+                    });
+                  }} style={{ background: '#8B7EFF', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: '50px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>Save Slots</button>
+                </div>
               </div>
             </div>
           ) : (
@@ -816,7 +889,7 @@ export default function DoctorDashboard() {
                   </div>
 
                   <div style={{ color: '#64748b', fontSize: '13px', paddingLeft: '8px' }}>
-                    Requested: {new Date(r.requested_at).toLocaleDateString('en-GB')}
+                    Requested: {new Date(r.requested_at || r.created_at || Date.now()).toLocaleDateString('en-GB')}
                   </div>
 
                   <div style={{ marginTop: 'auto', paddingTop: '10px', paddingLeft: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -825,16 +898,20 @@ export default function DoctorDashboard() {
                       <button onClick={() => {
                         const t = document.getElementById(`time-manage-${r.appointment_id}`).value;
                         if(!t) return addNotification && addNotification({ type: 'error', message: 'Please select a date and time slot first' });
-                        fetch('/api/doctor_schedule_request', {
-                          method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include',
-                          body: JSON.stringify({ appointment_id: r.appointment_id, scheduled_time: t, note: '' })
-                        }).then(res=>res.json()).then(data=>{
-                          if(data.success) fetch('/api/doctor_dashboard_data', {credentials: 'include'}).then(res=>res.json()).then(newData=>setDashboardData(newData));
+                        doctorApi.respondToAppointment(r.id || r.appointment_id, { status: 'ACCEPT', assignedDate: t, doctorMessage: '' }).then((data)=>{
+                          if(data && (data.id || data.success)) doctorApi.dashboardData().then((newData)=>{
+                            setDashboardData(newData);
+                            setSlotsData(hydrateSlotsData(newData.slots || []));
+                          });
                         });
                       }} style={{flex: 1, background:'#10b981', color:'#fff', border:'none', padding:'10px', borderRadius:'8px', cursor:'pointer', fontSize:'13px', fontWeight:'600'}}>Accept</button>
                       <button onClick={() => {
-                          // Note: Implement decline logic in backend if needed. Here we just UI mock it or send a dummy status
-                         addNotification && addNotification({ type: 'info', message: 'Declining currently unsupported; backend update required' });
+                        doctorApi.respondToAppointment(r.id || r.appointment_id, { status: 'REJECT', doctorMessage: 'Declined by doctor' }).then((data)=>{
+                          if(data && (data.id || data.success)) doctorApi.dashboardData().then((newData)=>{
+                            setDashboardData(newData);
+                            setSlotsData(hydrateSlotsData(newData.slots || []));
+                          });
+                        });
                       }} style={{flex: 1, background:'#f1f5f9', color:'#64748b', border:'1px solid #e2e8f0', padding:'10px', borderRadius:'8px', cursor:'pointer', fontSize:'13px', fontWeight:'600'}}>Decline</button>
                     </div>
                   </div>
@@ -853,36 +930,60 @@ export default function DoctorDashboard() {
                   
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingLeft: '8px' }}>
                     <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '600', color: '#334155', lineHeight: '1.4' }}>
-                      Consultation | {s.patient} | General Follow-up
+                      Consultation | {s.patient_display || s.patient} | {s.reason || 'General Follow-up'}
                     </h4>
                     <span style={{ padding: '4px 12px', border: manageSessionTab === 'completed' ? '1px solid #10b981' : '1px solid #c4b5fd', borderRadius: '50px', color: manageSessionTab === 'completed' ? '#10b981' : '#8B7EFF', fontSize: '12px', fontWeight: '500', marginLeft: '10px', background: manageSessionTab === 'completed' ? '#ecfdf5' : '#f3f0ff' }}>
-                      {manageSessionTab === 'completed' ? 'Completed' : 'Scheduled'}
+                      {manageSessionTab === 'completed' ? 'COMPLETED' : 'CONFIRMED'}
                     </span>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#64748b', fontSize: '13px', paddingLeft: '8px' }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                    {new Date(s.scheduled_time).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(s.scheduled_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                    {new Date(s.appointmentDate || s.scheduled_time).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} at {new Date(s.appointmentDate || s.scheduled_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                   </div>
 
-                  <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: '1.5', paddingLeft: '8px' }}>
-                    This session is blocked for a general health review and vital checks. Ensure patient reports are reviewed prior to the meeting. ... <span style={{color: '#8B7EFF', cursor: 'pointer', fontWeight: '500'}}>more</span>
-                  </p>
+                  <div style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: '1.6', paddingLeft: '8px', display: 'grid', gap: '6px' }}>
+                    <div><strong style={{ color: '#334155' }}>Reason:</strong> {s.reason || 'General follow-up'}</div>
+                    {String(s.note || '').trim() && <div><strong style={{ color: '#334155' }}>Note:</strong> {s.note}</div>}
+                  </div>
 
                   {manageSessionTab !== 'completed' && (
                   <div style={{ marginTop: 'auto', paddingTop: '10px', paddingLeft: '8px' }}>
-                    <button onClick={() => {
-                        fetch('/api/doctor_complete_schedule', {
-                          method: 'POST', headers: {'Content-Type': 'application/json'}, credentials: 'include',
-                          body: JSON.stringify({id: s.id})
-                        }).then(r=>r.json()).then(d=>{
-                            if(d.success) fetch('/api/doctor_dashboard_data', {credentials: 'include'}).then(res=>res.json()).then(newData=>setDashboardData(newData));
-                        });
-                      }} 
-                      style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#8B7EFF', background: 'none', border: 'none', fontSize: '14px', fontWeight: '500', cursor: 'pointer', padding: 0 }}
-                    >
-                      Complete Session <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 16 16 12 12 8"></polyline><line x1="8" y1="12" x2="16" y2="12"></line></svg>
-                    </button>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                      <button onClick={() => {
+                          fetch(`/api/appointments/${s.id}/action`, {
+                            method: 'PUT', headers: {'Content-Type': 'application/json'}, credentials: 'include',
+                            body: JSON.stringify({ status: 'ACCEPT', assignedDate: s.appointmentDate || s.scheduled_time, doctorMessage: 'Completed session' })
+                          }).then(r=>r.json()).then(d=>{
+                              if(d && (d.id || d.success)) fetch('/api/doctor_dashboard_data', {credentials: 'include'}).then(res=>res.json()).then(newData=>{
+                                setDashboardData(newData);
+                                setSlotsData(hydrateSlotsData(newData.slots || []));
+                              });
+                          });
+                        }} 
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#8B7EFF', background: 'none', border: 'none', fontSize: '14px', fontWeight: '500', cursor: 'pointer', padding: 0 }}
+                      >
+                        Complete Session <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 16 16 12 12 8"></polyline><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                      </button>
+                      <button onClick={() => {
+                          if (!window.confirm('Cancel this session?')) return;
+                          doctorApi.cancelAppointment(s.id).then((response) => {
+                            if (response && (response.id || response.success || response.message)) {
+                              return doctorApi.dashboardData().then((newData) => {
+                                setDashboardData(newData);
+                                setSlotsData(hydrateSlotsData(newData.slots || []));
+                              });
+                            }
+                            throw new Error('Unable to cancel session');
+                          }).catch(() => {
+                            addNotification && addNotification({ type: 'error', message: 'Failed to cancel session' });
+                          });
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#BE123C', background: '#FFF1F2', border: '1px solid #FCA5A5', borderRadius: '999px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px' }}
+                      >
+                        Cancel Session
+                      </button>
+                    </div>
                   </div>
                   )}
                 </div>

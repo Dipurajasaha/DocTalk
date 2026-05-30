@@ -6,9 +6,12 @@ from typing import Any, Literal
 from fastapi import HTTPException, status
 
 from ..core.database import prisma
-from ..core.security import create_access_token, hash_password, verify_password
-from ..services.user_service import UserService
+from ..core.logger import get_logger
+from ..utils.jwt import create_access_token
+from ..utils.password import hash_password, verify_password
 
+
+logger = get_logger(__name__)
 
 AuthRole = Literal["patient", "doctor"]
 
@@ -25,12 +28,12 @@ class AuthService:
     def __init__(self, client: Any = prisma) -> None:
         self.client = client
 
-    async def register_patient(self, username: str, name: str, password: str) -> AuthResult:
+    async def signup_patient(self, username: str, name: str, password: str) -> AuthResult:
         normalized_username = username.strip()
         normalized_name = name.strip()
         self._validate_signup_input(normalized_username, normalized_name, password)
 
-        await self._ensure_user_available(normalized_username)
+        await self._ensure_user_available(normalized_username, "patient")
         hashed_password = hash_password(password)
         await self._safe_create_patient(
             {
@@ -39,22 +42,37 @@ class AuthService:
                 "password": hashed_password,
             }
         )
+        logger.info("Patient signed up", extra={"component": "auth", "request_id": normalized_username})
         return self._issue_token(normalized_username, "patient")
+    
+    async def _safe_create_patient(self, data: dict[str, Any]) -> None:
+        try:
+            await self.client.patient.create(data=data)
+        except Exception as exc:
+            if "unique" in str(exc).lower() or "already exists" in str(exc).lower():
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists") from exc
+            raise
 
-    async def register_doctor(self, doctor_id: str, name: str, password: str) -> AuthResult:
+    async def signup_doctor(self, doctor_id: str, name: str, password: str) -> AuthResult:
         normalized_doctor_id = doctor_id.strip()
         normalized_name = name.strip()
         self._validate_signup_input(normalized_doctor_id, normalized_name, password)
 
-        await self._ensure_user_available(normalized_doctor_id)
+        await self._ensure_user_available(normalized_doctor_id, "doctor")
         hashed_password = hash_password(password)
-        await self._safe_create_doctor(
-            {
-                "doctorId": normalized_doctor_id,
-                "name": normalized_name,
-                "password": hashed_password,
-            }
-        )
+        try:
+            await self.client.doctor.create(
+                data={
+                    "doctorId": normalized_doctor_id,
+                    "name": normalized_name,
+                    "password": hashed_password,
+                }
+            )
+        except Exception as exc:
+            if "unique" in str(exc).lower() or "already exists" in str(exc).lower():
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists") from exc
+            raise
+        logger.info("Doctor signed up", extra={"component": "auth", "request_id": normalized_doctor_id})
         return self._issue_token(normalized_doctor_id, "doctor")
 
     async def login_patient(self, username: str, password: str) -> AuthResult:
@@ -72,29 +90,22 @@ class AuthService:
         return self._issue_token(doctor.doctorId, "doctor")
 
     async def get_user_profile(self, user_id: str, role: AuthRole) -> dict[str, Any]:
-        return await UserService(self.client).get_current_profile(user_id, role)
+        if role == "patient":
+            user = await self.client.patient.find_unique(where={"username": user_id})
+            if user is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
+            return {"user_id": user.username, "role": role, "name": user.name}
 
-    async def _ensure_user_available(self, user_id: str) -> None:
+        user = await self.client.doctor.find_unique(where={"doctorId": user_id})
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")
+        return {"user_id": user.doctorId, "role": role, "name": user.name}
+
+    async def _ensure_user_available(self, user_id: str, role: AuthRole) -> None:
         patient = await self.client.patient.find_unique(where={"username": user_id})
         doctor = await self.client.doctor.find_unique(where={"doctorId": user_id})
         if patient is not None or doctor is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
-
-    async def _safe_create_patient(self, data: dict[str, Any]) -> None:
-        try:
-            await self.client.patient.create(data=data)
-        except Exception as exc:
-            if "unique" in str(exc).lower() or "already exists" in str(exc).lower():
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists") from exc
-            raise
-
-    async def _safe_create_doctor(self, data: dict[str, Any]) -> None:
-        try:
-            await self.client.doctor.create(data=data)
-        except Exception as exc:
-            if "unique" in str(exc).lower() or "already exists" in str(exc).lower():
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists") from exc
-            raise
 
     @staticmethod
     def _validate_signup_input(user_id: str, name: str, password: str) -> None:

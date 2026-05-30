@@ -79,11 +79,13 @@ export default function PatientDashboard() {
   const [appointments, setAppointments] = useState([]);
   const [appointmentDraft, setAppointmentDraft] = useState({
     doctor_id: '',
-    date: '',
-    time: '',
     reason: 'General consultation',
     note: '',
   });
+  const [bookingMode, setBookingMode] = useState('direct');
+  const [availableSlots, setAvailableSlots] = useState([]);
+  const [selectedSlotId, setSelectedSlotId] = useState('');
+  const [slotLoading, setSlotLoading] = useState(false);
   
   // Patient-to-Doctor Chat System
   const [docChats, setDocChats] = useState([]); // List of doctors the patient has chatted with
@@ -386,6 +388,44 @@ export default function PatientDashboard() {
     }
   }, [doctors, appointmentDraft.doctor_id]);
 
+  useEffect(() => {
+    const doctorId = String(appointmentDraft.doctor_id || '').trim();
+    if (!doctorId) {
+      setAvailableSlots([]);
+      setSelectedSlotId('');
+      return;
+    }
+
+    let cancelled = false;
+    const loadSlots = async () => {
+      setSlotLoading(true);
+      try {
+        const slots = await patientApi.getAvailableSlots(doctorId);
+        if (!cancelled) {
+          setAvailableSlots(Array.isArray(slots) ? slots : []);
+          setSelectedSlotId((current) => {
+            if (current && Array.isArray(slots) && slots.some((slot) => String(slot.id) === String(current))) {
+              return current;
+            }
+            return '';
+          });
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setAvailableSlots([]);
+          setSelectedSlotId('');
+        }
+      } finally {
+        if (!cancelled) setSlotLoading(false);
+      }
+    };
+
+    loadSlots();
+    return () => {
+      cancelled = true;
+    };
+  }, [appointmentDraft.doctor_id]);
+
   const resolveConsultationForDoctor = (doctorId) => {
     const matchId = String(doctorId || '');
     return consultations.find((item) => String(item.doctor_id || item.doctorId || '') === matchId) || null;
@@ -579,33 +619,33 @@ export default function PatientDashboard() {
   const handleSelectDoctorForAppointment = (docId) => {
     setActivePanelFromNav('appointments');
     setAppointmentDraft(prev => ({ ...prev, doctor_id: String(docId) }));
+    setSelectedSlotId('');
   };
 
   const handleCreateAppointment = async (e) => {
     e.preventDefault();
-    if (!appointmentDraft.doctor_id || !appointmentDraft.date || !appointmentDraft.time || !appointmentDraft.reason.trim()) {
-      try { addNotification({ type: 'error', message: 'Choose a doctor, date, time, and reason before booking.' }); } catch (e) {}
+
+    const doctorId = String(appointmentDraft.doctor_id || '').trim();
+    const reason = String(appointmentDraft.reason || '').trim();
+
+    if (!doctorId || !reason) {
+      try { addNotification({ type: 'error', message: 'Choose a doctor and add a reason before booking.' }); } catch (e) {}
       return;
     }
 
     try {
-      const data = await patientApi.createAppointment({
-        doctor_id: appointmentDraft.doctor_id,
-        date: appointmentDraft.date,
-        time: appointmentDraft.time,
-        reason: appointmentDraft.reason.trim(),
-        note: appointmentDraft.note.trim() || null,
-      });
+      const data = bookingMode === 'direct'
+        ? await patientApi.bookDirectAppointment(selectedSlotId, reason, appointmentDraft.note.trim())
+        : await patientApi.bookOpenAppointment(doctorId, reason, appointmentDraft.note.trim());
 
       if (data && (data.id || data.success)) {
-        try { addNotification({ type: 'success', message: 'Appointment requested successfully' }); } catch (e) {}
+        try { addNotification({ type: 'success', message: bookingMode === 'direct' ? 'Appointment booked successfully' : 'Open request sent successfully' }); } catch (e) {}
         setAppointmentDraft(prev => ({
           ...prev,
-          date: '',
-          time: '',
           reason: 'General consultation',
           note: '',
         }));
+        setSelectedSlotId('');
         loadAppointments();
       } else {
         try { addNotification({ type: 'error', message: 'Error creating appointment: ' + (data && (data.error || data.detail) || 'unknown') }); } catch (e) {}
@@ -629,6 +669,16 @@ export default function PatientDashboard() {
     } catch (err) {
       console.error('cancel appointment failed', err);
       try { addNotification({ type: 'error', message: 'Error cancelling appointment: ' + (err?.message || 'server error') }); } catch (e) {}
+    }
+  };
+
+  const renderSlotLabel = (slot) => {
+    try {
+      const start = new Date(slot.startTime);
+      const end = new Date(slot.endTime);
+      return `${start.toLocaleDateString()} • ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    } catch (e) {
+      return 'Available slot';
     }
   };
 
@@ -1385,13 +1435,14 @@ export default function PatientDashboard() {
                           <div>
                             <strong style={{ fontSize: '11px', color: '#1E293B' }}>Dr. {appt.doctor_display}</strong>
                             <div style={{ fontSize: '11px', color: '#64748B', marginTop: '6px' }}>Reason: {appt.reason}</div>
-                            {appt.status === 'scheduled' && appt.scheduled_time && <div style={{ fontSize: '11px', color: '#8B7EFF', marginTop: '4px', fontWeight: '500' }}>Time: {new Date(appt.scheduled_time).toLocaleString()}</div>}
+                            {(appt.appointmentDate || appt.scheduled_time) && <div style={{ fontSize: '11px', color: '#8B7EFF', marginTop: '4px', fontWeight: '500' }}>Time: {new Date(appt.appointmentDate || appt.scheduled_time).toLocaleString()}</div>}
+                            {String(appt.doctorMessage || '').trim() && String(appt.status || '').toUpperCase() === 'REJECTED' && <div style={{ fontSize: '11px', color: '#B45309', marginTop: '4px' }}>Doctor note: {appt.doctorMessage}</div>}
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <span style={{ display: 'inline-block', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '700', background: appt.status === 'pending' ? '#FEF3C7' : appt.status === 'scheduled' ? '#DCFCE7' : '#E2E8F0', color: appt.status === 'pending' ? '#D97706' : appt.status === 'scheduled' ? '#166534' : '#475569' }}>
+                            <span style={{ display: 'inline-block', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '700', background: String(appt.status || '').toUpperCase() === 'PENDING' ? '#FEF3C7' : String(appt.status || '').toUpperCase() === 'CONFIRMED' ? '#DCFCE7' : String(appt.status || '').toUpperCase() === 'REJECTED' ? '#FEE2E2' : '#E2E8F0', color: String(appt.status || '').toUpperCase() === 'PENDING' ? '#D97706' : String(appt.status || '').toUpperCase() === 'CONFIRMED' ? '#166534' : String(appt.status || '').toUpperCase() === 'REJECTED' ? '#B91C1C' : '#475569' }}>
                                {String(appt.status || '').toUpperCase()}
                             </span>
-                            {appt.status !== 'cancelled' && appt.status !== 'completed' && appt.status !== 'declined' && (
+                            {String(appt.status || '').toUpperCase() !== 'CANCELLED' && String(appt.status || '').toUpperCase() !== 'COMPLETED' && String(appt.status || '').toUpperCase() !== 'REJECTED' && (
                               <button type="button" onClick={() => handleCancelAppointment(appt.id)} style={{ padding: '8px 14px', borderRadius: '50px', border: '1px solid #FCA5A5', background: '#FFF1F2', color: '#BE123C', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>
                                 Cancel
                               </button>
@@ -1406,6 +1457,10 @@ export default function PatientDashboard() {
                <div style={{ flex: 1 }}>
                   <h3 style={{ fontSize: '11px', marginBottom: '24px', color: '#475569', borderBottom: '2px solid #F1F5F9', paddingBottom: '12px' }}>Book New Appointment</h3>
                   <form onSubmit={handleCreateAppointment} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', padding: '20px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '16px', marginBottom: '24px' }}>
+                    <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '10px' }}>
+                      <button type="button" onClick={() => setBookingMode('direct')} style={{ flex: 1, padding: '10px 14px', borderRadius: '999px', border: bookingMode === 'direct' ? 'none' : '1px solid #CBD5E1', background: bookingMode === 'direct' ? '#6C5CE7' : '#FFF', color: bookingMode === 'direct' ? '#FFF' : '#475569', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>Pick a Time</button>
+                      <button type="button" onClick={() => setBookingMode('open')} style={{ flex: 1, padding: '10px 14px', borderRadius: '999px', border: bookingMode === 'open' ? 'none' : '1px solid #CBD5E1', background: bookingMode === 'open' ? '#6C5CE7' : '#FFF', color: bookingMode === 'open' ? '#FFF' : '#475569', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>Send Open Request</button>
+                    </div>
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569' }}>
                       Doctor
                       <select value={appointmentDraft.doctor_id} onChange={e => setAppointmentDraft(prev => ({ ...prev, doctor_id: e.target.value }))} style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF' }}>
@@ -1416,25 +1471,32 @@ export default function PatientDashboard() {
                         })}
                       </select>
                     </label>
-                    <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569' }}>
-                      Date
-                      <input type="date" value={appointmentDraft.date} onChange={e => setAppointmentDraft(prev => ({ ...prev, date: e.target.value }))} style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF' }} />
-                    </label>
-                    <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569' }}>
-                      Time
-                      <input type="time" value={appointmentDraft.time} onChange={e => setAppointmentDraft(prev => ({ ...prev, time: e.target.value }))} style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF' }} />
-                    </label>
+                    {bookingMode === 'direct' ? (
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569' }}>
+                        Available Slots
+                        <select value={selectedSlotId} onChange={e => setSelectedSlotId(e.target.value)} disabled={!appointmentDraft.doctor_id || slotLoading} style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF' }}>
+                          <option value="">{slotLoading ? 'Loading slots...' : 'Choose an available slot'}</option>
+                          {availableSlots.map(slot => (
+                            <option key={slot.id} value={slot.id}>{renderSlotLabel(slot)}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <div style={{ gridColumn: '1 / -1', padding: '12px 14px', background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: '12px', color: '#9A3412', fontSize: '11px', lineHeight: 1.5 }}>
+                        Send an open request when you do not see a slot that fits. The doctor will confirm a time later.
+                      </div>
+                    )}
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569' }}>
                       Reason
                       <input type="text" value={appointmentDraft.reason} onChange={e => setAppointmentDraft(prev => ({ ...prev, reason: e.target.value }))} placeholder="General consultation" style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF' }} />
                     </label>
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569', gridColumn: '1 / -1' }}>
                       Note
-                      <textarea value={appointmentDraft.note} onChange={e => setAppointmentDraft(prev => ({ ...prev, note: e.target.value }))} placeholder="Optional note for the doctor" rows="3" style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF', resize: 'vertical' }} />
+                      <textarea value={appointmentDraft.note} onChange={e => setAppointmentDraft(prev => ({ ...prev, note: e.target.value }))} placeholder="Optional context for the doctor" rows="3" style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF', resize: 'vertical' }} />
                     </label>
                     <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
                       <button type="submit" style={{ padding: '12px 18px', borderRadius: '999px', border: 'none', background: '#8B7EFF', color: '#FFF', fontSize: '11px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 8px 18px rgba(139,126,255,0.28)' }}>
-                        Create Appointment
+                        {bookingMode === 'direct' ? 'Book Slot' : 'Send Request'}
                       </button>
                     </div>
                   </form>

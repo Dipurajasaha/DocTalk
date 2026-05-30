@@ -1,1 +1,1 @@
-"""Service layer package for the DocTalk backend."""
+"""Service layer for backend business logic."""

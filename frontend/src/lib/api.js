@@ -59,9 +59,20 @@ export const authApi = {
 export const patientApi = {
   listAppointments: () => apiClient.get('/api/appointments', { retries: 1, auth: true }),
   listMyAppointments: () => apiClient.get('/api/my_appointments', { retries: 1, auth: true }),
+  getAvailableSlots: (doctorId) => apiClient.get(`/api/appointments/slots/${encodeURIComponent(doctorId)}`, { retries: 1, auth: true }),
+  bookDirectAppointment: (slotId, reason, note) => apiClient.post('/api/appointments/book/direct', { slotId, reason, note }, { retries: 0, auth: true }),
+  bookOpenAppointment: (doctorId, reason, note) => apiClient.post('/api/appointments/book/open', { doctorId, reason, note }, { retries: 0, auth: true }),
   listDoctors: () => apiClient.get('/api/doctor/list', { retries: 1, auth: true }),
   getConsultation: (consultationId) => apiClient.get(`/api/chat/consultations/${encodeURIComponent(consultationId)}`, { retries: 1, auth: true }),
-  createAppointment: (body) => apiClient.post('/api/appointments', body, { retries: 0, auth: true }),
+  createAppointment: (body) => {
+    if (body?.slotId || body?.slot_id) {
+      return apiClient.post('/api/appointments/book/direct', { slotId: body.slotId || body.slot_id, reason: body.reason, note: body.note }, { retries: 0, auth: true });
+    }
+    if (body?.doctorId || body?.doctor_id) {
+      return apiClient.post('/api/appointments/book/open', { doctorId: body.doctorId || body.doctor_id, reason: body.reason || body.note || 'General consultation', note: body.note }, { retries: 0, auth: true });
+    }
+    return apiClient.post('/api/appointments', body, { retries: 0, auth: true });
+  },
   cancelAppointment: (appointmentId) => apiClient.patch(`/api/appointments/${appointmentId}/cancel`, {}, { retries: 0, auth: true }),
   listMedicalImages: () => apiClient.get('/api/medical_images', { retries: 1, auth: true }),
   uploadMedicalImage: (formData) => apiClient.post('/api/medical_images/upload', formData, { retries: 0, auth: true }),
@@ -113,11 +124,26 @@ export const patientApi = {
 };
 
 export const doctorApi = {
+  createSlots: (slots) => apiClient.post('/api/appointments/slots', slots, { retries: 0, auth: true }),
+  getSlots: (doctorId) => apiClient.get(`/api/appointments/slots/${encodeURIComponent(doctorId)}`, { retries: 1, auth: true }),
+  respondToAppointment: (appointmentId, body) => apiClient.put(`/api/appointments/${encodeURIComponent(appointmentId)}/action`, body, { retries: 0, auth: true }),
+  cancelAppointment: (appointmentId) => apiClient.patch(`/api/appointments/${encodeURIComponent(appointmentId)}/cancel`, {}, { retries: 0, auth: true }),
   dashboardData: async () => {
-    // Compose dashboard data from existing endpoints to avoid requiring a new backend route.
+    try {
+      const summary = await apiClient.get('/api/doctor_dashboard_data', { retries: 1, auth: true });
+      if (summary && summary.success) return summary;
+    } catch (err) {
+      // fall back to composing from existing endpoints
+    }
+
     try {
       const appointments = await apiClient.get('/api/appointments', { retries: 1, auth: true });
-      const consultations = await apiClient.get('/api/chat/consultations', { retries: 1, auth: true });
+      let consultations = [];
+      try {
+        consultations = await apiClient.get('/api/chat/consultations', { retries: 0, auth: true });
+      } catch (e) {
+        consultations = [];
+      }
 
       const now = Date.now();
       const upcoming_schedules = Array.isArray(appointments)

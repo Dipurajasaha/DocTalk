@@ -1,1 +1,1 @@
-"""Core application utilities for configuration, logging, and database access."""
+"""Core backend utilities."""

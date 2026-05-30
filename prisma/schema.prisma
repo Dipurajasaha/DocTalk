@@ -21,15 +21,6 @@ enum Gender {
   other
 }
 
-enum AppointmentStatus {
-  pending
-  requested
-  scheduled
-  completed
-  cancelled
-  declined
-}
-
 model Patient {
   username            String         @id
   name                String
@@ -87,6 +78,7 @@ model Doctor {
   closedChats         Json?          @db.JsonB
   appointments        Appointment[]
   consultations       Consultation[]
+  doctorSlots         DoctorSlot[]
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
@@ -96,25 +88,46 @@ model Doctor {
   @@map("doctors")
 }
 
+model DoctorSlot {
+  id        String       @id @default(uuid())
+  doctorId  String
+  startTime DateTime
+  endTime   DateTime
+  isBooked  Boolean      @default(false)
+  isActive  Boolean      @default(true)
+  doctor    Doctor       @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+  appointment Appointment?
+
+  @@index([doctorId])
+  @@index([doctorId, startTime])
+  @@map("doctor_slots")
+}
+
 model Appointment {
-  id              String            @id
-  patientUsername String
-  doctorId        String
-  date            String?
-  time            String?
-  scheduledTime   DateTime?
-  reason          String
-  note            String?
-  status          AppointmentStatus @default(pending)
-  requestedAt     DateTime          @default(now())
-  createdAt       DateTime          @default(now())
-  completedAt     DateTime?
-  patient         Patient           @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
-  doctor          Doctor            @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
-  consultation    Consultation?
+  id               String       @id @default(uuid())
+  patientUsername   String
+  doctorId          String
+  slotId            String?      @unique
+  appointmentDate   DateTime?
+  scheduledTime     DateTime?
+  date              String?
+  time              String?
+  reason            String
+  note              String?
+  doctorMessage     String?
+  status            String       @default("PENDING")
+  requestedAt       DateTime     @default(now())
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  completedAt       DateTime?
+  patient           Patient      @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  doctor            Doctor       @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+  slot              DoctorSlot?  @relation(fields: [slotId], references: [id], onDelete: SetNull)
+  consultation      Consultation?
 
   @@index([patientUsername])
   @@index([doctorId])
+  @@index([slotId])
   @@index([status])
   @@map("appointments")
 }
