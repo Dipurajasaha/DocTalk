@@ -306,10 +306,7 @@ export default function PatientDashboard() {
 
     const loadAppointments = async () => {
       try {
-        // prefer /api/my_appointments if available
-        let data = null;
-        try { data = await patientApi.listMyAppointments(); } catch (e) { /* ignore and fallback */ }
-        if (!data) data = await patientApi.listAppointments();
+        const data = await patientApi.listAppointments();
         if (Array.isArray(data)) setAppointments(data || []);
         else if (data && data.success) setAppointments(data.appointments || []);
       } catch (e) { console.error('Failed loading appointments', e); }
@@ -663,6 +660,11 @@ export default function PatientDashboard() {
       return;
     }
 
+    if (bookingMode === 'direct' && !String(selectedSlotId || '').trim()) {
+      try { addNotification({ type: 'error', message: 'Choose an available slot before booking.' }); } catch (e) {}
+      return;
+    }
+
     setBookingInProgress(true);
     try {
       const data = bookingMode === 'direct'
@@ -685,6 +687,7 @@ export default function PatientDashboard() {
       console.error('create appointment failed', err);
       if (err?.status === 409) {
         await refreshAvailableSlotsForDoctor(doctorId);
+        try { window.alert('That slot was just booked by someone else. Please choose another available slot.'); } catch (e) {}
         try { addNotification({ type: 'error', message: 'That slot was just booked by someone else. Please choose another available slot.' }); } catch (e) {}
       } else {
         try { addNotification({ type: 'error', message: 'Error creating appointment: ' + (err?.message || 'server error') }); } catch (e) {}

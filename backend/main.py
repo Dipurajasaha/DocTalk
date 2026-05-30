@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api.auth import profile_router, router as auth_router
 from .api.chat import router as chat_router
-from .api.appointments import compat_router as appointments_compat_router, router as appointments_router
+from .api.appointments import router as appointments_router
 from .api.medical_assets import router as assets_router
 from .api.users import doctor_router as user_doctor_router, router as users_router
 from .core.database import connect_prisma, disconnect_prisma
@@ -37,7 +37,6 @@ app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(users_router, prefix="/api/users", tags=["users"])
 app.include_router(user_doctor_router, prefix="/api/doctor", tags=["users"])
 app.include_router(appointments_router, prefix="/api/appointments", tags=["appointments"])
-app.include_router(appointments_compat_router, prefix="/api", tags=["appointments"])
 app.include_router(assets_router, prefix="/api/assets", tags=["assets"])
 
 

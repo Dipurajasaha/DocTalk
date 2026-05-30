@@ -24,7 +24,6 @@ export const authApi = {
 
 export const patientApi = {
   listAppointments: () => apiClient.get('/api/appointments', { retries: 1, auth: true }),
-  listMyAppointments: () => apiClient.get('/api/my_appointments', { retries: 1, auth: true }),
   getAvailableSlots: (doctorId) => apiClient.get(`/api/appointments/slots/${encodeURIComponent(doctorId)}`, { retries: 1, auth: true }),
   bookDirectAppointment: (slotId, reason, note) => apiClient.post('/api/appointments/book/direct', { slotId, reason, note }, { retries: 0, auth: true }),
   bookOpenAppointment: (doctorId, reason, note) => apiClient.post('/api/appointments/book/open', { doctorId, reason, note }, { retries: 0, auth: true }),
@@ -65,56 +64,48 @@ export const doctorApi = {
   getSlots: (doctorId) => apiClient.get(`/api/appointments/slots/${encodeURIComponent(doctorId)}`, { retries: 1, auth: true }),
   respondToAppointment: (appointmentId, body) => apiClient.put(`/api/appointments/${encodeURIComponent(appointmentId)}/action`, body, { retries: 0, auth: true }),
   cancelAppointment: (appointmentId) => apiClient.patch(`/api/appointments/${encodeURIComponent(appointmentId)}/cancel`, {}, { retries: 0, auth: true }),
-  dashboardData: async () => {
-    try {
-      const summary = await apiClient.get('/api/doctor_dashboard_data', { retries: 1, auth: true });
-      if (summary && summary.success) return summary;
-    } catch (err) {
-      // fall back to composing from existing endpoints
-    }
+  dashboardData: async (doctorId) => {
+    const normalizeStatus = (value) => String(value || '').trim().toUpperCase();
+    const resolvedDoctorId = String(doctorId || '').trim();
 
-    try {
-      const appointments = await apiClient.get('/api/appointments', { retries: 1, auth: true });
-      let consultations = [];
-      try {
-        consultations = await apiClient.get('/api/chat/consultations', { retries: 0, auth: true });
-      } catch (e) {
-        consultations = [];
-      }
+    const [appointmentsResult, slotsResult, consultationsResult] = await Promise.allSettled([
+      apiClient.get('/api/appointments', { retries: 1, auth: true }),
+      resolvedDoctorId ? apiClient.get(`/api/appointments/slots/${encodeURIComponent(resolvedDoctorId)}`, { retries: 1, auth: true }) : Promise.resolve([]),
+      apiClient.get('/api/chat/consultations', { retries: 0, auth: true }),
+    ]);
 
-      const now = Date.now();
-      const upcoming_schedules = Array.isArray(appointments)
-        ? appointments.filter(a => a.scheduled_time && new Date(a.scheduled_time).getTime() > now)
-        : [];
+    const appointments = appointmentsResult.status === 'fulfilled' && Array.isArray(appointmentsResult.value)
+      ? appointmentsResult.value
+      : [];
+    const slots = slotsResult.status === 'fulfilled' && Array.isArray(slotsResult.value)
+      ? slotsResult.value
+      : [];
+    const consultations = consultationsResult.status === 'fulfilled' && Array.isArray(consultationsResult.value)
+      ? consultationsResult.value
+      : [];
 
-      const completed_schedules = Array.isArray(appointments)
-        ? appointments.filter(a => a.status === 'completed')
-        : [];
+    const requests = appointments.filter((item) => normalizeStatus(item.status) === 'PENDING');
+    const upcoming_schedules = appointments.filter((item) => normalizeStatus(item.status) === 'CONFIRMED');
+    const completed_schedules = appointments.filter((item) => normalizeStatus(item.status) === 'COMPLETED');
+    const patient_chat_patients = Array.from(new Set(
+      consultations
+        .map((item) => String(item.patientUsername || item.patient_id || item.patientId || '').trim())
+        .filter(Boolean),
+    ));
 
-      const requests = Array.isArray(appointments)
-        ? appointments.filter(a => a.status === 'pending' || a.status === 'requested' || a.status === 'awaiting')
-        : [];
-
-      const patient_chat_patients = Array.isArray(consultations)
-        ? Array.from(new Set(consultations.map(c => c.patientUsername || c.patient || c.patient_id).filter(Boolean)))
-        : [];
-
-      const closed_chats = [];
-
-      return {
-        success: true,
-        upcoming_schedules,
-        completed_schedules,
-        requests,
-        patient_chat_patients,
-        closed_chats,
-        total_requests: requests.length,
-        total_patients: Array.isArray(appointments) ? Array.from(new Set(appointments.map(a => a.patientUsername || a.patient))).length : 0,
-        monthly_revenue: 0,
-      };
-    } catch (err) {
-      throw err;
-    }
+    return {
+      success: true,
+      appointments,
+      upcoming_schedules,
+      completed_schedules,
+      requests,
+      patient_chat_patients,
+      closed_chats: [],
+      slots,
+      total_requests: requests.length,
+      total_patients: Array.from(new Set(appointments.map((item) => String(item.patientUsername || item.patient_id || item.patient || '').trim()).filter(Boolean))).length,
+      monthly_revenue: 0,
+    };
   },
   getCopilotForPatient: (patientId, consultationId = '') => {
     const query = consultationId ? `?consultation_id=${encodeURIComponent(consultationId)}` : '';

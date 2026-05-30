@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ..core.database import prisma
 from ..core.security import CurrentUser, get_current_user
 from ..schemas.appointment_schemas import (
     AppointmentActionResponse,
@@ -19,7 +16,6 @@ from ..services.appointment_service import AppointmentService
 
 
 router = APIRouter()
-compat_router = APIRouter()
 
 
 def get_appointment_service() -> AppointmentService:
@@ -95,7 +91,7 @@ async def doctor_action(
 
 
 @router.get("", response_model=list[AppointmentResponse])
-async def list_my_appointments(
+async def list_appointments(
     current_user: CurrentUser = Depends(get_current_user),
     appointment_service: AppointmentService = Depends(get_appointment_service),
 ) -> list[AppointmentResponse]:
@@ -111,80 +107,3 @@ async def cancel_appointment(
 ) -> AppointmentActionResponse:
     await appointment_service.cancel_appointment(current_user.role, current_user.user_id, appointment_id)
     return AppointmentActionResponse(message="Appointment cancelled")
-
-
-@compat_router.post("/doctor_schedule_request", response_model=AppointmentActionResponse)
-async def doctor_schedule_request(
-    payload: dict,
-    current_user: CurrentUser = Depends(get_current_user),
-    appointment_service: AppointmentService = Depends(get_appointment_service),
-) -> AppointmentActionResponse:
-    appointment_id = str(payload.get("appointment_id") or payload.get("appointmentId") or "").strip()
-    scheduled_time = payload.get("scheduled_time") or payload.get("scheduledTime")
-    doctor_message = payload.get("note") or payload.get("doctorMessage")
-    await appointment_service.handle_doctor_action(
-        current_user.user_id,
-        appointment_id,
-        {"status": "ACCEPT", "assignedDate": scheduled_time, "doctorMessage": doctor_message},
-    )
-    return AppointmentActionResponse(message="Appointment scheduled")
-
-
-@compat_router.get("/my_appointments", response_model=list[AppointmentResponse])
-async def my_appointments(
-    current_user: CurrentUser = Depends(get_current_user),
-    appointment_service: AppointmentService = Depends(get_appointment_service),
-) -> list[AppointmentResponse]:
-    appointments = await appointment_service.list_appointments(current_user.role, current_user.user_id)
-    return [_appointment_response(item) for item in appointments]
-
-
-@compat_router.get("/doctor_dashboard_data")
-async def doctor_dashboard_data(
-    current_user: CurrentUser = Depends(get_current_user),
-    appointment_service: AppointmentService = Depends(get_appointment_service),
-) -> dict[str, object]:
-    appointments = await appointment_service.list_appointments(current_user.role, current_user.user_id)
-    consultations = await prisma.consultation.find_many(where={"doctorId": current_user.user_id})
-    slots = await prisma.doctorslot.find_many(where={"doctorId": current_user.user_id}, order={"startTime": "asc"})
-
-    def _to_dict(item):
-        return item.model_dump() if hasattr(item, "model_dump") else dict(item)
-
-    consultation_rows = [_to_dict(item) for item in consultations]
-    slot_rows = [_to_dict(item) for item in slots]
-    now = datetime.now(timezone.utc)
-
-    def _as_dt(value):
-        if isinstance(value, datetime):
-            return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-        return None
-
-    upcoming_schedules = [item for item in appointments if item.get("status") == "CONFIRMED" and item.get("appointmentDate")]
-    upcoming_schedules = [item for item in upcoming_schedules if (_as_dt(item.get("appointmentDate")) or now) > now]
-    completed_schedules = [item for item in appointments if item.get("status") == "COMPLETED"]
-    requests = [item for item in appointments if item.get("status") == "PENDING"]
-    patient_chat_patients = sorted({str(item.get("patientUsername") or item.get("patient_id") or "").strip() for item in consultation_rows if str(item.get("patientUsername") or item.get("patient_id") or "").strip()})
-
-    return {
-        "success": True,
-        "upcoming_schedules": upcoming_schedules,
-        "completed_schedules": completed_schedules,
-        "requests": requests,
-        "patient_chat_patients": patient_chat_patients,
-        "closed_chats": [],
-        "slots": [
-            {
-                "id": item.get("id"),
-                "doctorId": item.get("doctorId"),
-                "startTime": item.get("startTime"),
-                "endTime": item.get("endTime"),
-                "isBooked": bool(item.get("isBooked", False)),
-                "isActive": bool(item.get("isActive", True)),
-            }
-            for item in slot_rows
-        ],
-        "total_requests": len(requests),
-        "total_patients": len({str(item.get("patient_id") or item.get("patientUsername") or item.get("patient") or "").strip() for item in appointments if str(item.get("patient_id") or item.get("patientUsername") or item.get("patient") or "").strip()}),
-        "monthly_revenue": 0,
-    }

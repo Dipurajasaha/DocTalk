@@ -201,6 +201,7 @@ export default function DoctorDashboard() {
     }
   });
   const [slotDateObj, setSlotDateObj] = useState(new Date());
+  const currentDoctorId = String(user?.doctor_id || user?.doctorId || user?.user_id || '').trim();
   // Helper to format local date YYYY-MM-DD
   const formatObjToDate = (d) => {
     const tzOffset = d.getTimezoneOffset() * 60000;
@@ -291,7 +292,7 @@ export default function DoctorDashboard() {
       try {
         const [consultationResult, dashboardResult] = await Promise.allSettled([
           patientApi.listConsultations(),
-          doctorApi.dashboardData(),
+          doctorApi.dashboardData(currentDoctorId),
         ]);
 
         if (cancelled) return;
@@ -317,7 +318,7 @@ export default function DoctorDashboard() {
           (dashboardDataResponse.upcoming_schedules || []).forEach(s => {
             const pid = String(s.patient || s.patient_id || '').trim();
             if (!pid) return;
-            if (!pSet.has(pid)) pSet.set(pid, { id: pid, display: s.patient || s.patient_display || pid, lastStatus: 'scheduled' });
+            if (!pSet.has(pid)) pSet.set(pid, { id: pid, display: s.patient || s.patient_display || pid, lastStatus: 'confirmed' });
           });
           (dashboardDataResponse.requests || []).forEach(r => {
             const pid = String(r.patient || r.patient_id || '').trim();
@@ -352,7 +353,7 @@ export default function DoctorDashboard() {
       cancelled = true;
       clearInterval(refreshTimer);
     };
-  }, [user, activeTab]);
+  }, [user, activeTab, currentDoctorId]);
 
   function normalizeChatMessage(item) {
     return {
@@ -688,7 +689,7 @@ export default function DoctorDashboard() {
                          if(data && (data.id || data.success)) {
                            addNotification && addNotification({ type: 'success', message: 'Scheduled!' });
                            // Refresh dashboard data
-                           fetch('/api/doctor_dashboard_data', {credentials: 'include'}).then(res=>res.json()).then(newData=>setDashboardData(newData));
+                           doctorApi.dashboardData(currentDoctorId).then((newData)=>setDashboardData(newData));
                          }
                        });
                     }} style={{background:'#8B7EFF', color:'#fff', border:'none', padding:'8px 16px', borderRadius:'50px', cursor:'pointer', fontSize:'12px', fontWeight:'600', transition:'0.2s'}}>Accept</button>
@@ -855,7 +856,7 @@ export default function DoctorDashboard() {
                       const end = new Date(start.getTime() + 30 * 60 * 1000);
                       return { startTime: start.toISOString(), endTime: end.toISOString() };
                     });
-                    doctorApi.createSlots(payload).then(() => doctorApi.dashboardData()).then((freshData) => {
+                    doctorApi.createSlots(payload).then(() => doctorApi.dashboardData(currentDoctorId)).then((freshData) => {
                       if (freshData && freshData.success) {
                         setDashboardData(freshData);
                         setSlotsData(hydrateSlotsData(freshData.slots || []));
@@ -896,7 +897,7 @@ export default function DoctorDashboard() {
                         const t = document.getElementById(`time-manage-${r.appointment_id}`).value;
                         if(!t) return addNotification && addNotification({ type: 'error', message: 'Please select a date and time slot first' });
                         doctorApi.respondToAppointment(r.id || r.appointment_id, { status: 'ACCEPT', assignedDate: t, doctorMessage: '' }).then((data)=>{
-                          if(data && (data.id || data.success)) doctorApi.dashboardData().then((newData)=>{
+                          if(data && (data.id || data.success)) doctorApi.dashboardData(currentDoctorId).then((newData)=>{
                             setDashboardData(newData);
                             setSlotsData(hydrateSlotsData(newData.slots || []));
                           });
@@ -904,7 +905,7 @@ export default function DoctorDashboard() {
                       }} style={{flex: 1, background:'#10b981', color:'#fff', border:'none', padding:'10px', borderRadius:'8px', cursor:'pointer', fontSize:'13px', fontWeight:'600'}}>Accept</button>
                       <button onClick={() => {
                         doctorApi.respondToAppointment(r.id || r.appointment_id, { status: 'REJECT', doctorMessage: 'Declined by doctor' }).then((data)=>{
-                          if(data && (data.id || data.success)) doctorApi.dashboardData().then((newData)=>{
+                          if(data && (data.id || data.success)) doctorApi.dashboardData(currentDoctorId).then((newData)=>{
                             setDashboardData(newData);
                             setSlotsData(hydrateSlotsData(newData.slots || []));
                           });
@@ -952,7 +953,7 @@ export default function DoctorDashboard() {
                             method: 'PUT', headers: {'Content-Type': 'application/json'}, credentials: 'include',
                             body: JSON.stringify({ status: 'ACCEPT', assignedDate: s.appointmentDate || s.scheduled_time, doctorMessage: 'Completed session' })
                           }).then(r=>r.json()).then(d=>{
-                              if(d && (d.id || d.success)) fetch('/api/doctor_dashboard_data', {credentials: 'include'}).then(res=>res.json()).then(newData=>{
+                              if(d && (d.id || d.success)) doctorApi.dashboardData(currentDoctorId).then((newData)=>{
                                 setDashboardData(newData);
                                 setSlotsData(hydrateSlotsData(newData.slots || []));
                               });
@@ -966,7 +967,7 @@ export default function DoctorDashboard() {
                           if (!window.confirm('Cancel this session?')) return;
                           doctorApi.cancelAppointment(s.id).then((response) => {
                             if (response && (response.id || response.success || response.message)) {
-                              return doctorApi.dashboardData().then((newData) => {
+                              return doctorApi.dashboardData(currentDoctorId).then((newData) => {
                                 setDashboardData(newData);
                                 setSlotsData(hydrateSlotsData(newData.slots || []));
                               });
