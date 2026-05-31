@@ -17,17 +17,6 @@ class PromptService:
         "Return valid JSON only with keys: success, summary, findings, recommendations, warnings, metadata. "
         "Keep the summary brief and preserve medically relevant detail."
     )
-    _OCR_TEMPLATE = PromptTemplate.from_template(
-        "Extract visible medical text from the image. {language_hint} {context_block}"
-        "Return valid JSON only with keys: success, summary, findings, recommendations, warnings, metadata. "
-        "Place the OCR text inside metadata.extracted_text and keep findings concise."
-    )
-    _PRESCRIPTION_TEMPLATE = PromptTemplate.from_template(
-        "Analyze the prescription text. {language_hint} {context_block}"
-        "Return valid JSON only with keys: success, summary, findings, recommendations, warnings, metadata. "
-        "Focus on medicine names, dosage, frequency, route, and cautionary notes. "
-        "Place the normalized text inside metadata.extracted_text."
-    )
     _XRAY_TEMPLATE = PromptTemplate.from_template(
         "Analyze the medical image for educational support only. {language_hint} {context_block}"
         "Return valid JSON only with keys: success, summary, findings, recommendations, warnings, metadata. "
@@ -71,18 +60,6 @@ class PromptService:
 
     def build_summary_prompt(self, language: str = "en") -> str:
         return self._SUMMARY_TEMPLATE.partial(language_hint=self._language_hint(language)).format()
-
-    def build_ocr_prompt(self, language: str = "en", context_text: str | None = None) -> str:
-        return self._OCR_TEMPLATE.partial(
-            language_hint=self._language_hint(language),
-            context_block=self._context_block(context_text, "Patient previously reported"),
-        ).format()
-
-    def build_prescription_prompt(self, language: str = "en", context_text: str | None = None) -> str:
-        return self._PRESCRIPTION_TEMPLATE.partial(
-            language_hint=self._language_hint(language),
-            context_block=self._context_block(context_text, "Past prescription history shows"),
-        ).format()
 
     def build_xray_prompt(self, language: str = "en", context_text: str | None = None) -> str:
         return self._XRAY_TEMPLATE.partial(

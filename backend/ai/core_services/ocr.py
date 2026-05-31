@@ -27,6 +27,7 @@ class OCRService:
         source: str | Path | bytes,
         mime_type: str | None = None,
         language: str = "eng",
+        page_limit: int | None = None,
     ) -> dict[str, Any]:
         path, raw_bytes = self._coerce_source(source)
         suffix = path.suffix.lower() if path is not None else ""
@@ -34,7 +35,7 @@ class OCRService:
         normalized_language = self._normalize_language(language)
 
         if self._is_pdf(suffix, content_type):
-            return await self.extract_pdf_text(path or raw_bytes, mime_type=mime_type, language=normalized_language)
+            return await self.extract_pdf_text(path or raw_bytes, mime_type=mime_type, language=normalized_language, page_limit=page_limit)
 
         if self._is_image(suffix, content_type):
             return await self.extract_image_text(path or raw_bytes, mime_type=mime_type, language=normalized_language)
@@ -47,10 +48,11 @@ class OCRService:
         *,
         mime_type: str | None = None,
         language: str = "eng",
+        page_limit: int | None = None,
     ) -> dict[str, Any]:
         path, raw_bytes = self._coerce_source(source)
         normalized_language = self._normalize_language(language)
-        return await asyncio.to_thread(self._extract_pdf_text_sync, path, raw_bytes, mime_type, normalized_language)
+        return await asyncio.to_thread(self._extract_pdf_text_sync, path, raw_bytes, mime_type, normalized_language, page_limit)
 
     async def extract_image_text(
         self,
@@ -69,6 +71,7 @@ class OCRService:
         raw_bytes: bytes | None,
         mime_type: str | None,
         language: str,
+        page_limit: int | None,
     ) -> dict[str, Any]:
         try:
             if raw_bytes is not None:
@@ -81,7 +84,9 @@ class OCRService:
             warnings: list[str] = []
             page_texts: list[str] = []
             try:
-                for page in doc:
+                for index, page in enumerate(doc):
+                    if page_limit is not None and index >= max(int(page_limit), 1):
+                        break
                     extracted = (page.get_text() or "").strip()
                     if extracted:
                         page_texts.append(extracted)

@@ -29,3 +29,6 @@ Thumbs.db
 /agent/
 /agents/
 /.github/agents/
+# Local data/uploads used during development and tests
+data/
+data/**

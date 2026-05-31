@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     ollama_vision_model: str = Field(default="llama3.2-vision", env="OLLAMA_VISION_MODEL")
     ollama_embed_model: str = Field(default="nomic-embed-text", env="OLLAMA_EMBED_MODEL")
     ai_request_timeout_seconds: float = Field(default=45.0, env=["AI_REQUEST_TIMEOUT_SECONDS", "OLLAMA_TIMEOUT_SECONDS"])
+    xray_analysis_timeout_seconds: float = Field(default=300.0, env="XRAY_ANALYSIS_TIMEOUT_SECONDS")
+    rag_embedding_timeout_seconds: float = Field(default=120.0, env="RAG_EMBEDDING_TIMEOUT_SECONDS")
     rag_embedding_dimension: int = Field(default=384, env="RAG_EMBEDDING_DIMENSION")
     rag_embedding_cache_size: int = Field(default=128, env="RAG_EMBEDDING_CACHE_SIZE")
     rag_max_memory_age_days: int = Field(default=365, env="RAG_MAX_MEMORY_AGE_DAYS")

@@ -21,7 +21,7 @@ class EmbeddingService:
         self.dimension = max(int(getattr(settings, "rag_embedding_dimension", 384) or 384), 64)
         self.base_url = str(getattr(settings, "ollama_base_url", "http://localhost:11434")).rstrip("/")
         self.model_name = str(getattr(settings, "ollama_embed_model", "nomic-embed-text")).strip() or "nomic-embed-text"
-        self.timeout_seconds = float(getattr(settings, "ai_request_timeout_seconds", 45.0) or 45.0)
+        self.timeout_seconds = float(getattr(settings, "rag_embedding_timeout_seconds", 120.0) or 120.0)
         self._provider_checked = False
         self._provider_available = False
         self._embedding_cache: OrderedDict[str, list[float]] = OrderedDict()

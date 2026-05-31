@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 
 from ..core.security import CurrentUser, get_current_user
 from ..schemas.asset_schemas import AssetResponse, AssetUploadResponse
-from ..services.asset_service import AssetConfig, AssetService
+from ..services.asset_service import AssetConfig, AssetService, process_asset_background
 
 router = APIRouter()
 
@@ -23,11 +23,19 @@ def get_asset_service() -> AssetService:
 
 @router.post("/upload", response_model=AssetUploadResponse)
 async def upload_asset(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     current_user: CurrentUser = Depends(get_current_user),
     service: AssetService = Depends(get_asset_service),
 ) -> AssetUploadResponse:
     result = await service.upload_asset(current_user.user_id, file)
+    background_tasks.add_task(
+        process_asset_background,
+        result.get("id"),
+        str(result.get("file_path") or ""),
+        file.content_type or result.get("file_type") or "",
+        service.client,
+    )
     return AssetUploadResponse(id=result.get("id"))
 
 

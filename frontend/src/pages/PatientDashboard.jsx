@@ -11,8 +11,19 @@ import FileViewer from '../components/FileViewer';
 const GENERAL_UPLOADS_FOLDER_PATH = '/my_documents/general_uploads/';
 const LEGACY_UNCLASSIFIED_FOLDER_PATH = '/my_documents/unclassified/';
 
-const normalizeFolderPath = (value) => {
+const normalizeAbsoluteFolderPath = (value) => {
   const raw = String(value || '').trim();
+  if (!raw) return '';
+  const lower = raw.toLowerCase();
+  if (lower.includes('uploads\\medical_images') || lower.includes('uploads/medical_images')) return '/my_documents/medical_images/';
+  if (lower.includes('uploads\\reports') || lower.includes('uploads/reports')) return '/my_documents/reports/';
+  if (lower.includes('uploads\\prescriptions') || lower.includes('uploads/prescriptions')) return '/my_documents/prescriptions/';
+  if (lower.includes('uploads\\unclassified') || lower.includes('uploads/unclassified')) return LEGACY_UNCLASSIFIED_FOLDER_PATH;
+  return raw;
+};
+
+const normalizeFolderPath = (value) => {
+  const raw = normalizeAbsoluteFolderPath(value);
   if (!raw) return '';
   if (raw === LEGACY_UNCLASSIFIED_FOLDER_PATH) return GENERAL_UPLOADS_FOLDER_PATH;
   return raw.endsWith('/') ? raw : `${raw}/`;
