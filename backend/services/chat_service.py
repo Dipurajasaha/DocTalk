@@ -35,6 +35,7 @@ class ChatService:
         user_id: str,
         page: int = 1,
         limit: int = 20,
+        role: str | None = None,
     ) -> dict[str, Any]:
         consultation = await self._load_consultation(consultation_id)
         self._require_participant(consultation, user_id)
@@ -43,9 +44,14 @@ class ChatService:
         limit = min(max(limit, 1), 100)
         skip = (page - 1) * limit
 
-        total = await self.client.message.count(where={"consultationId": consultation_id})
+        message_where: dict[str, Any] = {"consultationId": consultation_id}
+        normalized_role = str(role or "").strip().lower()
+        if normalized_role in {"patient", "doctor"}:
+            message_where["senderRole"] = normalized_role
+
+        total = await self.client.message.count(where=message_where)
         items = await self.client.message.find_many(
-            where={"consultationId": consultation_id},
+            where=message_where,
             order={"timestamp": "asc"},
             skip=skip,
             take=limit,
@@ -97,6 +103,30 @@ class ChatService:
                 "consultationId": consultation_id,
                 "senderId": sender_id,
                 "senderRole": role,
+                "message": message_text,
+                "timestamp": timestamp,
+            },
+        )
+        await self.client.consultation.update(where={"id": consultation_id}, data={"lastMessageAt": timestamp})
+        return self._serialize_message(record)
+
+    async def save_assistant_message(self, consultation_id: str, role: str, content: str) -> dict[str, Any]:
+        await self._load_consultation(consultation_id)
+
+        assistant_role = str(role or "").strip().lower()
+        if assistant_role not in {"patient", "doctor"}:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid assistant role")
+
+        message_text = str(content or "").strip()
+        if not message_text:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Message cannot be empty")
+
+        timestamp = datetime.now(timezone.utc)
+        record = await self.client.message.create(
+            data={
+                "consultationId": consultation_id,
+                "senderId": "doctalk-ai",
+                "senderRole": assistant_role,
                 "message": message_text,
                 "timestamp": timestamp,
             },

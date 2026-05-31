@@ -6,7 +6,7 @@ import { authApi, doctorApi, patientApi } from '../lib/api';
 import { createRealTimeClient } from '../lib/realTimeClient';
 import '../styles/doctor.css';
 import '../styles/chat.css';
-import CopilotPanel from '../components/CopilotPanel';
+import DoctorAssistantChat from '../components/DoctorAssistantChat';
 import { useNotifications } from '../contexts';
 
 const timeSlots = [];
@@ -358,6 +358,7 @@ export default function DoctorDashboard() {
   function normalizeChatMessage(item) {
     return {
       id: item?.id,
+      senderId: item?.sender_id || item?.senderId || item?.sender || '',
       sender: item?.sender_role || item?.senderRole || item?.sender || '',
       text: item?.message ?? item?.text ?? '',
       timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
@@ -448,10 +449,12 @@ export default function DoctorDashboard() {
         mode: 'auto',
         pollInterval: 5000,
         pollRequest: () => patientApi.getConsultationMessages(consultationId, 1, 20),
-        getSnapshotKey: (payload) => normalizeChatMessages(payload).map((message, index) => getChatMessageKey(message, index)).join('|'),
+        getSnapshotKey: (payload) => normalizeChatMessages(payload)
+          .filter((message) => String(message.senderId || '').toLowerCase() !== 'doctalk-ai')
+          .map((message, index) => getChatMessageKey(message, index)).join('|'),
         onMessage: (payload) => {
           if (cancelled) return;
-          const latestMessages = normalizeChatMessages(payload);
+          const latestMessages = normalizeChatMessages(payload).filter((message) => String(message.senderId || '').toLowerCase() !== 'doctalk-ai');
           patientChatSnapshotRef.current = {
             consultationId,
             fingerprint: latestMessages.map((message, index) => getChatMessageKey(message, index)).join('|'),
@@ -494,7 +497,7 @@ export default function DoctorDashboard() {
       }
       patientAutoScrollRef.current = true;
       const data = await patientApi.getConsultationMessages(consultationId, page, 20);
-      const items = normalizeChatMessages(data);
+      const items = normalizeChatMessages(data).filter((message) => String(message.senderId || '').toLowerCase() !== 'doctalk-ai');
       setPatientMessages((currentMessages) => page === 1
         ? mergeChronologicalMessages(currentMessages, items)
         : mergeChronologicalMessages(items, currentMessages));
@@ -682,8 +685,9 @@ export default function DoctorDashboard() {
                     <button onClick={() => {
                        const t = document.getElementById(`time-${r.id || r.appointment_id}`).value;
                        if(!t) return addNotification && addNotification({ type: 'error', message: 'Select time' });
+                       const token = localStorage.getItem('doctalk_token');
                        fetch(`/api/appointments/${r.id || r.appointment_id}/action`, {
-                         method: 'PUT', headers: {'Content-Type':'application/json'}, credentials: 'include',
+                         method: 'PUT', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, credentials: 'include',
                          body: JSON.stringify({ status: 'ACCEPT', assignedDate: t, doctorMessage: '' })
                        }).then(res=>res.json()).then(data=>{
                          if(data && (data.id || data.success)) {
@@ -949,8 +953,9 @@ export default function DoctorDashboard() {
                   <div style={{ marginTop: 'auto', paddingTop: '10px', paddingLeft: '8px' }}>
                     <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                       <button onClick={() => {
+                          const token = localStorage.getItem('doctalk_token');
                           fetch(`/api/appointments/${s.id}/action`, {
-                            method: 'PUT', headers: {'Content-Type': 'application/json'}, credentials: 'include',
+                            method: 'PUT', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, credentials: 'include',
                             body: JSON.stringify({ status: 'ACCEPT', assignedDate: s.appointmentDate || s.scheduled_time, doctorMessage: 'Completed session' })
                           }).then(r=>r.json()).then(d=>{
                               if(d && (d.id || d.success)) doctorApi.dashboardData(currentDoctorId).then((newData)=>{
@@ -1059,15 +1064,8 @@ export default function DoctorDashboard() {
       );
       case 'assistant': return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <h1 className="doc-h1">AI Medical Assistant</h1>
-          <div className="doc-section" style={{ display: 'flex', flexDirection: 'column', height: '80vh', padding: 0 }}>
-            <div style={{ padding: '20px', borderBottom: '1px solid #f0f0f0', fontWeight: '700', color: '#8B7EFF', fontSize: '16px' }}>AI Medical Assistant</div>
-            <div style={{ padding: '16px' }}>
-              <CopilotPanel defaultPatientId={dashboardData?.upcoming_schedules?.[0]?.patient || ''} />
-              <div style={{ marginTop: '12px', fontSize: '12px', color: '#64748B' }}>
-                Read-only copilot output only. No assistant chat or write actions are exposed here.
-              </div>
-            </div>
+          <div className="doc-section" style={{ display: 'flex', flexDirection: 'column', height: '80vh', padding: '16px' }}>
+            <DoctorAssistantChat consultations={consultations} defaultConsultationId={consultations?.[0]?.id || ''} />
           </div>
         </div>
       );

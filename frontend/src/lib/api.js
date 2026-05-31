@@ -53,7 +53,10 @@ export const patientApi = {
   renameAsset: (assetId, newName) => apiClient.patch(`/api/assets/${encodeURIComponent(assetId)}/rename`, { new_name: newName }, { retries: 0, auth: true }),
   listConsultations: () => apiClient.get('/api/chat/consultations', { retries: 1, auth: true }),
   getConsultation: (consultationId) => apiClient.get(`/api/chat/consultations/${encodeURIComponent(consultationId)}`, { retries: 1, auth: true }),
-  getConsultationMessages: (consultationId, page = 1, limit = 20) => apiClient.get(`/api/chat/consultations/${encodeURIComponent(consultationId)}/messages?page=${page}&limit=${limit}`, { retries: 1, auth: true }),
+  getConsultationMessages: (consultationId, page = 1, limit = 20, role = '') => {
+    const roleQuery = role ? `&role=${encodeURIComponent(role)}` : '';
+    return apiClient.get(`/api/chat/consultations/${encodeURIComponent(consultationId)}/messages?page=${page}&limit=${limit}${roleQuery}`, { retries: 1, auth: true });
+  },
   postConsultationMessage: (consultationId, message) => apiClient.post(`/api/chat/consultations/${encodeURIComponent(consultationId)}/messages`, { message }, { retries: 0, auth: true }),
   createConsultation: (appointmentId) => apiClient.post('/api/chat/consultations', { appointment_id: appointmentId }, { retries: 0, auth: true }),
   requestAppointment: (body) => apiClient.post('/api/appointment_request', body, { retries: 0, auth: true }),

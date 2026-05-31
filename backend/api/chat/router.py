@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, HTTPException, status
+from langchain_core.messages import HumanMessage
 
 from ...core.security import CurrentUser, get_current_user, decode_access_token
 from ...schemas.chat_schemas import (
@@ -12,6 +15,8 @@ from ...schemas.chat_schemas import (
     MessageResponse,
 )
 from ...services.chat_service import ChatService
+from ...workflows.state import create_workflow_state
+from ...workflows.unified_chat_graph import unified_chat_graph
 
 
 router = APIRouter(tags=["chat"])
@@ -19,6 +24,64 @@ router = APIRouter(tags=["chat"])
 
 def get_chat_service() -> ChatService:
     return ChatService()
+
+
+def _normalize_role(value: Any) -> str | None:
+    role = str(value or "").strip().lower()
+    return role if role in {"patient", "doctor"} else None
+
+
+def _extract_message_text(output: Any) -> str:
+    if isinstance(output, dict):
+        final_response = str(output.get("final_response") or "").strip()
+        if final_response:
+            return final_response
+        messages = list(output.get("messages") or [])
+        if messages:
+            last_message = messages[-1]
+            content = getattr(last_message, "content", None)
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+            if isinstance(last_message, dict):
+                text = str(last_message.get("content") or last_message.get("message") or "").strip()
+                if text:
+                    return text
+    return ""
+
+
+def _extract_stream_chunk_text(chunk: Any) -> str:
+    if chunk is None:
+        return ""
+    content = getattr(chunk, "content", chunk)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if isinstance(item, dict):
+                text = str(item.get("text") or item.get("content") or "")
+                if text:
+                    parts.append(text)
+        return "".join(parts)
+    return str(content or "")
+
+
+def _role_scaffold_message(role: str) -> str:
+    return "Patient AI Scaffold Online" if role == "patient" else "Doctor Copilot Scaffold Online"
+
+
+def _event_payload(event_type: str, consultation_id: str, content: str = "", node: str | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "type": event_type,
+        "consultation_id": consultation_id,
+        "content": content,
+    }
+    if node:
+        payload["node"] = node
+    return payload
 
 
 @router.get("/consultations", response_model=list[ConsultationResponse])
@@ -46,9 +109,16 @@ async def fetch_message_history(
     current_user: CurrentUser = Depends(get_current_user),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
+    role: str | None = Query(default=None),
     chat_service: ChatService = Depends(get_chat_service),
 ) -> MessageHistoryResponse:
-    history = await chat_service.get_consultation_messages(consultation_id, current_user.user_id, page=page, limit=limit)
+    history = await chat_service.get_consultation_messages(
+        consultation_id,
+        current_user.user_id,
+        page=page,
+        limit=limit,
+        role=role,
+    )
     return MessageHistoryResponse(
         items=[MessageResponse.model_validate(item) for item in history["items"]],
         page=history["page"],
@@ -140,6 +210,129 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "message", "item": saved})
             else:
                 # unknown message type - ignore
+                continue
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
+
+
+@router.websocket("/ws/{consultation_id}")
+async def websocket_assistant_consultation(websocket: WebSocket, consultation_id: str) -> None:
+    token = websocket.query_params.get("token")
+    role_param = _normalize_role(websocket.query_params.get("role"))
+    resolved_role: str | None = role_param
+    resolved_user_id: str | None = None
+
+    if token:
+        try:
+            token_payload = decode_access_token(token)
+        except HTTPException:
+            await websocket.close(code=1008)
+            return
+        token_role = _normalize_role(token_payload.get("role"))
+        if token_role is None:
+            await websocket.close(code=1008)
+            return
+        if resolved_role is not None and resolved_role != token_role:
+            await websocket.close(code=1008)
+            return
+        resolved_role = token_role
+        resolved_user_id = str(token_payload.get("user_id") or "").strip() or None
+
+    if resolved_role is None:
+        await websocket.close(code=1008)
+        return
+
+    chat_service = get_chat_service()
+
+    try:
+        consultation = await chat_service._load_consultation(consultation_id)
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
+
+    if resolved_user_id is None:
+        resolved_user_id = str(
+            getattr(consultation, "patientUsername", "") if resolved_role == "patient" else getattr(consultation, "doctorId", "")
+        ).strip()
+
+    if not resolved_user_id:
+        await websocket.close(code=1008)
+        return
+
+    try:
+        await chat_service.get_consultation(consultation_id, resolved_user_id)
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+
+    try:
+        while True:
+            user_text = (await websocket.receive_text()).strip()
+            if not user_text:
+                continue
+
+            final_sent = False
+            final_response = ""
+            streamed_token = False
+
+            try:
+                await chat_service.save_message(consultation_id, resolved_user_id, resolved_role, user_text)
+
+                workflow_state = create_workflow_state(
+                    messages=[HumanMessage(content=user_text)],
+                    role=resolved_role,  # type: ignore[arg-type]
+                    consultation_id=consultation_id,
+                    context_payload={
+                        "consultation_id": consultation_id,
+                        "role": resolved_role,
+                        "requester_id": resolved_user_id,
+                    },
+                )
+
+                async for event in unified_chat_graph.astream_events(workflow_state, version="v2"):
+                    event_name = str(event.get("event") or "")
+                    node_name = str(event.get("name") or "")
+                    data = dict(event.get("data") or {})
+
+                    if event_name == "on_chain_end" and node_name in {"patient_assistant_llm", "doctor_copilot_llm"}:
+                        output = data.get("output")
+                        chunk = _extract_message_text(output)
+                        if chunk:
+                            final_response = chunk
+                            await websocket.send_json(_event_payload("token", consultation_id, content=chunk, node=node_name))
+                            streamed_token = True
+                        continue
+
+                    if event_name in {"on_chat_model_stream", "on_llm_stream"}:
+                        chunk_text = _extract_stream_chunk_text(data.get("chunk")).strip()
+                        if chunk_text:
+                            final_response += chunk_text
+                            await websocket.send_json(_event_payload("token", consultation_id, content=chunk_text, node=node_name or None))
+                            streamed_token = True
+
+                if not final_response:
+                    final_response = str(workflow_state.get("final_response") or "").strip()
+                if not final_response:
+                    final_response = _role_scaffold_message(resolved_role)
+
+                if final_response and not streamed_token:
+                    await websocket.send_json(_event_payload("token", consultation_id, content=final_response))
+
+                if final_response:
+                    await chat_service.save_assistant_message(consultation_id, resolved_role, final_response)
+                await websocket.send_json(_event_payload("final", consultation_id, content=final_response))
+                final_sent = True
+            except Exception as exc:
+                await websocket.send_json(_event_payload("error", consultation_id, content=str(exc)))
+                if not final_sent:
+                    await websocket.send_json(_event_payload("final", consultation_id, content=_role_scaffold_message(resolved_role)))
                 continue
     except WebSocketDisconnect:
         return

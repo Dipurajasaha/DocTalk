@@ -24,8 +24,10 @@ export default function XrayAnalyzerPanel() {
     setResult(null);
 
     try {
+      const token = localStorage.getItem('doctalk_token');
       const response = await fetch('/api/analyze_xray', {
         method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
         credentials: 'include',
       });

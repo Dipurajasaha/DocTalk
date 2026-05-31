@@ -76,8 +76,10 @@ export default function PatientDashboard() {
       setIsUploadingProfile(true);
       const formData = new FormData(e.target);
       try {
+        const token = localStorage.getItem('doctalk_token');
         const res = await fetch('/api/update_patient_profile', {
           method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
           body: formData,
           credentials: 'include'
         });
@@ -340,6 +342,7 @@ export default function PatientDashboard() {
   function normalizeChatMessage(item) {
     return {
       id: item?.id,
+      senderId: item?.sender_id || item?.senderId || item?.sender || '',
       sender: item?.sender_role || item?.senderRole || item?.sender || '',
       text: item?.message ?? item?.text ?? '',
       timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
@@ -386,6 +389,28 @@ export default function PatientDashboard() {
     } catch (e) {
       console.error('Failed loading consultations', e);
       setConsultations([]);
+    }
+  };
+
+  const loadChatHistory = async () => {
+    const consultationId = activeConsultationId || consultations[0]?.id || null;
+    if (!consultationId) {
+      setMessages([]);
+      return;
+    }
+
+    try {
+      const data = await patientApi.getConsultationMessages(consultationId, 1, 20, 'patient');
+      const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+      setMessages(items.map((item) => ({
+        sender: item?.sender_role || item?.senderRole || item?.sender || '',
+        text: item?.message || item?.text || '',
+        id: item?.id || `${item?.timestamp || Date.now()}-${Math.random().toString(16).slice(2)}`,
+        timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
+      })));
+    } catch (e) {
+      console.error(e);
+      setMessages([]);
     }
   };
 
@@ -494,7 +519,7 @@ export default function PatientDashboard() {
       }
       docAutoScrollRef.current = true;
       const data = await patientApi.getConsultationMessages(consultationId, page, 20);
-      const items = normalizeChatMessages(data);
+      const items = normalizeChatMessages(data).filter((message) => String(message.senderId || '').toLowerCase() !== 'doctalk-ai');
       setDocMessages((currentMessages) => page === 1
         ? mergeChronologicalMessages(currentMessages, items)
         : mergeChronologicalMessages(items, currentMessages));
@@ -536,10 +561,12 @@ export default function PatientDashboard() {
         mode: 'auto',
         pollInterval: 5000,
         pollRequest: () => patientApi.getConsultationMessages(consultationId, 1, 20),
-        getSnapshotKey: (payload) => normalizeChatMessages(payload).map((message, index) => getChatMessageKey(message, index)).join('|'),
+        getSnapshotKey: (payload) => normalizeChatMessages(payload)
+          .filter((message) => String(message.senderId || '').toLowerCase() !== 'doctalk-ai')
+          .map((message, index) => getChatMessageKey(message, index)).join('|'),
         onMessage: (payload) => {
           if (cancelled) return;
-          const latestMessages = normalizeChatMessages(payload);
+          const latestMessages = normalizeChatMessages(payload).filter((message) => String(message.senderId || '').toLowerCase() !== 'doctalk-ai');
           docChatSnapshotRef.current = {
             consultationId,
             fingerprint: latestMessages.map((message, index) => getChatMessageKey(message, index)).join('|'),
@@ -608,7 +635,7 @@ export default function PatientDashboard() {
       if (!activeConsultationId) return;
       const nextPage = docMessagePage + 1;
       const data = await patientApi.getConsultationMessages(activeConsultationId, nextPage, 20);
-      const items = normalizeChatMessages(data);
+      const items = normalizeChatMessages(data).filter((message) => String(message.senderId || '').toLowerCase() !== 'doctalk-ai');
       if (items.length > 0) {
         setDocMessages(prev => mergeChronologicalMessages(items, prev));
         setDocMessagePage(nextPage);
@@ -703,11 +730,15 @@ export default function PatientDashboard() {
       } else {
         try { addNotification({ type: 'error', message: 'Error creating appointment: ' + (err?.message || 'server error') }); } catch (e) {}
       }
-    }
-    finally {
+    } finally {
       setBookingInProgress(false);
     }
   };
+
+  useEffect(() => {
+    if (!user || activePanel !== 'explain') return;
+    loadChatHistory();
+  }, [user, activePanel, consultations, activeConsultationId]);
 
   const handleCancelAppointment = async (appointmentId) => {
     if (!window.confirm('Cancel this appointment?')) return;
@@ -735,25 +766,6 @@ export default function PatientDashboard() {
     }
   };
 
-  // 2. Load Chat History
-  const loadChatHistory = () => {
-    patientApi.listConsultations()
-      .then(data => {
-        if (Array.isArray(data)) {
-          // pick first consultation and load messages if present
-          const first = data[0];
-          setMessages(first?.messages || []);
-        } else if (data.success && data.sessions) {
-          const sessions = data.sessions || [];
-          const isErrorText = (text = '') => /conversation error|chat service error|llm call failed|api quota exceeded/i.test(String(text));
-          const activeSession = sessions.find(session =>
-            (session?.messages || []).some(msg => msg?.sender === 'model' && !isErrorText(msg?.text))
-          ) || sessions[0];
-          setMessages(activeSession?.messages || []);
-        }
-      }).catch(e => console.error(e));
-  };
-
   // Scroll to bottom when messages change
   useEffect(() => {
     if (messages.length > 0) {
@@ -766,55 +778,132 @@ export default function PatientDashboard() {
     e.preventDefault();
     if (!inputMsg.trim()) return;
 
+    const consultationId = activeConsultationId || consultations[0]?.id || null;
+    if (!consultationId) {
+      try { addNotification({ type: 'error', message: 'Select a consultation before starting the assistant chat.' }); } catch (err) {}
+      return;
+    }
+
     const newMsg = { sender: 'user', text: inputMsg, id: Date.now() };
     setMessages(prev => [...prev, newMsg, { sender: 'model', id: 'loading', text: 'Typing...' }]);
     setInputMsg('');
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ message: inputMsg, language })
-      });
-      const data = await response.json();
-      
-      setMessages(prev => {
-        const filtered = prev.filter(m => m.id !== 'loading');
-        if (data.success) {
-          const reply = data.reply;
-          // Convert any structured response to plain text string
-          let textReply = '';
-          if (typeof reply === 'object' && reply) {
-            // Flatten structured object into readable text
-            const parts = [];
-            if (reply.summary) parts.push(reply.summary);
-            if (reply.key_findings && Array.isArray(reply.key_findings)) {
-              parts.push('Key Findings: ' + reply.key_findings.join(', '));
-            }
-            if (reply.observations && Array.isArray(reply.observations)) {
-              parts.push('Observations: ' + reply.observations.join(', '));
-            }
-            if (reply.risks && Array.isArray(reply.risks)) {
-              parts.push('Risks: ' + reply.risks.join(', '));
-            }
-            if (reply.recommendations && Array.isArray(reply.recommendations)) {
-              parts.push('Recommendations: ' + reply.recommendations.join(', '));
-            }
-            if (reply.notes) {
-              const notesText = Array.isArray(reply.notes) ? reply.notes.join('. ') : reply.notes;
-              parts.push('Notes: ' + notesText);
-            }
-            textReply = parts.filter(p => p).join('\n\n');
-          } else {
-            textReply = String(reply);
+      const token = localStorage.getItem('doctalk_token');
+      if (!token) {
+        throw new Error('Missing session token');
+      }
+
+      const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${scheme}//${window.location.host}/api/chat/ws/${encodeURIComponent(consultationId)}?token=${encodeURIComponent(token)}&role=patient`;
+      const socket = new WebSocket(wsUrl);
+      let finalText = '';
+      let completed = false;
+      let settleTimeout = null;
+
+      await new Promise((resolve, reject) => {
+        const cleanupTimeout = () => {
+          if (settleTimeout) {
+            clearTimeout(settleTimeout);
+            settleTimeout = null;
           }
-          return [...filtered, { sender: 'model', text: textReply, id: Date.now() }];
-        }
-        return [...filtered, { sender: 'model', text: 'Error: ' + data.error, id: Date.now() }];
+        };
+
+        const resolveOnce = () => {
+          if (completed) return;
+          completed = true;
+          cleanupTimeout();
+          resolve();
+        };
+
+        const rejectOnce = (error) => {
+          if (completed) return;
+          completed = true;
+          cleanupTimeout();
+          reject(error);
+        };
+
+        settleTimeout = setTimeout(() => {
+          try { socket.close(); } catch (e) {}
+          rejectOnce(new Error('Assistant response timed out'));
+        }, 25000);
+
+        socket.onopen = () => {
+          socket.send(inputMsg);
+        };
+
+        socket.onmessage = (event) => {
+          let payload = null;
+          try {
+            payload = JSON.parse(event.data);
+          } catch (parseError) {
+            payload = { type: 'token', content: String(event.data || '') };
+          }
+
+          const eventType = String(payload?.type || payload?.status || '').toLowerCase();
+          const chunkText = String(payload?.content || payload?.text || payload?.chunk || '');
+
+          if ((eventType === 'token' || eventType === 'message') && chunkText) {
+            finalText += chunkText;
+            setMessages(prev => {
+              const filtered = prev.filter(m => m.id !== 'loading');
+              const existingIndex = filtered.findIndex(m => m.id === 'assistant-stream');
+              const nextMessage = { sender: 'model', text: finalText, id: 'assistant-stream' };
+              if (existingIndex >= 0) {
+                const clone = [...filtered];
+                clone[existingIndex] = nextMessage;
+                return clone;
+              }
+              return [...filtered, nextMessage];
+            });
+          }
+
+          if (eventType === 'final' || eventType === 'done' || eventType === 'end' || payload?.isFinal === true) {
+            const textReply = String(chunkText || finalText || '').trim() || 'Patient AI Scaffold Online';
+            setMessages(prev => {
+              const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
+              return [...filtered, { sender: 'model', text: textReply, id: Date.now() }];
+            });
+            try { socket.close(); } catch (e) {}
+            resolveOnce();
+            return;
+          }
+
+          if (eventType === 'error') {
+            try { socket.close(); } catch (e) {}
+            rejectOnce(new Error(chunkText || 'Assistant stream failed'));
+          }
+        };
+
+        socket.onerror = () => {
+          rejectOnce(new Error('Assistant websocket connection failed'));
+        };
+
+        socket.onclose = () => {
+          if (completed) {
+            return;
+          }
+          if (finalText) {
+            setMessages(prev => {
+              const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
+              return [...filtered, { sender: 'model', text: finalText, id: Date.now() }];
+            });
+            resolveOnce();
+            return;
+          }
+          rejectOnce(new Error('Assistant websocket closed unexpectedly'));
+        };
       });
     } catch (err) {
-      setMessages(prev => prev.filter(m => m.id !== 'loading'));
+      const errText = String(err?.message || '');
+      const shouldShowFallback = /timed out|closed unexpectedly/i.test(errText);
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
+        if (shouldShowFallback) {
+          return [...filtered, { sender: 'model', text: 'Patient AI Scaffold Online', id: Date.now() }];
+        }
+        return filtered;
+      });
       try { addNotification({ type: 'error', message: "Failed to send message: " + err.message }); } catch (e) {}
     }
   };
@@ -864,8 +953,10 @@ export default function PatientDashboard() {
         
         formData.append('language', language);
 
+        const token = localStorage.getItem('doctalk_token');
         const response = await fetch('/api/explain_report', {
           method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
           credentials: 'include',
           body: formData
         });
@@ -928,8 +1019,10 @@ export default function PatientDashboard() {
       formData.append('file_id', selectedDocForAnalysis);
       formData.append('language', language);
 
+      const token = localStorage.getItem('doctalk_token');
       const response = await fetch('/api/analyze_document', {
         method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         credentials: 'include',
         body: formData
       });
