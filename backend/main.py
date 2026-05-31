@@ -33,7 +33,7 @@ async def shutdown_event() -> None:
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(profile_router, prefix="/api", tags=["auth"])
-app.include_router(chat_router, prefix="/api", tags=["chat"])
+app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(users_router, prefix="/api/users", tags=["users"])
 app.include_router(user_doctor_router, prefix="/api/doctor", tags=["users"])
 app.include_router(appointments_router, prefix="/api/appointments", tags=["appointments"])

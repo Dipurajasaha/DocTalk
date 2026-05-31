@@ -37,6 +37,7 @@ export function createRealTimeClient({
   fetchOptions = {},
 } = {}) {
   let eventSource = null;
+  let websocket = null;
   let pollTimer = null;
   let stopped = true;
   let requestInFlight = false;
@@ -155,6 +156,63 @@ export function createRealTimeClient({
     }
   };
 
+  const startWebSocket = () => {
+    if (typeof WebSocket === 'undefined') {
+      startEventSource();
+      return;
+    }
+
+    const token = localStorage.getItem('doctalk_token');
+    if (!token) {
+      // No token available; fallback to SSE/polling
+      startEventSource();
+      return;
+    }
+
+    try {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      const sep = url.includes('?') ? '&' : '?';
+      const wsUrl = `${proto}//${host}${url}${sep}token=${encodeURIComponent(token)}`;
+
+      websocket = new WebSocket(wsUrl);
+      setStatus('connecting');
+
+      websocket.onopen = () => {
+        if (stopped) return;
+        currentReconnectDelay = reconnectDelay;
+        setStatus('connected');
+        onOpen && onOpen();
+      };
+
+      websocket.onmessage = (event) => {
+        if (stopped) return;
+        emitIfChanged(safeJsonParse(event.data));
+      };
+
+      websocket.onerror = (error) => {
+        if (stopped) return;
+        onError && onError(error);
+        setStatus('reconnecting');
+        try {
+          websocket.close();
+        } catch (_) {}
+        websocket = null;
+        startPolling();
+      };
+
+      websocket.onclose = () => {
+        if (stopped) return;
+        setStatus('reconnecting');
+        websocket = null;
+        startPolling();
+      };
+    } catch (error) {
+      onError && onError(error);
+      startPolling();
+    }
+  };
+
   function start() {
     if (!stopped) return;
     stopped = false;
@@ -164,6 +222,11 @@ export function createRealTimeClient({
 
     if (mode === 'poll') {
       startPolling();
+      return;
+    }
+
+    if (mode === 'ws' || (mode === 'auto' && typeof WebSocket !== 'undefined')) {
+      startWebSocket();
       return;
     }
 
