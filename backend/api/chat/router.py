@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, HTTPException, status
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from ...core.security import CurrentUser, get_current_user, decode_access_token
 from ...schemas.chat_schemas import (
@@ -71,6 +71,74 @@ def _extract_stream_chunk_text(chunk: Any) -> str:
 
 def _role_scaffold_message(role: str) -> str:
     return "Patient AI Scaffold Online" if role == "patient" else "Doctor Copilot Scaffold Online"
+
+
+def _serialize_timestamp(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        if hasattr(value, "isoformat"):
+            return value.isoformat()
+    except Exception:
+        pass
+    return str(value)
+
+
+def _format_db_messages_for_ws(messages: list[dict[str, Any]], *, role: str) -> list[dict[str, Any]]:
+    formatted: list[dict[str, Any]] = []
+    for item in messages:
+        message_role = str(item.get("role") or "").strip().lower()
+        content = str(item.get("content") or item.get("message") or item.get("text") or "").strip()
+        if not content:
+            continue
+        is_assistant = message_role == "assistant"
+        formatted.append(
+            {
+                "id": item.get("id"),
+                "role": message_role,
+                "sender_id": "doctalk-ai" if is_assistant else item.get("sender_id"),
+                "sender_role": role,
+                "message": content,
+                "content": content,
+                "text": content,
+                "timestamp": _serialize_timestamp(item.get("timestamp")),
+            }
+        )
+    return formatted
+
+
+def _format_consultation_messages_for_ws(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    formatted: list[dict[str, Any]] = []
+    for item in items:
+        serialized = dict(item)
+        serialized["timestamp"] = _serialize_timestamp(item.get("timestamp"))
+        formatted.append(serialized)
+    return formatted
+
+
+def _langchain_messages_from_db_history(messages: list[dict[str, Any]]) -> list[BaseMessage]:
+    langchain_messages: list[BaseMessage] = []
+    for item in messages:
+        content = str(item.get("content") or item.get("message") or item.get("text") or "").strip()
+        if not content:
+            continue
+        if str(item.get("role") or "").strip().lower() == "assistant":
+            langchain_messages.append(AIMessage(content=content))
+        else:
+            langchain_messages.append(HumanMessage(content=content))
+    return langchain_messages
+
+
+async def _send_consultation_history(
+    websocket: WebSocket,
+    *,
+    chat_service: ChatService,
+    consultation_id: str,
+    user_id: str,
+) -> None:
+    history = await chat_service.get_consultation_messages(consultation_id, user_id, page=1, limit=100)
+    formatted_messages = _format_consultation_messages_for_ws(list(history.get("items") or []))
+    await websocket.send_json({"type": "history", "messages": formatted_messages})
 
 
 def _build_ai_checkpoint_namespace(*, user_id: str, ai_session_id: str, target_patient_id: str | None = None) -> str:
@@ -231,13 +299,25 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     chat_service = get_chat_service()
 
     await websocket.accept()
+    consultation_id = websocket.query_params.get("consultation_id")
+    if consultation_id:
+        try:
+            await _send_consultation_history(
+                websocket,
+                chat_service=chat_service,
+                consultation_id=str(consultation_id),
+                user_id=current_user.user_id,
+            )
+        except HTTPException:
+            await websocket.close(code=1008)
+            return
     try:
         while True:
             data = await websocket.receive_json()
             # Expect messages of shape: { type: 'message', consultation_id: string, message: string }
             msg_type = data.get("type")
             if msg_type == "message":
-                consultation_id = data.get("consultation_id")
+                consultation_id = data.get("consultation_id") or consultation_id
                 message_text = data.get("message")
                 if not consultation_id or not message_text:
                     # ignore malformed messages
@@ -274,6 +354,7 @@ async def _run_ai_websocket(
     if current_user is None:
         return
 
+    chat_service = get_chat_service()
     normalized_target_patient_id = str(target_patient_id or "").strip() or None
     namespace = _build_ai_checkpoint_namespace(
         user_id=current_user.user_id,
@@ -282,14 +363,30 @@ async def _run_ai_websocket(
     )
 
     await websocket.accept()
+    db_history = await chat_service.get_ai_chat_history(
+        current_user.user_id,
+        current_user.role,
+        ai_session_id,
+        normalized_target_patient_id,
+    )
+    await websocket.send_json(
+        {
+            "type": "history",
+            "messages": _format_db_messages_for_ws(db_history, role=current_user.role),
+        }
+    )
+
     try:
         while True:
             user_text = (await websocket.receive_text()).strip()
             if not user_text:
                 continue
 
+            conversation_messages = _langchain_messages_from_db_history(db_history)
+            conversation_messages.append(HumanMessage(content=user_text))
+
             workflow_state = create_workflow_state(
-                messages=[HumanMessage(content=user_text)],
+                messages=conversation_messages,
                 role=current_user.role,  # type: ignore[arg-type]
                 user_id=current_user.user_id,
                 ai_session_id=ai_session_id,
@@ -340,6 +437,15 @@ async def _run_ai_websocket(
                 if final_response and not streamed_token:
                     await websocket.send_text(final_response)
 
+                db_history = await chat_service.append_ai_chat_exchange(
+                    current_user.user_id,
+                    current_user.role,
+                    ai_session_id,
+                    user_text,
+                    final_response,
+                    normalized_target_patient_id,
+                )
+
                 await websocket.send_json(
                     {
                         "type": "final",
@@ -366,6 +472,28 @@ async def _run_ai_websocket(
             await websocket.close(code=1011)
         except Exception:
             pass
+
+
+@router.get("/ai/history")
+async def fetch_ai_chat_history(
+    current_user: CurrentUser = Depends(get_current_user),
+    ai_session_id: str = Query(default="patient_ai"),
+    target_patient_id: str | None = Query(default=None),
+    chat_service: ChatService = Depends(get_chat_service),
+) -> dict[str, Any]:
+    session_id = str(ai_session_id or "").strip() or ("doctor_ai" if current_user.role == "doctor" else "patient_ai")
+    normalized_target_patient_id = str(target_patient_id or "").strip() or None
+    messages = await chat_service.get_ai_chat_history(
+        current_user.user_id,
+        current_user.role,
+        session_id,
+        normalized_target_patient_id,
+    )
+    return {
+        "messages": _format_db_messages_for_ws(messages, role=current_user.role),
+        "ai_session_id": session_id,
+        "target_patient_id": normalized_target_patient_id,
+    }
 
 
 @router.websocket("/ai/patient/ws")
@@ -407,6 +535,16 @@ async def websocket_consultation_messages(websocket: WebSocket, consultation_id:
     chat_service = get_chat_service()
 
     await websocket.accept()
+    try:
+        await _send_consultation_history(
+            websocket,
+            chat_service=chat_service,
+            consultation_id=consultation_id,
+            user_id=current_user.user_id,
+        )
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
     try:
         while True:
             data = await websocket.receive_json()

@@ -412,19 +412,13 @@ export default function PatientDashboard() {
   };
 
   const loadChatHistory = async () => {
-    const consultationId = activeConsultationId || consultations[0]?.id || null;
-    if (!consultationId) {
-      setMessages([]);
-      return;
-    }
-
     try {
-      const data = await patientApi.getConsultationMessages(consultationId, 1, 20, 'patient');
-      const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+      const data = await patientApi.getAiChatHistory('patient_ai');
+      const items = Array.isArray(data?.messages) ? data.messages : [];
       setMessages(items.map((item) => ({
-        senderId: item?.sender_id || item?.senderId || item?.sender || '',
-        sender: item?.sender_role || item?.senderRole || item?.sender || '',
-        text: item?.message || item?.text || '',
+        senderId: item?.sender_id || item?.senderId || (String(item?.role || '').toLowerCase() === 'assistant' ? 'doctalk-ai' : 'user'),
+        sender: String(item?.role || '').toLowerCase() === 'assistant' ? 'model' : 'user',
+        text: item?.message || item?.content || item?.text || '',
         id: item?.id || `${item?.timestamp || Date.now()}-${Math.random().toString(16).slice(2)}`,
         timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
       })));
@@ -586,6 +580,19 @@ export default function PatientDashboard() {
           .map((message, index) => getChatMessageKey(message, index)).join('|'),
         onMessage: (payload) => {
           if (cancelled) return;
+          if (String(payload?.type || '').toLowerCase() === 'history' && Array.isArray(payload?.messages)) {
+            const latestMessages = normalizeChatMessages({ items: payload.messages }).filter((message) => String(message.senderId || '').toLowerCase() !== 'doctalk-ai');
+            docChatSnapshotRef.current = {
+              consultationId,
+              fingerprint: latestMessages.map((message, index) => getChatMessageKey(message, index)).join('|'),
+            };
+            setDocMessages(latestMessages);
+            setActiveConsultationId(consultationId);
+            setDocMessagePage(1);
+            setDocChatDisabled(false);
+            docAutoScrollRef.current = true;
+            return;
+          }
           const latestMessages = normalizeChatMessages(payload).filter((message) => String(message.senderId || '').toLowerCase() !== 'doctalk-ai');
           docChatSnapshotRef.current = {
             consultationId,
@@ -758,7 +765,7 @@ export default function PatientDashboard() {
   useEffect(() => {
     if (!user || activePanel !== 'explain') return;
     loadChatHistory();
-  }, [user, activePanel, consultations, activeConsultationId]);
+  }, [user, activePanel]);
 
   const handleCancelAppointment = async (appointmentId) => {
     if (!window.confirm('Cancel this appointment?')) return;
@@ -855,6 +862,10 @@ export default function PatientDashboard() {
 
           const eventType = String(payload?.type || payload?.status || '').toLowerCase();
           const chunkText = String(payload?.content || payload?.text || payload?.chunk || '');
+
+          if (eventType === 'history') {
+            return;
+          }
 
           if ((eventType === 'token' || eventType === 'message') && chunkText) {
             finalText += chunkText;

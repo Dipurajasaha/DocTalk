@@ -145,6 +145,123 @@ class ChatService:
             "ai_message": "LangGraph AI is offline.",
         }
 
+    @staticmethod
+    def _ai_storage_key(ai_session_id: str, target_patient_id: str | None = None) -> str:
+        session_key = str(ai_session_id or "").strip() or "default"
+        target_key = str(target_patient_id or "").strip()
+        return f"{session_key}:{target_key}" if target_key else session_key
+
+    @staticmethod
+    def _coerce_json_mapping(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        return {}
+
+    @staticmethod
+    def _normalize_ai_history_messages(raw_messages: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw_messages, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        for index, item in enumerate(raw_messages):
+            if not isinstance(item, dict):
+                continue
+            content = str(item.get("content") or item.get("message") or item.get("text") or "").strip()
+            if not content:
+                continue
+            role = str(item.get("role") or item.get("sender_role") or item.get("senderRole") or "").strip().lower()
+            if role in {"assistant", "ai", "model"}:
+                message_role = "assistant"
+            elif role in {"user", "human"}:
+                message_role = "user"
+            else:
+                sender_id = str(item.get("sender_id") or item.get("senderId") or "").strip().lower()
+                message_role = "assistant" if sender_id in {"doctalk-ai", "assistant", "model"} else "user"
+            normalized.append(
+                {
+                    "id": str(item.get("id") or f"ai-{index}"),
+                    "role": message_role,
+                    "content": content,
+                    "timestamp": item.get("timestamp") or item.get("created_at") or item.get("createdAt"),
+                }
+            )
+        return normalized
+
+    async def get_ai_chat_history(
+        self,
+        user_id: str,
+        role: str,
+        ai_session_id: str,
+        target_patient_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        storage_key = self._ai_storage_key(ai_session_id, target_patient_id)
+        normalized_role = str(role or "").strip().lower()
+
+        if normalized_role == "patient":
+            record = await self.client.patient.find_unique(where={"username": user_id})
+            store = self._coerce_json_mapping(getattr(record, "chatSessions", None) if record else None)
+        elif normalized_role == "doctor":
+            record = await self.client.doctor.find_unique(where={"doctorId": user_id})
+            store = self._coerce_json_mapping(getattr(record, "assistantChat", None) if record else None)
+        else:
+            return []
+
+        return self._normalize_ai_history_messages(store.get(storage_key))
+
+    async def append_ai_chat_exchange(
+        self,
+        user_id: str,
+        role: str,
+        ai_session_id: str,
+        user_message: str,
+        assistant_message: str,
+        target_patient_id: str | None = None,
+        *,
+        max_messages: int = 100,
+    ) -> list[dict[str, Any]]:
+        user_text = str(user_message or "").strip()
+        assistant_text = str(assistant_message or "").strip()
+        if not user_text and not assistant_text:
+            return await self.get_ai_chat_history(user_id, role, ai_session_id, target_patient_id)
+
+        storage_key = self._ai_storage_key(ai_session_id, target_patient_id)
+        normalized_role = str(role or "").strip().lower()
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        history = await self.get_ai_chat_history(user_id, role, ai_session_id, target_patient_id)
+        if user_text:
+            history.append(
+                {
+                    "id": f"user-{timestamp}",
+                    "role": "user",
+                    "content": user_text,
+                    "timestamp": timestamp,
+                }
+            )
+        if assistant_text:
+            history.append(
+                {
+                    "id": f"assistant-{timestamp}",
+                    "role": "assistant",
+                    "content": assistant_text,
+                    "timestamp": timestamp,
+                }
+            )
+        if len(history) > max_messages:
+            history = history[-max_messages:]
+
+        if normalized_role == "patient":
+            record = await self.client.patient.find_unique(where={"username": user_id})
+            store = self._coerce_json_mapping(getattr(record, "chatSessions", None) if record else None)
+            store[storage_key] = history
+            await self.client.patient.update(where={"username": user_id}, data={"chatSessions": store})
+        elif normalized_role == "doctor":
+            record = await self.client.doctor.find_unique(where={"doctorId": user_id})
+            store = self._coerce_json_mapping(getattr(record, "assistantChat", None) if record else None)
+            store[storage_key] = history
+            await self.client.doctor.update(where={"doctorId": user_id}, data={"assistantChat": store})
+
+        return history
+
     async def _load_consultation(self, consultation_id: str) -> Any:
         consultation = await self.client.consultation.find_unique(where={"id": consultation_id})
         if consultation is None:

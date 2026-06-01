@@ -5,19 +5,14 @@ from typing import Any, Literal
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.prebuilt import ToolNode, tools_condition
 
 from .nodes.doctor_nodes import doctor_general_llm, doctor_scoped_llm
 from .nodes.patient_nodes import patient_assistant_llm, triage_evaluator
 from .nodes.shared_nodes import medical_safety_guardrail
-from .nodes.tools import doctor_rag_tool, patient_rag_tool
 from .state import WorkflowState
 
 
 logger = logging.getLogger(__name__)
-
-tool_node = ToolNode([patient_rag_tool, doctor_rag_tool])
-doctor_tool_node = ToolNode([patient_rag_tool, doctor_rag_tool])
 
 
 async def log_entry_context(state: WorkflowState) -> dict[str, Any]:
@@ -38,15 +33,6 @@ def route_by_role(state: WorkflowState) -> Literal["triage_evaluator", "doctor_g
     return "triage_evaluator"
 
 
-def route_after_doctor_tools(
-    state: WorkflowState,
-) -> Literal["doctor_general_llm", "doctor_scoped_llm"]:
-    route = str((state.get("context_payload") or {}).get("route") or "")
-    if route == "doctor_scoped_llm":
-        return "doctor_scoped_llm"
-    return "doctor_general_llm"
-
-
 def build_unified_chat_graph() -> Any:
     graph: StateGraph[WorkflowState] = StateGraph(WorkflowState)
     graph.add_node("log_entry_context", log_entry_context)
@@ -54,8 +40,6 @@ def build_unified_chat_graph() -> Any:
     graph.add_node("patient_assistant_llm", patient_assistant_llm)
     graph.add_node("doctor_general_llm", doctor_general_llm)
     graph.add_node("doctor_scoped_llm", doctor_scoped_llm)
-    graph.add_node("tools", tool_node)
-    graph.add_node("doctor_tools", doctor_tool_node)
     graph.add_node("guardrail", medical_safety_guardrail)
     graph.add_edge(START, "log_entry_context")
     graph.add_conditional_edges(
@@ -68,39 +52,9 @@ def build_unified_chat_graph() -> Any:
         },
     )
     graph.add_edge("triage_evaluator", "patient_assistant_llm")
-    graph.add_conditional_edges(
-        "patient_assistant_llm",
-        tools_condition,
-        {
-            "tools": "tools",
-            "__end__": "guardrail",
-        },
-    )
-    graph.add_edge("tools", "patient_assistant_llm")
-    graph.add_conditional_edges(
-        "doctor_general_llm",
-        tools_condition,
-        {
-            "tools": "doctor_tools",
-            "__end__": "guardrail",
-        },
-    )
-    graph.add_conditional_edges(
-        "doctor_scoped_llm",
-        tools_condition,
-        {
-            "tools": "doctor_tools",
-            "__end__": "guardrail",
-        },
-    )
-    graph.add_conditional_edges(
-        "doctor_tools",
-        route_after_doctor_tools,
-        {
-            "doctor_general_llm": "doctor_general_llm",
-            "doctor_scoped_llm": "doctor_scoped_llm",
-        },
-    )
+    graph.add_edge("patient_assistant_llm", "guardrail")
+    graph.add_edge("doctor_general_llm", "guardrail")
+    graph.add_edge("doctor_scoped_llm", "guardrail")
     graph.add_edge("guardrail", END)
     return graph.compile(checkpointer=MemorySaver())
 

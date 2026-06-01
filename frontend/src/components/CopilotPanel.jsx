@@ -128,6 +128,12 @@ export default function CopilotPanel({ patientList = [] }) {
       const eventType = String(payload?.type || payload?.status || '').toLowerCase();
       const chunkText = String(payload?.content || payload?.text || payload?.chunk || '');
 
+      if (eventType === 'history') {
+        const historyItems = Array.isArray(payload?.messages) ? payload.messages : [];
+        setMessages(historyItems.map((item) => normalizeMessage(item)));
+        return;
+      }
+
       if ((eventType === 'token' || eventType === 'message') && chunkText) {
         finalText += chunkText;
         setMessages((currentMessages) => appendOrReplaceAssistantMessage(currentMessages, finalText, false));

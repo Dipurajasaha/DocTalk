@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from langchain_core.messages import SystemMessage
@@ -21,13 +22,6 @@ TRIAGE_SYSTEM_PROMPT = (
     "You are a clinical triage safety classifier. Read only the last patient message and decide whether it contains "
     "severe emergency symptoms such as chest pain, trouble breathing, stroke symptoms, severe bleeding, seizure, "
     "unconsciousness, blue lips, or other immediately life-threatening signs. Reply with a strict structured decision."
-)
-
-PATIENT_SYSTEM_PROMPT = (
-    "You are a friendly, easy-to-understand health assistant. Use plain language, keep answers simple, and be "
-    "reassuring without minimizing risk. Encourage urgent care when symptoms sound severe. "
-    "You have access to a tool that retrieves the patient's medical files. IF the user asks about their blood "
-    "reports, x-rays, or past data, you MUST call the tool before answering. Do not ask for the values."
 )
 
 llm = ChatOllama(
@@ -71,11 +65,18 @@ async def triage_evaluator(state: UnifiedChatState) -> dict[str, Any]:
 
 
 async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
-    system_prompt = PATIENT_SYSTEM_PROMPT
-    sys_msg = SystemMessage(content=system_prompt)
-    messages = [sys_msg] + list(state["messages"])
-    llm_with_tools = llm.bind_tools([patient_rag_tool])
-    response = await llm_with_tools.ainvoke(messages)
+    messages_list = list(state.get("messages") or [])
+    last_message = messages_list[-1] if messages_list else None
+    query = message_content_text(last_message) if last_message else latest_message_text(messages_list)
+    context = await patient_rag_tool.ainvoke({"query": query, "state": state})
+    context_str = json.dumps(context, default=str)
+    sys_msg = SystemMessage(
+        content=(
+            "You are a medical AI. Answer the user's query using ONLY this retrieved data: "
+            f"{context_str}. If empty, say no records exist."
+        )
+    )
+    response = await llm.ainvoke([sys_msg] + messages_list)
     response_text = message_content_text(response) or "I am here to help with your health question."
 
     return {
