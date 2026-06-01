@@ -14,13 +14,17 @@ except ImportError:  # pragma: no cover - fallback for older environments
 
 
 DEFAULT_CHAT_MODEL = "qwen2.5:7b-instruct"
+DEFAULT_CHAT_BASE_URL = str(getattr(settings, "ollama_base_url", "http://localhost:11434")).rstrip("/")
+
+
+llm = ChatOllama(model=DEFAULT_CHAT_MODEL, base_url=DEFAULT_CHAT_BASE_URL, temperature=0.2)
 
 
 @lru_cache(maxsize=1)
 def get_ollama_chat_model(temperature: float = 0.2) -> ChatOllama:
-    model_name = str(getattr(settings, "ollama_chat_model", DEFAULT_CHAT_MODEL)).strip() or DEFAULT_CHAT_MODEL
-    base_url = str(getattr(settings, "ollama_base_url", "http://localhost:11434")).rstrip("/")
-    return ChatOllama(model=model_name, base_url=base_url, temperature=temperature)
+    if temperature == 0.2:
+        return llm
+    return ChatOllama(model=DEFAULT_CHAT_MODEL, base_url=DEFAULT_CHAT_BASE_URL, temperature=temperature)
 
 
 def latest_message_text(messages: list[BaseMessage] | list[Any] | None) -> str:

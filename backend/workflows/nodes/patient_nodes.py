@@ -22,9 +22,8 @@ TRIAGE_SYSTEM_PROMPT = (
 )
 
 PATIENT_SYSTEM_PROMPT = (
-    "You are an empathetic, easy-to-understand health assistant. Use plain language, avoid jargon, and be reassuring "
-    "without minimizing risk. If triage level is emergency, say so directly and advise urgent emergency care. "
-    "Current triage level: {triage_level}. Retrieved context: {context_summary}"
+    "You are a friendly, easy-to-understand health assistant. Use plain language, keep answers simple, and be "
+    "reassuring without minimizing risk. Encourage urgent care when symptoms sound severe."
 )
 
 
@@ -62,35 +61,20 @@ async def triage_evaluator(state: UnifiedChatState) -> dict[str, Any]:
 
 
 async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
-    payload = dict(state.get("context_payload") or {})
-    triage_level = str(state.get("triage_level") or "routine").strip() or "routine"
-    context_summary = str(
-        payload.get("retrieved_context_text")
-        or payload.get("context_text")
-        or payload.get("prompt_frame")
-        or "No additional context was retrieved."
-    ).strip()
-
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", PATIENT_SYSTEM_PROMPT),
             MessagesPlaceholder("messages"),
         ]
     )
-    response = await (prompt | get_ollama_chat_model()).ainvoke(
-        {
-            "messages": list(state.get("messages") or []),
-            "triage_level": triage_level,
-            "context_summary": context_summary,
-        }
-    )
+    response = await (prompt | get_ollama_chat_model()).ainvoke({"messages": list(state.get("messages") or [])})
     response_text = message_content_text(response) or "I am here to help with your health question."
 
     return {
         "messages": list(state.get("messages") or []) + [AIMessage(content=response_text)],
         "final_response": response_text,
         "context_payload": {
-            **payload,
+            **dict(state.get("context_payload") or {}),
             "route": "patient_assistant_llm",
             "assistant_mode": "empathetic_health_assistant",
         },

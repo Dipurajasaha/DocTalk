@@ -6,7 +6,7 @@ from typing import Any, Literal
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from .nodes.doctor_nodes import doctor_copilot_llm
+from .nodes.doctor_nodes import doctor_general_llm, doctor_scoped_llm
 from .nodes.patient_nodes import patient_assistant_llm, triage_evaluator
 from .state import WorkflowState
 
@@ -25,8 +25,11 @@ async def log_entry_context(state: WorkflowState) -> dict[str, Any]:
     return {}
 
 
-def route_by_role(state: WorkflowState) -> Literal["triage_evaluator", "doctor_copilot_llm"]:
-    return "doctor_copilot_llm" if str(state.get("role") or "patient").lower() == "doctor" else "triage_evaluator"
+def route_by_role(state: WorkflowState) -> Literal["triage_evaluator", "doctor_general_llm", "doctor_scoped_llm"]:
+    if str(state.get("role") or "patient").lower() == "doctor":
+        target_patient_id = str(state.get("target_patient_id") or "").strip()
+        return "doctor_scoped_llm" if target_patient_id else "doctor_general_llm"
+    return "triage_evaluator"
 
 
 def build_unified_chat_graph() -> Any:
@@ -34,19 +37,22 @@ def build_unified_chat_graph() -> Any:
     graph.add_node("log_entry_context", log_entry_context)
     graph.add_node("triage_evaluator", triage_evaluator)
     graph.add_node("patient_assistant_llm", patient_assistant_llm)
-    graph.add_node("doctor_copilot_llm", doctor_copilot_llm)
+    graph.add_node("doctor_general_llm", doctor_general_llm)
+    graph.add_node("doctor_scoped_llm", doctor_scoped_llm)
     graph.add_edge(START, "log_entry_context")
     graph.add_conditional_edges(
         "log_entry_context",
         route_by_role,
         {
             "triage_evaluator": "triage_evaluator",
-            "doctor_copilot_llm": "doctor_copilot_llm",
+            "doctor_general_llm": "doctor_general_llm",
+            "doctor_scoped_llm": "doctor_scoped_llm",
         },
     )
     graph.add_edge("triage_evaluator", "patient_assistant_llm")
     graph.add_edge("patient_assistant_llm", END)
-    graph.add_edge("doctor_copilot_llm", END)
+    graph.add_edge("doctor_general_llm", END)
+    graph.add_edge("doctor_scoped_llm", END)
     return graph.compile(checkpointer=MemorySaver())
 
 

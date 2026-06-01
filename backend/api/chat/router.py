@@ -312,21 +312,16 @@ async def _run_ai_websocket(
                     node_name = str(event.get("name") or "")
                     data = dict(event.get("data") or {})
 
-                    if event_name == "on_chain_end" and node_name in {"patient_assistant_llm", "doctor_copilot_llm"}:
+                    if event_name == "on_chain_end" and node_name in {
+                        "patient_assistant_llm",
+                        "doctor_general_llm",
+                        "doctor_scoped_llm",
+                    }:
                         output = data.get("output")
                         chunk = _extract_message_text(output)
                         if chunk:
                             final_response = chunk
-                            await websocket.send_json(
-                                _ai_event_payload(
-                                    "token",
-                                    ai_session_id,
-                                    content=chunk,
-                                    node=node_name,
-                                    user_id=current_user.user_id,
-                                    target_patient_id=normalized_target_patient_id,
-                                )
-                            )
+                            await websocket.send_text(chunk)
                             streamed_token = True
                         continue
 
@@ -334,16 +329,7 @@ async def _run_ai_websocket(
                         chunk_text = _extract_stream_chunk_text(data.get("chunk")).strip()
                         if chunk_text:
                             final_response += chunk_text
-                            await websocket.send_json(
-                                _ai_event_payload(
-                                    "token",
-                                    ai_session_id,
-                                    content=chunk_text,
-                                    node=node_name or None,
-                                    user_id=current_user.user_id,
-                                    target_patient_id=normalized_target_patient_id,
-                                )
-                            )
+                            await websocket.send_text(chunk_text)
                             streamed_token = True
 
                 if not final_response:
@@ -352,15 +338,7 @@ async def _run_ai_websocket(
                     final_response = _role_scaffold_message(current_user.role)
 
                 if final_response and not streamed_token:
-                    await websocket.send_json(
-                        _ai_event_payload(
-                            "token",
-                            ai_session_id,
-                            content=final_response,
-                            user_id=current_user.user_id,
-                            target_patient_id=normalized_target_patient_id,
-                        )
-                    )
+                    await websocket.send_text(final_response)
 
                 await websocket.send_json(
                     {

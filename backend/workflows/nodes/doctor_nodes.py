@@ -11,19 +11,14 @@ from ..state import UnifiedChatState
 
 DOCTOR_SYSTEM_PROMPT = (
     "You are a highly technical clinical reasoning copilot. Use medical terminology, reason with precision, and "
-    "focus on differential considerations, red-flag assessment, and next-step clinical thinking. Be concise but detailed. "
-    "Retrieved context: {context_summary}"
+    "focus on differential considerations, red-flag assessment, and next-step clinical thinking. Be concise but detailed."
 )
 
+DOCTOR_SCOPED_SUFFIX = " Focus strictly on patient ID: {target_patient_id}."
 
-async def doctor_copilot_llm(state: UnifiedChatState) -> dict[str, Any]:
+
+async def doctor_general_llm(state: UnifiedChatState) -> dict[str, Any]:
     payload = dict(state.get("context_payload") or {})
-    context_summary = str(
-        payload.get("retrieved_context_text")
-        or payload.get("context_text")
-        or payload.get("prompt_frame")
-        or "No additional patient context was retrieved."
-    ).strip()
     latest_message = latest_message_text(state.get("messages"))
     if latest_message:
         payload.setdefault("latest_request", latest_message)
@@ -35,10 +30,7 @@ async def doctor_copilot_llm(state: UnifiedChatState) -> dict[str, Any]:
         ]
     )
     response = await (prompt | get_ollama_chat_model()).ainvoke(
-        {
-            "messages": list(state.get("messages") or []),
-            "context_summary": context_summary,
-        }
+        {"messages": list(state.get("messages") or [])}
     )
     response_text = message_content_text(response) or "Clinical reasoning guidance is unavailable at the moment."
 
@@ -47,7 +39,38 @@ async def doctor_copilot_llm(state: UnifiedChatState) -> dict[str, Any]:
         "final_response": response_text,
         "context_payload": {
             **payload,
-            "route": "doctor_copilot_llm",
+            "route": "doctor_general_llm",
             "assistant_mode": "clinical_reasoning_copilot",
         },
     }
+
+
+async def doctor_scoped_llm(state: UnifiedChatState) -> dict[str, Any]:
+    payload = dict(state.get("context_payload") or {})
+    target_patient_id = str(state.get("target_patient_id") or "").strip()
+    latest_message = latest_message_text(state.get("messages"))
+    if latest_message:
+        payload.setdefault("latest_request", latest_message)
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", DOCTOR_SYSTEM_PROMPT + DOCTOR_SCOPED_SUFFIX.format(target_patient_id=target_patient_id)),
+            MessagesPlaceholder("messages"),
+        ]
+    )
+    response = await (prompt | get_ollama_chat_model()).ainvoke({"messages": list(state.get("messages") or [])})
+    response_text = message_content_text(response) or "Clinical reasoning guidance is unavailable at the moment."
+
+    return {
+        "messages": list(state.get("messages") or []) + [AIMessage(content=response_text)],
+        "final_response": response_text,
+        "context_payload": {
+            **payload,
+            "route": "doctor_scoped_llm",
+            "assistant_mode": "clinical_reasoning_copilot",
+            "target_patient_id": target_patient_id,
+        },
+    }
+
+
+doctor_copilot_llm = doctor_general_llm
