@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react';
+﻿import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSession } from '../contexts/SessionContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -6,7 +6,7 @@ import { authApi, doctorApi, patientApi } from '../lib/api';
 import { createRealTimeClient } from '../lib/realTimeClient';
 import '../styles/doctor.css';
 import '../styles/chat.css';
-import DoctorAssistantChat from '../components/DoctorAssistantChat';
+import CopilotPanel from '../components/CopilotPanel';
 import { useNotifications } from '../contexts';
 
 const timeSlots = [];
@@ -210,6 +210,40 @@ export default function DoctorDashboard() {
   const [slotDate, setSlotDate] = useState(formatObjToDate(new Date()));
   const [slotsData, setSlotsData] = useState({});
   const { addNotification } = useNotifications();
+
+  const patientList = useMemo(() => {
+    const appointments = Array.isArray(dashboardData?.appointments) ? dashboardData.appointments : [];
+    const patientMap = new Map();
+
+    appointments.forEach((appointment) => {
+      const patient = appointment?.patient || {};
+      const patientId = String(
+        patient?.id
+          || appointment?.patient_id
+          || appointment?.patientId
+          || appointment?.patientUsername
+          || appointment?.patient
+          || '',
+      ).trim();
+      const patientName = String(
+        patient?.user?.username
+          || patient?.user?.name
+          || patient?.name
+          || appointment?.patient_display
+          || appointment?.patient
+          || patientId,
+      ).trim();
+      const uniqueKey = patientId || patientName;
+
+      if (!uniqueKey || patientMap.has(uniqueKey)) return;
+      patientMap.set(uniqueKey, {
+        id: patientId || uniqueKey,
+        name: patientName || patientId || uniqueKey,
+      });
+    });
+
+    return Array.from(patientMap.values());
+  }, [dashboardData?.appointments]);
 
   const setActiveTabFromNav = (tab) => {
     const nextTab = ['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].includes(tab) ? tab : 'dashboard';
@@ -1065,7 +1099,7 @@ export default function DoctorDashboard() {
       case 'assistant': return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <div className="doc-section" style={{ display: 'flex', flexDirection: 'column', height: '80vh', padding: '16px' }}>
-            <DoctorAssistantChat consultations={consultations} defaultConsultationId={consultations?.[0]?.id || ''} />
+            <CopilotPanel patientList={patientList} />
           </div>
         </div>
       );

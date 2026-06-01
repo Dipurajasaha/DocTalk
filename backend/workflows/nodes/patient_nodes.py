@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from langchain_core.messages import AIMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import SystemMessage
+from langchain_ollama import ChatOllama
 from pydantic import BaseModel, Field
 
 from ..common import get_ollama_chat_model, latest_message_text, message_content_text
+from backend.core.config import settings
 from ..state import UnifiedChatState
+from .tools import patient_rag_tool
 
 
 class TriageEvaluation(BaseModel):
@@ -23,7 +25,15 @@ TRIAGE_SYSTEM_PROMPT = (
 
 PATIENT_SYSTEM_PROMPT = (
     "You are a friendly, easy-to-understand health assistant. Use plain language, keep answers simple, and be "
-    "reassuring without minimizing risk. Encourage urgent care when symptoms sound severe."
+    "reassuring without minimizing risk. Encourage urgent care when symptoms sound severe. "
+    "You have access to a tool that retrieves the patient's medical files. IF the user asks about their blood "
+    "reports, x-rays, or past data, you MUST call the tool before answering. Do not ask for the values."
+)
+
+llm = ChatOllama(
+    model="qwen2.5:7b-instruct",
+    base_url=getattr(settings, "OLLAMA_BASE_URL", settings.ollama_base_url),
+    temperature=0.1,
 )
 
 
@@ -61,17 +71,15 @@ async def triage_evaluator(state: UnifiedChatState) -> dict[str, Any]:
 
 
 async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", PATIENT_SYSTEM_PROMPT),
-            MessagesPlaceholder("messages"),
-        ]
-    )
-    response = await (prompt | get_ollama_chat_model()).ainvoke({"messages": list(state.get("messages") or [])})
+    system_prompt = PATIENT_SYSTEM_PROMPT
+    sys_msg = SystemMessage(content=system_prompt)
+    messages = [sys_msg] + list(state["messages"])
+    llm_with_tools = llm.bind_tools([patient_rag_tool])
+    response = await llm_with_tools.ainvoke(messages)
     response_text = message_content_text(response) or "I am here to help with your health question."
 
     return {
-        "messages": list(state.get("messages") or []) + [AIMessage(content=response_text)],
+        "messages": [response],
         "final_response": response_text,
         "context_payload": {
             **dict(state.get("context_payload") or {}),

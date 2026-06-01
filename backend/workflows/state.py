@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
 
 ChatRole = Literal["patient", "doctor"]
@@ -10,7 +11,7 @@ ChatRoute = Literal["patient_general", "patient_rag", "doctor_rag", "emergency"]
 
 
 class WorkflowState(TypedDict):
-    messages: list[BaseMessage]
+    messages: Annotated[list[BaseMessage], add_messages]
     role: ChatRole
     user_id: str
     target_patient_id: str | None

@@ -1,100 +1,309 @@
-import React, { useState } from 'react';
-import StructuredReply from './StructuredReply';
-import { doctorApi, patientApi } from '../lib/api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { buildAiChatWebSocketUrl } from '../lib/realTimeClient';
 
-const normalizeCopilotResponse = (payload) => {
-  if (!payload || typeof payload !== 'object') return null;
-  return {
-    title: 'Doctor Copilot',
-    description: payload.patient_summary?.text || '',
-    key_points: Array.isArray(payload.key_findings)
-      ? payload.key_findings.map((item) => item?.finding || '').filter(Boolean)
-      : [],
-    observations: Array.isArray(payload.recent_reports)
-      ? payload.recent_reports.map((item) => item?.original_name || item?.id || '').filter(Boolean)
-      : [],
-    recommendations: Array.isArray(payload.warnings) ? payload.warnings.filter(Boolean) : [],
-    raw: payload,
-  };
+const normalizeMessage = (payload, fallbackText = '') => ({
+  id: payload?.id || payload?.message_id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  senderId: payload?.sender_id || payload?.senderId || payload?.sender || '',
+  senderRole: String(payload?.sender_role || payload?.senderRole || payload?.role || '').toLowerCase(),
+  text: String(payload?.content || payload?.text || payload?.chunk || payload?.message || fallbackText || ''),
+  timestamp: payload?.timestamp || payload?.created_at || payload?.createdAt || new Date().toISOString(),
+});
+
+const appendOrReplaceAssistantMessage = (currentMessages, nextText, final = false) => {
+  const assistantMessage = normalizeMessage(
+    {
+      id: final ? `assistant-final-${Date.now()}` : 'assistant-stream',
+      sender_id: 'doctalk-ai',
+      sender_role: 'doctor',
+      content: nextText,
+    },
+    nextText,
+  );
+  const filtered = currentMessages.filter((item) => item.id !== 'assistant-loading');
+  const existingIndex = filtered.findIndex((item) => item.id === 'assistant-stream' || item.id.startsWith('assistant-final-'));
+  if (existingIndex >= 0 && !final) {
+    const nextMessages = [...filtered];
+    nextMessages[existingIndex] = assistantMessage;
+    return nextMessages;
+  }
+  if (existingIndex >= 0 && final) {
+    const nextMessages = [...filtered];
+    nextMessages[existingIndex] = assistantMessage;
+    return nextMessages;
+  }
+  return [...filtered, assistantMessage];
 };
 
-export default function CopilotPanel({ defaultPatientId = '' }) {
-  const [patientId, setPatientId] = useState(defaultPatientId || '');
-  const [consultationId, setConsultationId] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+const normalizePatient = (patient) => ({
+  id: String(patient?.id || '').trim(),
+  name: String(patient?.name || patient?.label || patient?.id || '').trim(),
+});
 
-  React.useEffect(() => {
-    console.error('[CopilotPanel] state', {
-      loading,
-      hasError: Boolean(error),
-      hasResult: Boolean(result),
-      resultType: result ? typeof result : 'null',
-    });
-  }, [loading, error, result]);
+export default function CopilotPanel({ patientList = [] }) {
+  const [targetPatientId, setTargetPatientId] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [inputValue, setInputValue] = useState('');
+  const [status, setStatus] = useState('idle');
+  const [error, setError] = useState('');
+  const socketRef = useRef(null);
+  const messageEndRef = useRef(null);
 
-  const fetchForPatient = async () => {
-    if (!patientId) return;
-    setLoading(true); setError(null); setResult(null);
-    try {
-      console.error('[CopilotPanel] patient fetch start', { patientId });
-      const data = await doctorApi.getCopilotForPatient(patientId);
-      console.error('[CopilotPanel] patient fetch response', data);
-      setResult(normalizeCopilotResponse(data) || data);
-    } catch (err) {
-      console.error('[CopilotPanel] patient fetch error', err);
-      setError(err?.message || 'Failed fetching copilot output');
-    } finally { setLoading(false); }
-  };
+  const normalizedPatients = useMemo(() => {
+    const seen = new Set();
+    return (Array.isArray(patientList) ? patientList : [])
+      .map(normalizePatient)
+      .filter((patient) => patient.id || patient.name)
+      .filter((patient) => {
+        const key = patient.id || patient.name;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }, [patientList]);
 
-  const fetchForConsultation = async () => {
-    if (!consultationId) return;
-    setLoading(true); setError(null); setResult(null);
-    try {
-      console.error('[CopilotPanel] consultation fetch start', { consultationId });
-      const data = await doctorApi.getCopilotForConsultation(consultationId);
-      console.error('[CopilotPanel] consultation fetch response', data);
-      setResult(normalizeCopilotResponse(data) || data);
-    } catch (err) {
-      console.error('[CopilotPanel] consultation fetch direct error', err);
+  const selectedPatientName = useMemo(
+    () => normalizedPatients.find((patient) => patient.id === targetPatientId)?.name || '',
+    [normalizedPatients, targetPatientId],
+  );
+
+  useEffect(() => {
+    messageEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, status]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('doctalk_token');
+
+    setMessages([]);
+    setError('');
+    setStatus('connecting');
+
+    if (socketRef.current) {
       try {
-        const consultation = await patientApi.getConsultation(consultationId);
-        console.error('[CopilotPanel] consultation lookup response', consultation);
-        const patientId = consultation?.patientUsername || consultation?.patient_id || consultation?.patientId;
-        if (!patientId) throw err;
-        const fallback = await doctorApi.getCopilotForPatient(patientId, consultationId);
-        console.error('[CopilotPanel] consultation fallback response', fallback);
-        setResult(normalizeCopilotResponse(fallback) || fallback);
-        return;
-      } catch (fallbackError) {
-        console.error('[CopilotPanel] consultation fetch fallback error', fallbackError);
-        setError(fallbackError?.message || err?.message || 'Failed fetching copilot output');
+        socketRef.current.close();
+      } catch (closeError) {
+        console.error('[CopilotPanel] websocket close error', closeError);
       }
-    } finally { setLoading(false); }
+      socketRef.current = null;
+    }
+
+    if (!token) {
+      setStatus('idle');
+      setError('Missing session token');
+      return () => {};
+    }
+
+    if (typeof WebSocket === 'undefined') {
+      setStatus('idle');
+      setError('WebSocket is unavailable in this browser');
+      return () => {};
+    }
+
+    const wsUrl = buildAiChatWebSocketUrl({
+      role: 'doctor',
+      token,
+      targetPatientId: targetPatientId || '',
+    });
+
+    const socket = new WebSocket(wsUrl);
+    socketRef.current = socket;
+
+    let finalText = '';
+    let cancelled = false;
+
+    socket.onopen = () => {
+      if (cancelled) return;
+      setStatus('connected');
+    };
+
+    socket.onmessage = (event) => {
+      if (cancelled) return;
+
+      let payload;
+      try {
+        payload = JSON.parse(event.data);
+      } catch (parseError) {
+        payload = { type: 'token', content: String(event.data || '') };
+      }
+
+      const eventType = String(payload?.type || payload?.status || '').toLowerCase();
+      const chunkText = String(payload?.content || payload?.text || payload?.chunk || '');
+
+      if ((eventType === 'token' || eventType === 'message') && chunkText) {
+        finalText += chunkText;
+        setMessages((currentMessages) => appendOrReplaceAssistantMessage(currentMessages, finalText, false));
+        return;
+      }
+
+      if (eventType === 'final' || eventType === 'done' || eventType === 'end' || payload?.isFinal === true) {
+        const replyText = String(chunkText || finalText || '').trim() || 'Doctor Copilot is ready.';
+        setMessages((currentMessages) => appendOrReplaceAssistantMessage(currentMessages, replyText, true));
+        finalText = replyText;
+        try {
+          socket.close();
+        } catch (closeError) {
+          console.error('[CopilotPanel] websocket final close error', closeError);
+        }
+        return;
+      }
+
+      if (eventType === 'error') {
+        const message = chunkText || 'Doctor copilot stream failed';
+        setError(message);
+        try {
+          socket.close();
+        } catch (closeError) {
+          console.error('[CopilotPanel] websocket error close issue', closeError);
+        }
+      }
+    };
+
+    socket.onerror = () => {
+      if (cancelled) return;
+      setError('Doctor copilot websocket connection failed');
+      setStatus('idle');
+    };
+
+    socket.onclose = () => {
+      if (cancelled) return;
+      if (finalText) {
+        setMessages((currentMessages) => {
+          const hasFinal = currentMessages.some((item) => item.id.startsWith('assistant-final-'));
+          if (hasFinal) return currentMessages;
+          return appendOrReplaceAssistantMessage(currentMessages, finalText, true);
+        });
+      }
+      setStatus('idle');
+    };
+
+    return () => {
+      cancelled = true;
+      setStatus('idle');
+      try {
+        socket.close();
+      } catch (closeError) {
+        console.error('[CopilotPanel] websocket cleanup close error', closeError);
+      }
+      if (socketRef.current === socket) {
+        socketRef.current = null;
+      }
+    };
+  }, [targetPatientId]);
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    const text = String(inputValue || '').trim();
+    if (!text) return;
+
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setError('Doctor copilot is not connected');
+      return;
+    }
+
+    const userMessage = normalizeMessage({
+      id: `user-${Date.now()}`,
+      sender_id: 'doctor',
+      sender_role: 'doctor',
+      content: text,
+    }, text);
+
+    setMessages((currentMessages) => [
+      ...currentMessages.filter((item) => item.id !== 'assistant-loading'),
+      userMessage,
+      normalizeMessage({
+        id: 'assistant-loading',
+        sender_id: 'doctalk-ai',
+        sender_role: 'doctor',
+        content: 'Typing...',
+      }, 'Typing...'),
+    ]);
+    setInputValue('');
+    setError('');
+
+    try {
+      socket.send(text);
+    } catch (sendError) {
+      setError('Failed to send message');
+      setMessages((currentMessages) => currentMessages.filter((item) => item.id !== 'assistant-loading'));
+    }
   };
+
+  const selectedPatientLabel = targetPatientId
+    ? selectedPatientName || targetPatientId
+    : 'General Medical Chat';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-        <input placeholder="Patient id (username)" value={patientId} onChange={e=>setPatientId(e.target.value)} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', flex: 1 }} />
-        <button onClick={fetchForPatient} disabled={loading || !patientId} style={{ background:'#8B7EFF', color:'#fff', border:'none', padding:'8px 14px', borderRadius:'8px', cursor:'pointer' }}>{loading ? 'Loading...' : 'Fetch'}</button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '16px', border: '1px solid #e2e8f0', borderRadius: '16px', background: 'linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)', boxShadow: '0 12px 28px rgba(15, 23, 42, 0.06)', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>Doctor Copilot</div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>{status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Idle'} {selectedPatientLabel ? `• ${selectedPatientLabel}` : ''}</div>
+        </div>
+        <div style={{ minWidth: '280px', flex: '1 1 320px' }}>
+          <select
+            value={targetPatientId || ''}
+            onChange={(event) => setTargetPatientId(event.target.value || null)}
+            style={{ width: '100%', padding: '12px 14px', border: '1px solid #cbd5e1', borderRadius: '12px', background: '#fff', outline: 'none', fontSize: '13px', color: '#0f172a' }}
+          >
+            <option value="">General Medical Chat</option>
+            {normalizedPatients.map((patient) => (
+              <option key={patient.id || patient.name} value={patient.id}>
+                {patient.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-        <input placeholder="Consultation id (optional)" value={consultationId} onChange={e=>setConsultationId(e.target.value)} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', flex: 1 }} />
-        <button onClick={fetchForConsultation} disabled={loading || !consultationId} style={{ background:'#0ea5e9', color:'#fff', border:'none', padding:'8px 14px', borderRadius:'8px', cursor:'pointer' }}>{loading ? 'Loading...' : 'Fetch (consultation)'}</button>
-      </div>
-
-      <div style={{ minHeight: '120px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px' }}>
-        {error && <div style={{ color: 'red' }}>{String(error)}</div>}
-        {!error && !result && <div style={{ color: '#64748B' }}>No results. Run a fetch to load copilot output (read-only).</div>}
-        {result && (
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: '1px solid #e2e8f0', borderRadius: '18px', background: '#fff', overflow: 'hidden', boxShadow: '0 18px 36px rgba(15, 23, 42, 0.08)' }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
           <div>
-            {/* If structured reply, render using StructuredReply */}
-            <StructuredReply data={result} />
+            <div style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b' }}>Conversation</div>
+            <div style={{ fontSize: '12px', color: '#64748b' }}>{selectedPatientLabel}</div>
           </div>
-        )}
+          <div style={{ fontSize: '12px', color: '#64748b' }}>{error || 'Ready'}</div>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px', background: 'linear-gradient(180deg, #fbfdff 0%, #f8fafc 100%)' }}>
+          {messages.length === 0 && !error && (
+            <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '14px' }}>
+              Pick a patient or stay in general chat, then send a prompt to the doctor copilot.
+            </div>
+          )}
+
+          {messages.map((message) => {
+            const isAssistant = message.senderId === 'doctalk-ai' || message.id === 'assistant-loading' || message.id.startsWith('assistant-');
+            const isOutgoing = !isAssistant;
+
+            return (
+              <div key={message.id} style={{ display: 'flex', justifyContent: isOutgoing ? 'flex-end' : 'flex-start', marginBottom: '12px' }}>
+                <div style={{ maxWidth: '82%', padding: '12px 14px', borderRadius: '16px', background: isOutgoing ? 'linear-gradient(135deg, #8B7EFF 0%, #6C5CE7 100%)' : '#ffffff', color: isOutgoing ? '#fff' : '#1e293b', border: isOutgoing ? 'none' : '1px solid #e2e8f0', boxShadow: '0 8px 18px rgba(15, 23, 42, 0.06)' }}>
+                  <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: '14px' }}>{message.text}</div>
+                  <div style={{ marginTop: '8px', fontSize: '11px', opacity: 0.72, display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                    <span>{isOutgoing ? 'Doctor' : 'Doctor Copilot'}</span>
+                    <span>{message.timestamp ? new Date(message.timestamp).toLocaleString() : ''}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <div ref={messageEndRef} />
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ padding: '14px', borderTop: '1px solid #eef2f7', background: '#fff' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '18px', padding: '10px 10px 10px 14px' }}>
+            <textarea
+              value={inputValue}
+              onChange={(event) => setInputValue(event.target.value)}
+              placeholder={targetPatientId ? 'Ask about the selected patient...' : 'Ask a general medical question...'}
+              rows={2}
+              style={{ flex: 1, resize: 'none', border: 'none', background: 'transparent', outline: 'none', fontSize: '14px', lineHeight: 1.6, color: '#0f172a', minHeight: '48px' }}
+            />
+            <button type="submit" style={{ background: '#8B7EFF', color: '#fff', border: 'none', padding: '12px 16px', borderRadius: '12px', cursor: 'pointer', fontWeight: 700, boxShadow: '0 10px 20px rgba(108, 92, 231, 0.22)' }}>
+              Send
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

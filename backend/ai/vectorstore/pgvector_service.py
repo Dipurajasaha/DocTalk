@@ -216,6 +216,7 @@ class PgVectorService:
         self,
         *,
         patient_id: str,
+        metadata_user_id: str | None = None,
         query: str,
         consultation_id: str | None = None,
         top_k: int = 5,
@@ -230,6 +231,7 @@ class PgVectorService:
         if not normalized_query:
             items = await self.fetch_recent_documents(
                 patient_id=patient_id,
+                metadata_user_id=metadata_user_id,
                 consultation_id=consultation_id,
                 source_type=source_type,
                 top_k=top_k,
@@ -241,6 +243,7 @@ class PgVectorService:
             started_at = time.perf_counter()
             items = await self._vector_search(
                 patient_id=patient_id,
+                metadata_user_id=metadata_user_id,
                 consultation_id=consultation_id,
                 source_type=source_type,
                 query=normalized_query,
@@ -262,6 +265,7 @@ class PgVectorService:
             logger.warning("Vector retrieval failed, falling back to lexical search", extra={"component": "rag", "error": str(exc)})
             items = await self._lexical_fallback(
                 patient_id=patient_id,
+                metadata_user_id=metadata_user_id,
                 consultation_id=consultation_id,
                 source_type=source_type,
                 query=normalized_query,
@@ -275,6 +279,7 @@ class PgVectorService:
         self,
         *,
         patient_id: str,
+        metadata_user_id: str | None = None,
         consultation_id: str | None = None,
         source_type: str | None = None,
         top_k: int = 5,
@@ -284,6 +289,9 @@ class PgVectorService:
 
         args: list[Any] = [patient_id]
         clauses = ["patient_id = $1"]
+        if metadata_user_id is not None:
+            args.append(metadata_user_id)
+            clauses.append(f"metadata->>'user_id' = ${len(args)}")
         memory_cutoff = self._memory_cutoff()
         if memory_cutoff is not None:
             args.append(memory_cutoff)
@@ -307,6 +315,7 @@ class PgVectorService:
         self,
         *,
         patient_id: str,
+        metadata_user_id: str | None,
         consultation_id: str | None,
         source_type: str | None,
         query: str,
@@ -318,6 +327,9 @@ class PgVectorService:
 
         args: list[Any] = [patient_id]
         clauses = ["patient_id = $1"]
+        if metadata_user_id is not None:
+            args.append(metadata_user_id)
+            clauses.append(f"metadata->>'user_id' = ${len(args)}")
         memory_cutoff = self._memory_cutoff()
         if memory_cutoff is not None:
             args.append(memory_cutoff)
@@ -350,6 +362,7 @@ class PgVectorService:
         self,
         *,
         patient_id: str,
+        metadata_user_id: str | None,
         consultation_id: str | None,
         source_type: str | None,
         query: str,
@@ -358,6 +371,7 @@ class PgVectorService:
     ) -> list[dict[str, Any]]:
         rows = await self.fetch_recent_documents(
             patient_id=patient_id,
+            metadata_user_id=metadata_user_id,
             consultation_id=consultation_id,
             source_type=source_type,
             top_k=max(top_k * 5, 20),
@@ -434,6 +448,7 @@ class PgVectorService:
             {
                 "source_type": source_type,
                 "patient_id": patient_id,
+                "user_id": patient_id,
                 "consultation_id": consultation_id,
             }
         )
