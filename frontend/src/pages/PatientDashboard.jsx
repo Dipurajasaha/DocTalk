@@ -3,7 +3,7 @@ import { useSession } from '../contexts/SessionContext';
 import { useNotifications, useAssetCache } from '../contexts';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { authApi, patientApi, buildAssetDownloadUrl } from '../lib/api';
-import { createRealTimeClient } from '../lib/realTimeClient';
+import { buildAiChatWebSocketUrl, createRealTimeClient } from '../lib/realTimeClient';
 import '../styles/patient.css'; // Uses your existing patient CSS
 import XrayAnalyzerPanel from '../components/XrayAnalyzerPanel';
 import FileViewer from '../components/FileViewer';
@@ -349,6 +349,25 @@ export default function PatientDashboard() {
     };
   }
 
+  const isOutgoingChatMessage = (message) => {
+    const senderId = String(message?.senderId || '').trim().toLowerCase();
+    const sender = String(message?.sender || '').trim().toLowerCase();
+
+    if (senderId === 'doctalk-ai') {
+      return false;
+    }
+
+    if (sender === 'user') {
+      return true;
+    }
+
+    if (sender === 'patient' && senderId !== 'doctalk-ai') {
+      return true;
+    }
+
+    return false;
+  };
+
   const normalizeChatMessages = (data) => {
     const items = Array.isArray(data) ? data : (data?.items || []);
     return items.map(normalizeChatMessage);
@@ -403,6 +422,7 @@ export default function PatientDashboard() {
       const data = await patientApi.getConsultationMessages(consultationId, 1, 20, 'patient');
       const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
       setMessages(items.map((item) => ({
+        senderId: item?.sender_id || item?.senderId || item?.sender || '',
         sender: item?.sender_role || item?.senderRole || item?.sender || '',
         text: item?.message || item?.text || '',
         id: item?.id || `${item?.timestamp || Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -778,12 +798,6 @@ export default function PatientDashboard() {
     e.preventDefault();
     if (!inputMsg.trim()) return;
 
-    const consultationId = activeConsultationId || consultations[0]?.id || null;
-    if (!consultationId) {
-      try { addNotification({ type: 'error', message: 'Select a consultation before starting the assistant chat.' }); } catch (err) {}
-      return;
-    }
-
     const newMsg = { sender: 'user', text: inputMsg, id: Date.now() };
     setMessages(prev => [...prev, newMsg, { sender: 'model', id: 'loading', text: 'Typing...' }]);
     setInputMsg('');
@@ -794,8 +808,7 @@ export default function PatientDashboard() {
         throw new Error('Missing session token');
       }
 
-      const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${scheme}//${window.location.host}/api/chat/ws/${encodeURIComponent(consultationId)}?token=${encodeURIComponent(token)}&role=patient`;
+        const wsUrl = buildAiChatWebSocketUrl({ role: 'patient', token });
       const socket = new WebSocket(wsUrl);
       let finalText = '';
       let completed = false;
@@ -1183,9 +1196,9 @@ export default function PatientDashboard() {
               <div className="chat-box" style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 100px 24px', minHeight: 0 }}>
                 {messages.length === 0 && <div style={{textAlign: "center", color: "#6B6B6B", marginTop: "20px"}}>Start chatting with your AI Medical Assistant!</div>}
                 {messages.map((msg, idx) => (
-                  <div key={idx} className={`chat-message ${msg.sender === 'user' ? 'user' : 'model'}`} style={{ marginBottom: '16px', display: 'flex', alignItems: 'flex-start', justifyContent: msg.sender==='user' ? 'flex-end' : 'flex-start' }}>
-                    {msg.sender !== 'user' && <div className="emoji" style={{ marginRight: '8px', fontSize: '18px' }}></div>}
-                    <div className="bubble" style={{ background: msg.sender==='user' ? '#8B7EFF' : '#F1F5F9', color: msg.sender==='user' ? '#FFF' : '#1E293B', padding: '12px 16px', borderRadius: '16px', maxWidth: '80%', boxShadow: '0 8px 16px rgba(0,0,0,0.08), 0 4px 6px rgba(0,0,0,0.04)' }}>
+                  <div key={idx} className={`chat-message ${isOutgoingChatMessage(msg) ? 'user' : 'model'}`} style={{ marginBottom: '16px', display: 'flex', alignItems: 'flex-start', justifyContent: isOutgoingChatMessage(msg) ? 'flex-end' : 'flex-start' }}>
+                    {!isOutgoingChatMessage(msg) && <div className="emoji" style={{ marginRight: '8px', fontSize: '18px' }}></div>}
+                    <div className="bubble" style={{ background: isOutgoingChatMessage(msg) ? '#8B7EFF' : '#F1F5F9', color: isOutgoingChatMessage(msg) ? '#FFF' : '#1E293B', padding: '12px 16px', borderRadius: '16px', maxWidth: '80%', boxShadow: '0 8px 16px rgba(0,0,0,0.08), 0 4px 6px rgba(0,0,0,0.04)' }}>
                       <div className="content" dangerouslySetInnerHTML={{ __html: (msg.text || '').replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br/>") }} />
                     </div>
                   </div>

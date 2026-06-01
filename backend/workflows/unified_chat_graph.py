@@ -1,12 +1,28 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from .nodes.doctor_nodes import doctor_copilot_llm
 from .nodes.patient_nodes import patient_assistant_llm, triage_evaluator
 from .state import WorkflowState
+
+
+logger = logging.getLogger(__name__)
+
+
+async def log_entry_context(state: WorkflowState) -> dict[str, Any]:
+    logger.info(
+        "AI workflow entry user_id=%s target_patient_id=%s ai_session_id=%s role=%s",
+        state.get("user_id"),
+        state.get("target_patient_id"),
+        state.get("ai_session_id"),
+        state.get("role"),
+    )
+    return {}
 
 
 def route_by_role(state: WorkflowState) -> Literal["triage_evaluator", "doctor_copilot_llm"]:
@@ -15,11 +31,13 @@ def route_by_role(state: WorkflowState) -> Literal["triage_evaluator", "doctor_c
 
 def build_unified_chat_graph() -> Any:
     graph: StateGraph[WorkflowState] = StateGraph(WorkflowState)
+    graph.add_node("log_entry_context", log_entry_context)
     graph.add_node("triage_evaluator", triage_evaluator)
     graph.add_node("patient_assistant_llm", patient_assistant_llm)
     graph.add_node("doctor_copilot_llm", doctor_copilot_llm)
+    graph.add_edge(START, "log_entry_context")
     graph.add_conditional_edges(
-        START,
+        "log_entry_context",
         route_by_role,
         {
             "triage_evaluator": "triage_evaluator",
@@ -29,7 +47,7 @@ def build_unified_chat_graph() -> Any:
     graph.add_edge("triage_evaluator", "patient_assistant_llm")
     graph.add_edge("patient_assistant_llm", END)
     graph.add_edge("doctor_copilot_llm", END)
-    return graph.compile()
+    return graph.compile(checkpointer=MemorySaver())
 
 
 unified_chat_graph = build_unified_chat_graph()

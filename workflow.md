@@ -1,10 +1,27 @@
 # Human-to-AI LangGraph Workflow Blueprint
 
-This document is the strict contract for the Human-to-AI assistant workflow. It defines the shared graph state, the node responsibilities, the routing order, and the streaming model used by FastAPI.
+This document is the architectural contract for the Human-to-AI assistant workflow. It enforces strict isolation between patient and doctor dashboards and removes any dependency on telemedicine consultation identifiers.
 
-## 1. Unified Graph State (`WorkflowState`)
+## 1. Segregated Session Scopes
 
-The workflow must use a single `TypedDict` state object so every node reads and writes the same contract.
+The workflow must treat Patient AI and Doctor AI as distinct session models with separate state boundaries, retrieval namespaces, and routing assumptions.
+
+### Patient AI Workspace
+
+- Completely decoupled from consultation IDs.
+- The session identifier is strictly the authenticated Patient's `user_id`.
+- The vector namespace is hardlocked to this `user_id` so no cross-patient or cross-role state can leak into the patient workspace.
+
+### Doctor AI Workspace
+
+- Tracked via the Doctor's `user_id`.
+- Supports an optional context toggle property: `target_patient_id`.
+- If `target_patient_id` is null, the workspace remains in general medical chat mode.
+- If `target_patient_id` is valid, the context layer must fetch report and x-ray RAG data associated only with that specific patient.
+
+## 2. Refactored Graph State (`WorkflowState`)
+
+The graph state must be minimal, explicit, and role-aware so each execution is isolated by authenticated user scope.
 
 ```python
 from typing import Any, Literal, TypedDict
@@ -15,104 +32,93 @@ from langchain_core.messages import BaseMessage
 class WorkflowState(TypedDict):
     messages: list[BaseMessage]
     role: Literal["patient", "doctor"]
-    consultation_id: str
-    triage_level: str  # initialize as "routine" at graph entry
+    user_id: str
+    target_patient_id: str | None
     context_payload: dict[str, Any]
-    final_response: str
 ```
 
 State semantics:
 
-- `messages`: the full message history for the current consultation turn.
-- `role`: selects the downstream assistant persona and response style.
-- `consultation_id`: binds the workflow to the active consultation record.
-- `triage_level`: risk label for patient-facing routing; default should be `"routine"`.
-- `context_payload`: structured enrichment bucket for RAG outputs, extracted file text, and intermediate metadata.
-- `final_response`: the final text that is emitted to the client after guardrail review.
+- `messages`: List of LangChain message objects.
+- `role`: Literal["patient", "doctor"].
+- `user_id`: String identifying the active user chatting with the AI.
+- `target_patient_id`: Optional string identifying the selected patient profile for doctor-scoped analysis.
+- `context_payload`: Dictionary containing documents fetched during execution.
 
-## 2. Node Definitions (The Agents)
+Implementation constraints:
 
-The graph is organized around one router, two role-specific paths, and one shared safety node.
+- The state must not include `consultation_id`.
+- Any persisted or in-memory namespace key must be derived from `user_id` and, when applicable, `target_patient_id`.
+- The context payload must remain execution-local and must not be reused across roles.
 
-**The Router:** `route_by_role`
+## 3. Parallel Implementation Roadmap
 
-- Evaluates `role` and selects the correct path before any generation begins.
-- Keeps the Human-to-AI workflow separate from any Human-to-Human messaging flow.
-- Must not mutate the response content; it only decides the branch.
+The implementation must be split into two non-overlapping execution paths so the patient and doctor dashboards can evolve independently without shared-session leakage.
 
-**Patient AI Assistant Path**
+### Patient Path
 
-- `triage_evaluator`: scans the latest patient message for emergency signals such as `chest pain` and updates `triage_level` accordingly.
-- `patient_rag_retriever`: fetches simplified explanations of the patient’s own uploaded reports from pgvector and stores them in `context_payload`.
-- `patient_assistant_llm`: drafts empathetic, plain-language guidance for the patient using the triage state and retrieved context.
+`triage_evaluator` -> `personal_rag_retriever` -> `patient_response_llm` -> `safety_layer` -> END
 
-**Doctor AI Copilot Path**
+Execution rules:
 
-- `clinical_rag_retriever`: fetches dense clinical context from patient records, including structured summaries and reference material from pgvector.
-- `doctor_copilot_llm`: drafts clinical summaries, possible ICD codes, and note-ready medical documentation for the doctor.
+- `triage_evaluator` runs first and can enrich the request before retrieval.
+- `personal_rag_retriever` only queries the authenticated patient's namespace.
+- `patient_response_llm` must respond in patient-friendly language and stay aligned to the retrieved personal context.
+- `safety_layer` is the final gate before the graph ends.
 
-**Shared Node**
+### Doctor Path
 
-- `medical_safety_guardrail`: reviews the drafted response and blocks definitive medical diagnosing, unsafe certainty, or policy violations. If the output violates safety policy, it must override the response with a safer alternative.
+`conditional_context_router` -> (If null: `general_llm` | If present: `target_patient_rag_retriever` -> `clinical_copilot_llm`) -> `safety_layer` -> END
 
-## 3. Dynamic Routing (Conditional Edges)
+Execution rules:
 
-The graph must follow this exact traversal order:
+- `conditional_context_router` inspects `target_patient_id` and selects the correct branch.
+- When `target_patient_id` is null, `general_llm` handles a general medical chat with no patient-specific retrieval.
+- When `target_patient_id` is present, `target_patient_rag_retriever` fetches only that patient's report and x-ray context before generation.
+- `clinical_copilot_llm` produces doctor-facing clinical assistance from the selected patient context.
+- `safety_layer` must always execute before END.
 
-1. `START` -> `route_by_role`.
-2. If `role == "patient"`: route to `triage_evaluator` -> `patient_rag_retriever` -> `patient_assistant_llm` -> `medical_safety_guardrail`.
-3. If `role == "doctor"`: route to `clinical_rag_retriever` -> `doctor_copilot_llm` -> `medical_safety_guardrail`.
-4. `medical_safety_guardrail` -> `END`.
+### Isolation Requirements
+
+- Patient execution must never read doctor-scoped context.
+- Doctor execution must never use patient-session namespace keys.
+- No graph node may infer a consultation identifier as a substitute for authenticated user scope.
+- All context retrieval must be keyed by role-appropriate user identity before generation begins.
+
+## 4. Routing Contract
+
+The graph must route exclusively from role and scoped identifiers.
+
+1. `START` -> role-aware entry node.
+2. If `role == "patient"`, execute the Patient Path.
+3. If `role == "doctor"`, execute the Doctor Path.
+4. Every path must terminate at `safety_layer` before `END`.
 
 Implementation note:
 
-- `route_by_role` should be implemented as a conditional edge from `START`.
-- The patient path must always run triage before retrieval so emergency language can influence retrieval depth and tone.
-- The doctor path skips triage because it is a clinician-facing workflow.
-
-## 4. WebSocket Streaming Integration
-
-FastAPI should expose a WebSocket endpoint for the Human-to-AI assistant so the client can receive partial model output in real time.
-
-The integration pattern is:
-
-1. The WebSocket receives the user message, `role`, and `consultation_id`.
-2. The backend constructs a `WorkflowState` payload and starts the LangGraph execution.
-3. Instead of waiting for the full graph result, the server iterates over LangGraph `.astream_events()`.
-4. Token and event chunks are forwarded to the browser as they arrive.
-5. The client renders streamed text incrementally and then replaces it with the final message when the graph finishes.
-
-Streaming expectations:
-
-- Use `.astream_events()` to capture node starts, node completions, and token-level model events.
-- Preserve the same `consultation_id` across the stream so the client can correlate the response with the active chat session.
-- Send a final completion event containing `final_response` after `medical_safety_guardrail` finishes.
-- If a node fails, emit an error event over the WebSocket and stop streaming that turn.
-
-Recommended event shape:
-
-```json
-{
-  "type": "token | node_start | node_end | final | error",
-  "node": "patient_assistant_llm",
-  "consultation_id": "...",
-  "content": "..."
-}
-```
-
-The WebSocket layer should remain transport-only. All branching, retrieval, triage, generation, and safety enforcement must stay inside the LangGraph workflow so the client always observes a single coherent assistant stream.
+- The entry node may validate `user_id` and `target_patient_id`, but it must not reintroduce consultation-based branching.
+- The router should remain a pure decision node and must not mutate response content.
 
 ## 5. Workflow Diagram
 
 ```mermaid
 flowchart TD
-  START([START]) --> route_by_role{"role"}
-  route_by_role -->|patient| triage_evaluator["triage_evaluator"]
-  route_by_role -->|doctor| clinical_rag_retriever["clinical_rag_retriever"]
-  triage_evaluator --> patient_rag_retriever["patient_rag_retriever"]
-  patient_rag_retriever --> patient_assistant_llm["patient_assistant_llm"]
-  patient_assistant_llm --> medical_safety_guardrail["medical_safety_guardrail"]
-  clinical_rag_retriever --> doctor_copilot_llm["doctor_copilot_llm"]
-  doctor_copilot_llm --> medical_safety_guardrail
-  medical_safety_guardrail --> END([END])
+  START([START]) --> ENTRY{"role + scoped ids"}
+  ENTRY -->|patient| triage_evaluator["triage_evaluator"]
+  triage_evaluator --> personal_rag_retriever["personal_rag_retriever"]
+  personal_rag_retriever --> patient_response_llm["patient_response_llm"]
+  patient_response_llm --> safety_layer["safety_layer"]
+  ENTRY -->|doctor / target_patient_id null| general_llm["general_llm"]
+  ENTRY -->|doctor / target_patient_id valid| conditional_context_router["conditional_context_router"]
+  conditional_context_router --> target_patient_rag_retriever["target_patient_rag_retriever"]
+  target_patient_rag_retriever --> clinical_copilot_llm["clinical_copilot_llm"]
+  general_llm --> safety_layer
+  clinical_copilot_llm --> safety_layer
+  safety_layer --> END([END])
 ```
+
+## 6. Architectural Guarantees
+
+- Patient and doctor sessions are isolated by authenticated `user_id`, not by consultation records.
+- Doctor-scoped analysis is opt-in through `target_patient_id` and must never default to another patient's context.
+- Retrieval namespaces, graph state, and downstream generation nodes must preserve role boundaries end to end.

@@ -73,15 +73,58 @@ def _role_scaffold_message(role: str) -> str:
     return "Patient AI Scaffold Online" if role == "patient" else "Doctor Copilot Scaffold Online"
 
 
-def _event_payload(event_type: str, consultation_id: str, content: str = "", node: str | None = None) -> dict[str, Any]:
+def _build_ai_checkpoint_namespace(*, user_id: str, ai_session_id: str, target_patient_id: str | None = None) -> str:
+    namespace_parts = [str(ai_session_id or "").strip(), str(user_id or "").strip()]
+    normalized_target_patient_id = str(target_patient_id or "").strip()
+    if normalized_target_patient_id:
+        namespace_parts.append(normalized_target_patient_id)
+    return ":".join(part for part in namespace_parts if part)
+
+
+def _ai_event_payload(
+    event_type: str,
+    ai_session_id: str,
+    content: str = "",
+    node: str | None = None,
+    *,
+    user_id: str,
+    target_patient_id: str | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "type": event_type,
-        "consultation_id": consultation_id,
+        "ai_session_id": ai_session_id,
+        "user_id": user_id,
+        "target_patient_id": target_patient_id,
         "content": content,
     }
     if node:
         payload["node"] = node
     return payload
+
+
+async def _authenticate_websocket_user(websocket: WebSocket, expected_role: str | None = None) -> CurrentUser | None:
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=1008)
+        return None
+
+    try:
+        payload = decode_access_token(token)
+    except HTTPException:
+        await websocket.close(code=1008)
+        return None
+
+    user_id = str(payload.get("user_id") or "").strip()
+    role = _normalize_role(payload.get("role"))
+    if not user_id or role not in {"patient", "doctor"}:
+        await websocket.close(code=1008)
+        return None
+
+    if expected_role is not None and role != expected_role:
+        await websocket.close(code=1008)
+        return None
+
+    return CurrentUser(user_id=user_id, role=role)
 
 
 @router.get("/consultations", response_model=list[ConsultationResponse])
@@ -220,83 +263,51 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             pass
 
 
-@router.websocket("/ws/{consultation_id}")
-async def websocket_assistant_consultation(websocket: WebSocket, consultation_id: str) -> None:
-    token = websocket.query_params.get("token")
-    role_param = _normalize_role(websocket.query_params.get("role"))
-    resolved_role: str | None = role_param
-    resolved_user_id: str | None = None
-
-    if token:
-        try:
-            token_payload = decode_access_token(token)
-        except HTTPException:
-            await websocket.close(code=1008)
-            return
-        token_role = _normalize_role(token_payload.get("role"))
-        if token_role is None:
-            await websocket.close(code=1008)
-            return
-        if resolved_role is not None and resolved_role != token_role:
-            await websocket.close(code=1008)
-            return
-        resolved_role = token_role
-        resolved_user_id = str(token_payload.get("user_id") or "").strip() or None
-
-    if resolved_role is None:
-        await websocket.close(code=1008)
+async def _run_ai_websocket(
+    websocket: WebSocket,
+    *,
+    ai_session_id: str,
+    expected_role: str,
+    target_patient_id: str | None = None,
+) -> None:
+    current_user = await _authenticate_websocket_user(websocket, expected_role=expected_role)
+    if current_user is None:
         return
 
-    chat_service = get_chat_service()
-
-    try:
-        consultation = await chat_service._load_consultation(consultation_id)
-    except HTTPException:
-        await websocket.close(code=1008)
-        return
-
-    if resolved_user_id is None:
-        resolved_user_id = str(
-            getattr(consultation, "patientUsername", "") if resolved_role == "patient" else getattr(consultation, "doctorId", "")
-        ).strip()
-
-    if not resolved_user_id:
-        await websocket.close(code=1008)
-        return
-
-    try:
-        await chat_service.get_consultation(consultation_id, resolved_user_id)
-    except HTTPException:
-        await websocket.close(code=1008)
-        return
+    normalized_target_patient_id = str(target_patient_id or "").strip() or None
+    namespace = _build_ai_checkpoint_namespace(
+        user_id=current_user.user_id,
+        ai_session_id=ai_session_id,
+        target_patient_id=normalized_target_patient_id,
+    )
 
     await websocket.accept()
-
     try:
         while True:
             user_text = (await websocket.receive_text()).strip()
             if not user_text:
                 continue
 
-            final_sent = False
+            workflow_state = create_workflow_state(
+                messages=[HumanMessage(content=user_text)],
+                role=current_user.role,  # type: ignore[arg-type]
+                user_id=current_user.user_id,
+                ai_session_id=ai_session_id,
+                target_patient_id=normalized_target_patient_id,
+                context_payload={
+                    "ai_session_id": ai_session_id,
+                    "user_id": current_user.user_id,
+                    "target_patient_id": normalized_target_patient_id,
+                    "role": current_user.role,
+                },
+            )
+
             final_response = ""
             streamed_token = False
+            ai_config = {"configurable": {"thread_id": namespace}}
 
             try:
-                await chat_service.save_message(consultation_id, resolved_user_id, resolved_role, user_text)
-
-                workflow_state = create_workflow_state(
-                    messages=[HumanMessage(content=user_text)],
-                    role=resolved_role,  # type: ignore[arg-type]
-                    consultation_id=consultation_id,
-                    context_payload={
-                        "consultation_id": consultation_id,
-                        "role": resolved_role,
-                        "requester_id": resolved_user_id,
-                    },
-                )
-
-                async for event in unified_chat_graph.astream_events(workflow_state, version="v2"):
+                async for event in unified_chat_graph.astream_events(workflow_state, config=ai_config, version="v2"):
                     event_name = str(event.get("event") or "")
                     node_name = str(event.get("name") or "")
                     data = dict(event.get("data") or {})
@@ -306,7 +317,16 @@ async def websocket_assistant_consultation(websocket: WebSocket, consultation_id
                         chunk = _extract_message_text(output)
                         if chunk:
                             final_response = chunk
-                            await websocket.send_json(_event_payload("token", consultation_id, content=chunk, node=node_name))
+                            await websocket.send_json(
+                                _ai_event_payload(
+                                    "token",
+                                    ai_session_id,
+                                    content=chunk,
+                                    node=node_name,
+                                    user_id=current_user.user_id,
+                                    target_patient_id=normalized_target_patient_id,
+                                )
+                            )
                             streamed_token = True
                         continue
 
@@ -314,26 +334,53 @@ async def websocket_assistant_consultation(websocket: WebSocket, consultation_id
                         chunk_text = _extract_stream_chunk_text(data.get("chunk")).strip()
                         if chunk_text:
                             final_response += chunk_text
-                            await websocket.send_json(_event_payload("token", consultation_id, content=chunk_text, node=node_name or None))
+                            await websocket.send_json(
+                                _ai_event_payload(
+                                    "token",
+                                    ai_session_id,
+                                    content=chunk_text,
+                                    node=node_name or None,
+                                    user_id=current_user.user_id,
+                                    target_patient_id=normalized_target_patient_id,
+                                )
+                            )
                             streamed_token = True
 
                 if not final_response:
                     final_response = str(workflow_state.get("final_response") or "").strip()
                 if not final_response:
-                    final_response = _role_scaffold_message(resolved_role)
+                    final_response = _role_scaffold_message(current_user.role)
 
                 if final_response and not streamed_token:
-                    await websocket.send_json(_event_payload("token", consultation_id, content=final_response))
+                    await websocket.send_json(
+                        _ai_event_payload(
+                            "token",
+                            ai_session_id,
+                            content=final_response,
+                            user_id=current_user.user_id,
+                            target_patient_id=normalized_target_patient_id,
+                        )
+                    )
 
-                if final_response:
-                    await chat_service.save_assistant_message(consultation_id, resolved_role, final_response)
-                await websocket.send_json(_event_payload("final", consultation_id, content=final_response))
-                final_sent = True
+                await websocket.send_json(
+                    {
+                        "type": "final",
+                        "ai_session_id": ai_session_id,
+                        "user_id": current_user.user_id,
+                        "target_patient_id": normalized_target_patient_id,
+                        "content": final_response,
+                    }
+                )
             except Exception as exc:
-                await websocket.send_json(_event_payload("error", consultation_id, content=str(exc)))
-                if not final_sent:
-                    await websocket.send_json(_event_payload("final", consultation_id, content=_role_scaffold_message(resolved_role)))
-                continue
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "ai_session_id": ai_session_id,
+                        "user_id": current_user.user_id,
+                        "target_patient_id": normalized_target_patient_id,
+                        "content": str(exc),
+                    }
+                )
     except WebSocketDisconnect:
         return
     except Exception:
@@ -341,6 +388,21 @@ async def websocket_assistant_consultation(websocket: WebSocket, consultation_id
             await websocket.close(code=1011)
         except Exception:
             pass
+
+
+@router.websocket("/ai/patient/ws")
+async def patient_ai_websocket(websocket: WebSocket) -> None:
+    await _run_ai_websocket(websocket, ai_session_id="patient_ai", expected_role="patient")
+
+
+@router.websocket("/ai/doctor/ws")
+async def doctor_ai_websocket(websocket: WebSocket) -> None:
+    await _run_ai_websocket(
+        websocket,
+        ai_session_id="doctor_ai",
+        expected_role="doctor",
+        target_patient_id=websocket.query_params.get("target_patient_id"),
+    )
 
 
 @router.websocket("/consultations/{consultation_id}/messages")

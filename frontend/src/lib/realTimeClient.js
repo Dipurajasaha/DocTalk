@@ -5,6 +5,23 @@ const DEFAULT_POLL_INTERVAL = 5000;
 const DEFAULT_RECONNECT_DELAY = 1000;
 const DEFAULT_MAX_RECONNECT_DELAY = 30000;
 
+export function buildAiChatWebSocketUrl({ role, token, targetPatientId = '' } = {}) {
+  const normalizedRole = String(role || '').trim().toLowerCase();
+  const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
+
+  if (!token) {
+    throw new Error('Missing session token');
+  }
+
+  if (normalizedRole === 'doctor') {
+    const patientQuery = targetPatientId ? `&target_patient_id=${encodeURIComponent(targetPatientId)}` : '';
+    return `${scheme}//${host}/api/chat/ai/doctor/ws?token=${encodeURIComponent(token)}${patientQuery}`;
+  }
+
+  return `${scheme}//${host}/api/chat/ai/patient/ws?token=${encodeURIComponent(token)}`;
+}
+
 function safeJsonParse(value) {
   if (typeof value !== 'string') return value;
   try {

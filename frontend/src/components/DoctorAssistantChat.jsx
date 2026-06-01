@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { patientApi } from '../lib/api';
+import { buildAiChatWebSocketUrl } from '../lib/realTimeClient';
 
 function normalizeMessage(item) {
   return {
@@ -18,6 +19,7 @@ function normalizeConsultationLabel(item) {
   const createdAt = item?.created_at || item?.createdAt || '';
   return {
     id: consultationId,
+    patientId,
     label: [patientId ? `Patient: ${patientId}` : 'Patient', doctorId ? `Doctor: ${doctorId}` : 'Doctor', consultationId ? `ID: ${consultationId}` : '', createdAt ? new Date(createdAt).toLocaleString() : '']
       .filter(Boolean)
       .join(' • '),
@@ -29,7 +31,6 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
     () => (Array.isArray(consultations) ? consultations : []).map(normalizeConsultationLabel).filter((item) => item.id),
     [consultations],
   );
-
   const [selectedConsultationId, setSelectedConsultationId] = useState(defaultConsultationId || consultationOptions[0]?.id || '');
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
@@ -38,6 +39,11 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState('');
   const messageEndRef = useRef(null);
+
+  const selectedTargetPatientId = useMemo(
+    () => consultationOptions.find((item) => item.id === selectedConsultationId)?.patientId || '',
+    [consultationOptions, selectedConsultationId],
+  );
 
   useEffect(() => {
     if (!selectedConsultationId && consultationOptions[0]?.id) {
@@ -83,7 +89,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
   const handleSubmit = async (event) => {
     event.preventDefault();
     const text = String(inputValue || '').trim();
-    if (!text || !selectedConsultationId) return;
+    if (!text || !selectedConsultationId || !selectedTargetPatientId) return;
 
     const token = localStorage.getItem('doctalk_token');
     if (!token) {
@@ -113,8 +119,11 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
     setStatus('connecting');
     setError('');
 
-    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${scheme}//${window.location.host}/api/chat/ws/${encodeURIComponent(selectedConsultationId)}?token=${encodeURIComponent(token)}&role=doctor`;
+    const wsUrl = buildAiChatWebSocketUrl({
+      role: 'doctor',
+      token,
+      targetPatientId: selectedTargetPatientId,
+    });
     const socket = new WebSocket(wsUrl);
     let finalText = '';
     let completed = false;
