@@ -17,7 +17,7 @@ def _normalized_scope_id(value: str | None) -> str:
 async def patient_rag_tool(
     query: str,
     top_k: int = 5,
-    similarity_threshold: float = 0.75,
+    similarity_threshold: float = 0.30,
     state: Annotated[UnifiedChatState, InjectedState] | None = None,
 ) -> dict[str, Any]:
     """Retrieve patient-scoped RAG context for the authenticated user only."""
@@ -49,7 +49,7 @@ async def patient_rag_tool(
 async def doctor_rag_tool(
     query: str,
     top_k: int = 5,
-    similarity_threshold: float = 0.75,
+    similarity_threshold: float = 0.30,
     state: Annotated[UnifiedChatState, InjectedState] | None = None,
 ) -> dict[str, Any]:
     """Retrieve doctor-scoped RAG context for the selected target patient only."""

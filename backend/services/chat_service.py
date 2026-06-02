@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import HTTPException, status
 
 from ..core.database import prisma
-
+from prisma import Json
 
 class ChatService:
     def __init__(self, client: Any = prisma) -> None:
@@ -253,12 +253,18 @@ class ChatService:
             record = await self.client.patient.find_unique(where={"username": user_id})
             store = self._coerce_json_mapping(getattr(record, "chatSessions", None) if record else None)
             store[storage_key] = history
-            await self.client.patient.update(where={"username": user_id}, data={"chatSessions": store})
+            await self.client.patient.update(
+                where={"username": user_id},
+                data={"chatSessions": Json(store)}
+            )
         elif normalized_role == "doctor":
             record = await self.client.doctor.find_unique(where={"doctorId": user_id})
             store = self._coerce_json_mapping(getattr(record, "assistantChat", None) if record else None)
             store[storage_key] = history
-            await self.client.doctor.update(where={"doctorId": user_id}, data={"assistantChat": store})
+            await self.client.doctor.update(
+                where={"doctorId": user_id},
+                data={"assistantChat": Json(store)}
+            )
 
         return history
 

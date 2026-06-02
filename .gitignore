@@ -32,3 +32,6 @@ Thumbs.db
 # Local data/uploads used during development and tests
 data/
 data/**
+
+script.py
+workflow_debug_dump.txt

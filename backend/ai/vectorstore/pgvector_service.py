@@ -352,8 +352,8 @@ class PgVectorService:
             "SELECT id, patient_id, consultation_id, source_type, content, summary, metadata, created_at, "
             f"1 - (embedding <=> ${vector_index}::vector) AS similarity "
             f"FROM rag_documents WHERE {' AND '.join(clauses)} "
-            f"AND 1 - (embedding <=> ${vector_index}::vector) >= ${threshold_index} "
-            f"ORDER BY embedding <=> ${vector_index}::vector LIMIT ${limit_index}"
+            f"ORDER BY embedding <=> ${vector_index}::vector "
+            f"LIMIT ${limit_index}"
         )
         rows = await prisma.query_raw(sql, *args)
         return [self._serialize_row(row) for row in rows]

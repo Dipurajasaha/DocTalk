@@ -380,12 +380,21 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
             },
         )
 
-        await pgvector_service.ingest_asset_text(
-            asset_id=asset_id,
+        asset = await db.medicalasset.find_unique(
+            where={"id": asset_id}
+        )
+
+        if not asset:
+            raise ValueError(f"Asset {asset_id} not found")
+        
+        await pgvector_service.ingest_document(
+            patient_id=str(asset.userId),
+            consultation_id=None,
             source_type=source_type,
             content=ingestion_text,
             summary=extracted_text or ingestion_text,
             metadata={
+                "user_id": str(asset.userId),
                 "asset_id": asset_id,
                 "asset_category": category,
                 "mime_type": mime_type,
