@@ -36,7 +36,6 @@ model Patient {
   profilePic          String?
   closedDoctorChats   Json?          @db.JsonB
   doctorChats         Json?          @db.JsonB
-  chatSessions        Json?          @db.JsonB
   xrayAnalyses        Json?          @db.JsonB
   customAssets        Json?          @db.JsonB
   appointments        Appointment[]
@@ -71,7 +70,6 @@ model Doctor {
   appointmentRequests Json?          @db.JsonB
   payments            Json?          @db.JsonB
   patientChats        Json?          @db.JsonB
-  assistantChat       Json?          @db.JsonB
   closedChats         Json?          @db.JsonB
   appointments        Appointment[]
   consultations       Consultation[]
@@ -227,4 +225,34 @@ model RagDocument {
   @@index([consultationId])
   @@index([sourceType])
   @@map("rag_documents")
+}
+
+model AiChatSession {
+  id              String   @id @default(uuid())
+  userId          String   @map("userId")
+  role            String   @map("userRole")
+  mode            String   @default("default")
+  targetPatientId String?  @map("targetPatientId")
+  title           String?
+  createdAt       DateTime @default(now()) @map("createdAt")
+  updatedAt       DateTime @updatedAt @map("updatedAt")
+
+  messages AiChatMessage[]
+
+  @@index([userId])
+  @@index([targetPatientId])
+  @@map("ai_chat_sessions")
+}
+
+model AiChatMessage {
+  id        String   @id @default(uuid())
+  sessionId String   @map("sessionId")
+  role      String
+  content   String   @db.Text
+  createdAt DateTime @default(now()) @map("createdAt")
+
+  session AiChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("ai_chat_messages")
 }

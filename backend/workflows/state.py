@@ -7,12 +7,14 @@ from langgraph.graph.message import add_messages
 
 
 ChatRole = Literal["patient", "doctor"]
+ChatMode = Literal["general", "patient_scoped"]
 ChatRoute = Literal["patient_general", "patient_rag", "doctor_rag", "emergency"]
 
 
 class WorkflowState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     role: ChatRole
+    mode: ChatMode
     user_id: str
     target_patient_id: str | None
     ai_session_id: str

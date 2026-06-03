@@ -363,6 +363,17 @@ async def _run_ai_websocket(
     )
 
     await websocket.accept()
+
+    # Ensure the AI chat session exists in DB before running the graph,
+    # so that session metadata (userId, role, mode, targetPatientId) is
+    # persisted even if the very first message is also the only message.
+    await chat_service.ensure_ai_session(
+        current_user.user_id,
+        current_user.role,
+        ai_session_id,
+        normalized_target_patient_id,
+    )
+
     db_history = await chat_service.get_ai_chat_history(
         current_user.user_id,
         current_user.role,
