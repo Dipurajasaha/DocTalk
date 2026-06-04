@@ -70,7 +70,7 @@ def _extract_stream_chunk_text(chunk: Any) -> str:
 
 
 def _role_scaffold_message(role: str) -> str:
-    return "Patient AI Scaffold Online" if role == "patient" else "Doctor Copilot Scaffold Online"
+    return "I'm sorry, I was unable to generate a response. Please try again." if role == "patient" else "Doctor copilot is temporarily unavailable. Please try again."
 
 
 def _serialize_timestamp(value: Any) -> str | None:
@@ -364,30 +364,28 @@ async def _run_ai_websocket(
 
     await websocket.accept()
 
-    # Ensure the AI chat session exists in DB before running the graph,
-    # so that session metadata (userId, role, mode, targetPatientId) is
-    # persisted even if the very first message is also the only message.
-    await chat_service.ensure_ai_session(
-        current_user.user_id,
-        current_user.role,
-        ai_session_id,
-        normalized_target_patient_id,
-    )
-
-    db_history = await chat_service.get_ai_chat_history(
-        current_user.user_id,
-        current_user.role,
-        ai_session_id,
-        normalized_target_patient_id,
-    )
-    await websocket.send_json(
-        {
-            "type": "history",
-            "messages": _format_db_messages_for_ws(db_history, role=current_user.role),
-        }
-    )
-
     try:
+        # Determine the explicit mode based on role and target patient
+        mode = "patient_scoped" if expected_role == "doctor" and normalized_target_patient_id else "general"
+
+        # Ensure the AI chat session exists in DB before running the graph,
+        # so that session metadata (userId, role, mode) is
+        # persisted even if the very first message is also the only message.
+        await chat_service.ensure_ai_session(
+            current_user.user_id,
+            current_user.role,
+            ai_session_id,
+            mode,
+        )
+
+        db_history = await chat_service.get_ai_chat_history(ai_session_id)
+        await websocket.send_json(
+            {
+                "type": "history",
+                "messages": _format_db_messages_for_ws(db_history, role=current_user.role),
+            }
+        )
+
         while True:
             user_text = (await websocket.receive_text()).strip()
             if not user_text:
@@ -429,7 +427,10 @@ async def _run_ai_websocket(
                         chunk = _extract_message_text(output)
                         if chunk:
                             final_response = chunk
-                            await websocket.send_text(chunk)
+                            try:
+                                await websocket.send_text(chunk)
+                            except WebSocketDisconnect:
+                                return
                             streamed_token = True
                         continue
 
@@ -437,7 +438,10 @@ async def _run_ai_websocket(
                         chunk_text = _extract_stream_chunk_text(data.get("chunk")).strip()
                         if chunk_text:
                             final_response += chunk_text
-                            await websocket.send_text(chunk_text)
+                            try:
+                                await websocket.send_json({"type": "stream", "content": chunk_text})
+                            except WebSocketDisconnect:
+                                return
                             streamed_token = True
 
                 if not final_response:
@@ -446,36 +450,44 @@ async def _run_ai_websocket(
                     final_response = _role_scaffold_message(current_user.role)
 
                 if final_response and not streamed_token:
-                    await websocket.send_text(final_response)
+                    try:
+                        await websocket.send_text(final_response)
+                    except WebSocketDisconnect:
+                        return
 
                 db_history = await chat_service.append_ai_chat_exchange(
-                    current_user.user_id,
-                    current_user.role,
-                    ai_session_id,
-                    user_text,
-                    final_response,
-                    normalized_target_patient_id,
+                    ai_session_id=ai_session_id,
+                    user_message=user_text,
+                    assistant_message=final_response,
                 )
 
-                await websocket.send_json(
-                    {
-                        "type": "final",
-                        "ai_session_id": ai_session_id,
-                        "user_id": current_user.user_id,
-                        "target_patient_id": normalized_target_patient_id,
-                        "content": final_response,
-                    }
-                )
+                try:
+                    await websocket.send_json(
+                        {
+                            "type": "final",
+                            "ai_session_id": ai_session_id,
+                            "user_id": current_user.user_id,
+                            "target_patient_id": normalized_target_patient_id,
+                            "content": final_response,
+                        }
+                    )
+                except WebSocketDisconnect:
+                    return
+            except WebSocketDisconnect:
+                return
             except Exception as exc:
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "ai_session_id": ai_session_id,
-                        "user_id": current_user.user_id,
-                        "target_patient_id": normalized_target_patient_id,
-                        "content": str(exc),
-                    }
-                )
+                try:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "ai_session_id": ai_session_id,
+                            "user_id": current_user.user_id,
+                            "target_patient_id": normalized_target_patient_id,
+                            "content": str(exc),
+                        }
+                    )
+                except Exception:
+                    pass
     except WebSocketDisconnect:
         return
     except Exception:
@@ -493,17 +505,10 @@ async def fetch_ai_chat_history(
     chat_service: ChatService = Depends(get_chat_service),
 ) -> dict[str, Any]:
     session_id = str(ai_session_id or "").strip() or ("doctor_ai" if current_user.role == "doctor" else "patient_ai")
-    normalized_target_patient_id = str(target_patient_id or "").strip() or None
-    messages = await chat_service.get_ai_chat_history(
-        current_user.user_id,
-        current_user.role,
-        session_id,
-        normalized_target_patient_id,
-    )
+    messages = await chat_service.get_ai_chat_history(session_id)
     return {
         "messages": _format_db_messages_for_ws(messages, role=current_user.role),
         "ai_session_id": session_id,
-        "target_patient_id": normalized_target_patient_id,
     }
 
 

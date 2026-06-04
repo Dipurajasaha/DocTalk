@@ -1,6 +1,45 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { patientApi } from '../lib/api';
 import { buildAiChatWebSocketUrl } from '../lib/realTimeClient';
+import StructuredReply from './StructuredReply';
+
+const isJsonLike = (text) => {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (trimmed.startsWith('```json') && trimmed.endsWith('```')) return true;
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) return true;
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) return true;
+  return false;
+};
+
+const tryParseJson = (text) => {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const stripped = trimmed.startsWith('```')
+    ? trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+    : trimmed;
+  try {
+    const parsed = JSON.parse(stripped);
+    if (parsed && typeof parsed === 'object') return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const renderMessageContent = (text) => {
+  if (isJsonLike(text)) {
+    const parsed = tryParseJson(text);
+    if (parsed) return <StructuredReply data={parsed} />;
+  }
+  // Strip markdown code block wrappers that the AI sometimes emits around
+  // its entire response (e.g. ```markdown\n...\n```). Without this,
+  // ReactMarkdown treats the whole reply as a single fenced code block
+  // instead of rendering the inner formatting (bold, lists, headers).
+  const cleanedText = text.replace(/^```markdown\s*\n?/i, '').replace(/\n?```\s*$/, '');
+  return <ReactMarkdown>{cleanedText}</ReactMarkdown>;
+};
 
 function normalizeMessage(item) {
   return {
@@ -129,6 +168,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
     let completed = false;
     let settleTimeout = null;
 
+    try {
     await new Promise((resolve, reject) => {
       const cleanupTimeout = () => {
         if (settleTimeout) {
@@ -193,7 +233,18 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
           });
         }
 
-        if (eventType === 'final' || eventType === 'done' || eventType === 'end' || payload?.isFinal === true) {
+        // The backend signals completion in several ways — an explicit
+        // done/final/end event, a payload flag, or by closing the socket.
+        // Treat all of them as "stream finished" so the input box unlocks.
+        const isDoneEvent = eventType === 'final'
+          || eventType === 'done'
+          || eventType === 'end'
+          || eventType === 'complete'
+          || payload?.isFinal === true
+          || payload?.done === true
+          || payload?.finished === true;
+
+        if (isDoneEvent) {
           const textReply = String(chunkText || finalText || '').trim() || 'Doctor Copilot Scaffold Online';
           setMessages((current) => {
             const filtered = current.filter((item) => item.id !== 'assistant-loading' && item.id !== 'assistant-stream');
@@ -223,6 +274,8 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
       socket.onclose = () => {
         if (completed) return;
         if (finalText) {
+          // Stream produced tokens before closing — finalize the
+          // message list and resolve so the input unlocks cleanly.
           setMessages((current) => {
             const filtered = current.filter((item) => item.id !== 'assistant-loading' && item.id !== 'assistant-stream');
             return [...filtered, {
@@ -231,20 +284,36 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
               senderRole: 'doctor',
               text: finalText,
               timestamp: new Date().toISOString(),
-            }];
-          });
+            }]});
           resolveOnce();
           return;
         }
+        // Socket closed without any tokens — reject so the catch
+        // block can show a user-friendly fallback message.
         rejectOnce(new Error('Doctor assistant websocket closed unexpectedly'));
       };
-    }).catch((err) => {
+    });
+    } catch (err) {
+      const errText = String(err?.message || '');
+      const shouldShowFallback = /timed out|closed unexpectedly/i.test(errText);
+      setMessages((current) => {
+        const filtered = current.filter((item) => item.id !== 'assistant-loading' && item.id !== 'assistant-stream');
+        if (shouldShowFallback) {
+          return [...filtered, {
+            id: `assistant-final-${Date.now()}`,
+            senderId: 'doctalk-ai',
+            senderRole: 'doctor',
+            text: 'I am sorry, the connection timed out. Please try again.',
+            timestamp: new Date().toISOString(),
+          }];
+        }
+        return filtered;
+      });
       setError(err?.message || 'Failed to send assistant message');
-      setMessages((current) => current.filter((item) => item.id !== 'assistant-loading' && item.id !== 'assistant-stream'));
-    }).finally(() => {
+    } finally {
       setSending(false);
       setStatus('idle');
-    });
+    }
   };
 
   return (
@@ -274,7 +343,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
             <div style={{ fontSize: '12px', color: '#64748b' }}>{selectedConsultationId ? `Consultation ${selectedConsultationId}` : 'Select a consultation to begin'}</div>
           </div>
           <div style={{ fontSize: '12px', color: status === 'connected' ? '#10b981' : '#64748b' }}>
-            {loadingHistory ? 'Loading history...' : sending ? 'Streaming...' : status === 'connected' ? 'Connected' : 'Idle'}
+            {loadingHistory ? 'Loading history...' : sending ? 'Streaming...' : status === 'connected' ? '🟢 Connected' : '🟢 Ready'}
           </div>
         </div>
 

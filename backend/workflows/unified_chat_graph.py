@@ -7,7 +7,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from .nodes.doctor_nodes import doctor_general_llm, doctor_scoped_llm
-from .nodes.patient_nodes import patient_assistant_llm, triage_evaluator
+from .nodes.patient_nodes import patient_assistant_llm, patient_general_llm, triage_evaluator
+from .nodes.routing import classify_intent
 from .nodes.shared_nodes import medical_safety_guardrail
 from .state import WorkflowState
 
@@ -28,9 +29,16 @@ async def log_entry_context(state: WorkflowState) -> dict[str, Any]:
 
 def route_by_role(state: WorkflowState) -> Literal["triage_evaluator", "doctor_general_llm", "doctor_scoped_llm"]:
     if str(state.get("role") or "patient").lower() == "doctor":
-        target_patient_id = str(state.get("target_patient_id") or "").strip()
-        return "doctor_scoped_llm" if target_patient_id else "doctor_general_llm"
+        mode = str(state.get("mode") or "").strip()
+        return "doctor_scoped_llm" if mode == "patient_scoped" else "doctor_general_llm"
     return "triage_evaluator"
+
+
+def route_patient_intent(state: WorkflowState) -> Literal["patient_assistant_llm", "patient_general_llm"]:
+    intent = classify_intent(state)
+    if intent in ("emergency", "patient_rag"):
+        return "patient_assistant_llm"
+    return "patient_general_llm"
 
 
 def build_unified_chat_graph() -> Any:
@@ -38,6 +46,7 @@ def build_unified_chat_graph() -> Any:
     graph.add_node("log_entry_context", log_entry_context)
     graph.add_node("triage_evaluator", triage_evaluator)
     graph.add_node("patient_assistant_llm", patient_assistant_llm)
+    graph.add_node("patient_general_llm", patient_general_llm)
     graph.add_node("doctor_general_llm", doctor_general_llm)
     graph.add_node("doctor_scoped_llm", doctor_scoped_llm)
     graph.add_node("guardrail", medical_safety_guardrail)
@@ -51,8 +60,16 @@ def build_unified_chat_graph() -> Any:
             "doctor_scoped_llm": "doctor_scoped_llm",
         },
     )
-    graph.add_edge("triage_evaluator", "patient_assistant_llm")
+    graph.add_conditional_edges(
+        "triage_evaluator",
+        route_patient_intent,
+        {
+            "patient_assistant_llm": "patient_assistant_llm",
+            "patient_general_llm": "patient_general_llm",
+        },
+    )
     graph.add_edge("patient_assistant_llm", "guardrail")
+    graph.add_edge("patient_general_llm", "guardrail")
     graph.add_edge("doctor_general_llm", "guardrail")
     graph.add_edge("doctor_scoped_llm", "guardrail")
     graph.add_edge("guardrail", END)

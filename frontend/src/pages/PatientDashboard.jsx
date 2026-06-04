@@ -822,33 +822,40 @@ export default function PatientDashboard() {
       let settleTimeout = null;
 
       await new Promise((resolve, reject) => {
-        const cleanupTimeout = () => {
-          if (settleTimeout) {
-            clearTimeout(settleTimeout);
-            settleTimeout = null;
+        const INACTIVITY_TIMEOUT_MS = 25000;
+        let inactivityTimeout = null;
+
+        const clearInactivityTimeout = () => {
+          if (inactivityTimeout) {
+            clearTimeout(inactivityTimeout);
+            inactivityTimeout = null;
           }
+        };
+
+        const resetInactivityTimeout = () => {
+          clearInactivityTimeout();
+          inactivityTimeout = setTimeout(() => {
+            try { socket.close(); } catch (e) {}
+            rejectOnce(new Error('Assistant response timed out due to inactivity'));
+          }, INACTIVITY_TIMEOUT_MS);
         };
 
         const resolveOnce = () => {
           if (completed) return;
           completed = true;
-          cleanupTimeout();
+          clearInactivityTimeout();
           resolve();
         };
 
         const rejectOnce = (error) => {
           if (completed) return;
           completed = true;
-          cleanupTimeout();
+          clearInactivityTimeout();
           reject(error);
         };
 
-        settleTimeout = setTimeout(() => {
-          try { socket.close(); } catch (e) {}
-          rejectOnce(new Error('Assistant response timed out'));
-        }, 25000);
-
         socket.onopen = () => {
+          resetInactivityTimeout();
           socket.send(inputMsg);
         };
 
@@ -859,6 +866,9 @@ export default function PatientDashboard() {
           } catch (parseError) {
             payload = { type: 'token', content: String(event.data || '') };
           }
+
+          // Reset inactivity timer on every incoming message chunk
+          resetInactivityTimeout();
 
           const eventType = String(payload?.type || payload?.status || '').toLowerCase();
           const chunkText = String(payload?.content || payload?.text || payload?.chunk || '');
@@ -883,7 +893,7 @@ export default function PatientDashboard() {
           }
 
           if (eventType === 'final' || eventType === 'done' || eventType === 'end' || payload?.isFinal === true) {
-            const textReply = String(chunkText || finalText || '').trim() || 'Patient AI Scaffold Online';
+            const textReply = String(chunkText || finalText || '').trim() || "I'm sorry, I was unable to generate a response. Please try again.";
             setMessages(prev => {
               const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
               return [...filtered, { sender: 'model', text: textReply, id: Date.now() }];
@@ -924,7 +934,7 @@ export default function PatientDashboard() {
       setMessages(prev => {
         const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
         if (shouldShowFallback) {
-          return [...filtered, { sender: 'model', text: 'Patient AI Scaffold Online', id: Date.now() }];
+          return [...filtered, { sender: 'model', text: 'I am sorry, the connection timed out. Please try again.', id: Date.now() }];
         }
         return filtered;
       });

@@ -159,12 +159,12 @@ class ChatService:
         user_id: str,
         role: str,
         ai_session_id: str,
-        target_patient_id: str | None = None,
+        mode: str = "general",
     ) -> str:
         """Create the AiChatSession row if it doesn't exist yet.
 
         Returns the database id of the session so callers can reference it.
-        Session metadata (userId, role, mode, targetPatientId) is persisted
+        Session metadata (userId, role, mode) is persisted
         up-front, before any graph execution or message exchange.
         """
         normalized_role = str(role or "").strip().lower()
@@ -175,106 +175,45 @@ class ChatService:
             )
 
         normalized_user_id = str(user_id or "").strip()
-        normalized_target_patient_id = str(target_patient_id or "").strip() or None
 
-        session_where: dict[str, Any] = {
-            "userId": normalized_user_id,
-            "role": normalized_role,
-            "mode": "default",
-        }
-        if normalized_target_patient_id:
-            session_where["targetPatientId"] = normalized_target_patient_id
-
-        existing = await self.client.aichatsession.find_first(where=session_where)
+        existing = await self.client.aichatsession.find_unique(where={"id": ai_session_id})
         if existing is not None:
             return existing.id
 
         created = await self.client.aichatsession.create(
             data={
+                "id": ai_session_id,
                 "userId": normalized_user_id,
                 "role": normalized_role,
-                "mode": "default",
-                "targetPatientId": normalized_target_patient_id,
+                "mode": mode,
             },
         )
         return created.id
 
-    async def get_ai_chat_history(
-        self,
-        user_id: str,
-        role: str,
-        ai_session_id: str,
-        target_patient_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        normalized_role = str(role or "").strip().lower()
-        if normalized_role not in {"patient", "doctor"}:
-            return []
-
-        normalized_user_id = str(user_id or "").strip()
-        normalized_target_patient_id = str(target_patient_id or "").strip() or None
-
-        session_where: dict[str, Any] = {
-            "userId": normalized_user_id,
-            "role": normalized_role,
-        }
-        if normalized_target_patient_id:
-            session_where["targetPatientId"] = normalized_target_patient_id
-
-        session = await self.client.aichatsession.find_first(where=session_where)
-        if session is None:
-            return []
-
+    async def get_ai_chat_history(self, ai_session_id: str) -> list[dict[str, Any]]:
         messages = await self.client.aichatmessage.find_many(
-            where={"sessionId": session.id},
+            where={"sessionId": ai_session_id},
             order={"createdAt": "asc"},
         )
         return [self._serialize_ai_message(msg) for msg in messages]
 
     async def append_ai_chat_exchange(
         self,
-        user_id: str,
-        role: str,
         ai_session_id: str,
         user_message: str,
         assistant_message: str,
-        target_patient_id: str | None = None,
         *,
         max_messages: int = 100,
     ) -> list[dict[str, Any]]:
         user_text = str(user_message or "").strip()
         assistant_text = str(assistant_message or "").strip()
         if not user_text and not assistant_text:
-            return await self.get_ai_chat_history(user_id, role, ai_session_id, target_patient_id)
-
-        normalized_role = str(role or "").strip().lower()
-        if normalized_role not in {"patient", "doctor"}:
-            return await self.get_ai_chat_history(user_id, role, ai_session_id, target_patient_id)
-
-        normalized_user_id = str(user_id or "").strip()
-        normalized_target_patient_id = str(target_patient_id or "").strip() or None
-
-        session_where: dict[str, Any] = {
-            "userId": normalized_user_id,
-            "role": normalized_role,
-        }
-        if normalized_target_patient_id:
-            session_where["targetPatientId"] = normalized_target_patient_id
-
-        session = await self.client.aichatsession.find_first(where=session_where)
-        if session is None:
-            session = await self.client.aichatsession.create(
-                data={
-                    "userId": normalized_user_id,
-                    "role": normalized_role,
-                    "mode": "default",
-                    "targetPatientId": normalized_target_patient_id,
-                },
-            )
+            return await self.get_ai_chat_history(ai_session_id)
 
         if user_text:
             await self.client.aichatmessage.create(
                 data={
-                    "sessionId": session.id,
+                    "sessionId": ai_session_id,
                     "role": "user",
                     "content": user_text,
                 },
@@ -282,18 +221,18 @@ class ChatService:
         if assistant_text:
             await self.client.aichatmessage.create(
                 data={
-                    "sessionId": session.id,
+                    "sessionId": ai_session_id,
                     "role": "assistant",
                     "content": assistant_text,
                 },
             )
 
         # Enforce max_messages by deleting oldest messages if over limit
-        total = await self.client.aichatmessage.count(where={"sessionId": session.id})
+        total = await self.client.aichatmessage.count(where={"sessionId": ai_session_id})
         if total > max_messages:
             excess = total - max_messages
             oldest = await self.client.aichatmessage.find_many(
-                where={"sessionId": session.id},
+                where={"sessionId": ai_session_id},
                 order={"createdAt": "asc"},
                 take=excess,
             )
@@ -303,11 +242,11 @@ class ChatService:
             )
 
         await self.client.aichatsession.update(
-            where={"id": session.id},
+            where={"id": ai_session_id},
             data={"updatedAt": datetime.now(timezone.utc)},
         )
 
-        return await self.get_ai_chat_history(user_id, role, ai_session_id, target_patient_id)
+        return await self.get_ai_chat_history(ai_session_id)
 
     async def _load_consultation(self, consultation_id: str) -> Any:
         consultation = await self.client.consultation.find_unique(where={"id": consultation_id})

@@ -64,6 +64,32 @@ async def triage_evaluator(state: UnifiedChatState) -> dict[str, Any]:
     return updated_state
 
 
+async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
+    """Patient-facing AI without RAG — for general / non-clinical queries."""
+    messages = [
+        SystemMessage(
+            content=(
+                "You are a helpful, empathetic medical assistant. "
+                "Answer the user's question in plain, patient-friendly language. "
+                "Do not attempt to diagnose or provide definitive medical advice."
+            )
+        ),
+        *list(state.get("messages") or []),
+    ]
+    response = await llm.ainvoke(messages)
+    response_text = message_content_text(response) or "I am here to help with your health question."
+
+    return {
+        "messages": [response],
+        "final_response": response_text,
+        "context_payload": {
+            **dict(state.get("context_payload") or {}),
+            "route": "patient_general_llm",
+            "assistant_mode": "general_health_assistant",
+        },
+    }
+
+
 async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
     messages_list = list(state.get("messages") or [])
     last_message = messages_list[-1] if messages_list else None

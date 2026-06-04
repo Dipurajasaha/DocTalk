@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Literal
 
-from ..state import ChatRoute, UnifiedChatState
+from langchain_core.messages import BaseMessage
+
+from ..common import latest_message_text
+from ..state import UnifiedChatState
 
 
 _EMERGENCY_TERMS = (
@@ -20,42 +23,40 @@ _EMERGENCY_TERMS = (
     "blue lips",
 )
 
+_PATIENT_CLINICAL_TERMS = (
+    "report",
+    "blood",
+    "pain",
+    "symptom",
+    "medicine",
+    "medication",
+    "prescription",
+    "timeline",
+    "xray",
+    "scan",
+    "lab",
+    "result",
+    "follow up",
+    "follow-up",
+    "checkup",
+)
 
-def _latest_message_text(messages: list[dict[str, Any]] | None) -> str:
-    for message in reversed(list(messages or [])):
-        for key in ("message", "content", "text"):
-            value = str(message.get(key) or "").strip()
-            if value:
-                return value
-    return ""
+PatientIntent = Literal["patient_rag", "patient_general", "emergency"]
 
 
-def classify_intent(state: UnifiedChatState) -> ChatRoute:
-    role = str(state.get("role") or "patient").lower()
-    latest_message = _latest_message_text(state.get("messages"))
-    lowered_message = latest_message.lower()
+def classify_intent(state: UnifiedChatState) -> PatientIntent:
+    """Decide whether the patient query needs document retrieval.
 
-    if any(term in lowered_message for term in _EMERGENCY_TERMS):
+    Returns one of:
+        "emergency"      — life-threatening symptoms detected
+        "patient_rag"    — clinical terms found, retrieve patient records
+        "patient_general" — general chat, no retrieval needed
+    """
+    latest_message = latest_message_text(state.get("messages"))
+    lowered = latest_message.lower()
+
+    if any(term in lowered for term in _EMERGENCY_TERMS):
         return "emergency"
-    if role == "doctor":
-        return "doctor_rag"
-    clinical_terms = (
-        "report",
-        "blood",
-        "pain",
-        "symptom",
-        "medicine",
-        "medication",
-        "prescription",
-        "timeline",
-        "xray",
-        "scan",
-        "lab",
-        "result",
-        "follow up",
-        "follow-up",
-        "checkup",
-    )
-    if any(term in lowered_message for term in clinical_terms):
+    if any(term in lowered for term in _PATIENT_CLINICAL_TERMS):
         return "patient_rag"
     return "patient_general"
