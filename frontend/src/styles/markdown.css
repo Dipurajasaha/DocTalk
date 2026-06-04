@@ -1,0 +1,162 @@
+/* Shared markdown typography for AI chat messages.
+   Applied via .markdown-body wrapper so it does NOT leak into
+   user messages, raw text, or other UI elements. */
+
+.markdown-body {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #1e293b;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Headings — compact, proportional */
+.markdown-body h1 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin: 10px 0 6px;
+  line-height: 1.3;
+  color: #0f172a;
+}
+.markdown-body h2 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 8px 0 4px;
+  line-height: 1.3;
+  color: #0f172a;
+}
+.markdown-body h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 6px 0 3px;
+  line-height: 1.35;
+  color: #1e293b;
+}
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 4px 0 2px;
+  line-height: 1.4;
+  color: #1e293b;
+}
+
+/* Paragraphs — tight spacing */
+.markdown-body p {
+  margin: 4px 0;
+}
+
+/* Links */
+.markdown-body a {
+  color: #6c5ce7;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-body a:hover {
+  color: #5a4bd6;
+}
+
+/* Strong / Em */
+.markdown-body strong {
+  font-weight: 700;
+  color: #0f172a;
+}
+.markdown-body em {
+  font-style: italic;
+}
+
+/* Lists — compact, consistent indentation */
+.markdown-body ul,
+.markdown-body ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.markdown-body li {
+  margin: 2px 0;
+  line-height: 1.5;
+}
+.markdown-body li > p {
+  margin: 0;
+}
+
+/* Task lists (GFM checkboxes) */
+.markdown-body li input[type="checkbox"] {
+  margin-right: 6px;
+}
+
+/* Blockquotes */
+.markdown-body blockquote {
+  margin: 6px 0;
+  padding: 4px 12px;
+  border-left: 3px solid #cbd5e1;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.markdown-body blockquote p {
+  margin: 2px 0;
+}
+
+/* Inline code */
+.markdown-body code {
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.85em;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  color: #e11d48;
+}
+
+/* Fenced code blocks */
+.markdown-body pre {
+  margin: 6px 0;
+  padding: 10px 12px;
+  background: #1e293b;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+  color: #e2e8f0;
+  font-size: 0.82em;
+  line-height: 1.5;
+}
+
+/* Tables */
+.markdown-body table {
+  width: 100%;
+  margin: 6px 0;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.markdown-body th,
+.markdown-body td {
+  padding: 5px 8px;
+  border: 1px solid #e2e8f0;
+  text-align: left;
+}
+.markdown-body th {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #0f172a;
+}
+.markdown-body td {
+  color: #334155;
+}
+
+/* Horizontal rule */
+.markdown-body hr {
+  margin: 8px 0;
+  border: none;
+  border-top: 1px solid #e2e8f0;
+}
+
+/* Images */
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 4px 0;
+}

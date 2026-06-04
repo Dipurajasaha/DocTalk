@@ -6,7 +6,9 @@ import { authApi, patientApi, buildAssetDownloadUrl } from '../lib/api';
 import { buildAiChatWebSocketUrl, createRealTimeClient } from '../lib/realTimeClient';
 import '../styles/patient.css'; // Uses your existing patient CSS
 import XrayAnalyzerPanel from '../components/XrayAnalyzerPanel';
+import MarkdownMessage from '../components/chat/MarkdownMessage';
 import FileViewer from '../components/FileViewer';
+import AiProcessingCard from '../components/AiProcessingCard';
 
 const GENERAL_UPLOADS_FOLDER_PATH = '/my_documents/general_uploads/';
 const LEGACY_UNCLASSIFIED_FOLDER_PATH = '/my_documents/unclassified/';
@@ -68,6 +70,7 @@ export default function PatientDashboard() {
   }, [location.search]);
 
     const [isUploadingProfile, setIsUploadingProfile] = useState(false);
+  const [isAiProcessing, setIsAiProcessing] = useState(false);
     const { addNotification } = useNotifications();
     const { getAsset, setAsset, removeAsset } = useAssetCache();
     
@@ -806,8 +809,9 @@ export default function PatientDashboard() {
     if (!inputMsg.trim()) return;
 
     const newMsg = { sender: 'user', text: inputMsg, id: Date.now() };
-    setMessages(prev => [...prev, newMsg, { sender: 'model', id: 'loading', text: 'Typing...' }]);
+    setMessages(prev => [...prev, newMsg]);
     setInputMsg('');
+    setIsAiProcessing(true);
 
     try {
       const token = localStorage.getItem('doctalk_token');
@@ -878,6 +882,8 @@ export default function PatientDashboard() {
           }
 
           if ((eventType === 'token' || eventType === 'message') && chunkText) {
+            // Hide processing card on first token
+            setIsAiProcessing(false);
             finalText += chunkText;
             setMessages(prev => {
               const filtered = prev.filter(m => m.id !== 'loading');
@@ -893,6 +899,7 @@ export default function PatientDashboard() {
           }
 
           if (eventType === 'final' || eventType === 'done' || eventType === 'end' || payload?.isFinal === true) {
+            setIsAiProcessing(false);
             const textReply = String(chunkText || finalText || '').trim() || "I'm sorry, I was unable to generate a response. Please try again.";
             setMessages(prev => {
               const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
@@ -904,6 +911,7 @@ export default function PatientDashboard() {
           }
 
           if (eventType === 'error') {
+            setIsAiProcessing(false);
             try { socket.close(); } catch (e) {}
             rejectOnce(new Error(chunkText || 'Assistant stream failed'));
           }
@@ -938,6 +946,7 @@ export default function PatientDashboard() {
         }
         return filtered;
       });
+      setIsAiProcessing(false);
       try { addNotification({ type: 'error', message: "Failed to send message: " + err.message }); } catch (e) {}
     }
   };
@@ -1215,15 +1224,20 @@ export default function PatientDashboard() {
               <div className="ai-chat-column" style={{ position: 'relative', flex: 7, display: 'flex', flexDirection: 'column', overflow: 'visible', minHeight: 0, gap: '0' }}>
                 <div className="chat-box-container" style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', background: '#FFF', borderRadius: '16px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', overflow: 'hidden', minHeight: 0 }}>
               <div className="chat-box" style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 100px 24px', minHeight: 0 }}>
-                {messages.length === 0 && <div style={{textAlign: "center", color: "#6B6B6B", marginTop: "20px"}}>Start chatting with your AI Medical Assistant!</div>}
+                {messages.length === 0 && !isAiProcessing && <div style={{textAlign: "center", color: "#6B6B6B", marginTop: "20px"}}>Start chatting with your AI Medical Assistant!</div>}
                 {messages.map((msg, idx) => (
                   <div key={idx} className={`chat-message ${isOutgoingChatMessage(msg) ? 'user' : 'model'}`} style={{ marginBottom: '16px', display: 'flex', alignItems: 'flex-start', justifyContent: isOutgoingChatMessage(msg) ? 'flex-end' : 'flex-start' }}>
                     {!isOutgoingChatMessage(msg) && <div className="emoji" style={{ marginRight: '8px', fontSize: '18px' }}></div>}
                     <div className="bubble" style={{ background: isOutgoingChatMessage(msg) ? '#8B7EFF' : '#F1F5F9', color: isOutgoingChatMessage(msg) ? '#FFF' : '#1E293B', padding: '12px 16px', borderRadius: '16px', maxWidth: '80%', boxShadow: '0 8px 16px rgba(0,0,0,0.08), 0 4px 6px rgba(0,0,0,0.04)' }}>
-                      <div className="content" dangerouslySetInnerHTML={{ __html: (msg.text || '').replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br/>") }} />
+                      {isOutgoingChatMessage(msg) ? (
+                        <div className="content" style={{ whiteSpace: 'pre-wrap' }}>{msg.text || ''}</div>
+                      ) : (
+                        <div className="content"><MarkdownMessage text={msg.text || ''} /></div>
+                      )}
                     </div>
                   </div>
                 ))}
+                {isAiProcessing && <AiProcessingCard active={isAiProcessing} />}
                 <div ref={chatEndRef} />
               </div>
 <form id="chatInputForm" style={{ position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)', width: 'calc(90% - 48px)', maxWidth: '720px', display: 'flex', alignItems: 'center', padding: '6px 6px 6px 12px', background: '#ffffff', borderRadius: '50px', boxShadow: '0 16px 32px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', zIndex: 10 }} onSubmit={handleChatSubmit}>

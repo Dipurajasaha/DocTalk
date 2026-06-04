@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import MarkdownMessage from './chat/MarkdownMessage';
 import { patientApi } from '../lib/api';
 import { buildAiChatWebSocketUrl } from '../lib/realTimeClient';
 import StructuredReply from './StructuredReply';
+import { sanitizeAiMessage } from '../utils/chatSanitizer';
+import AiProcessingCard from './AiProcessingCard';
 
 const isJsonLike = (text) => {
   if (!text) return false;
@@ -33,12 +35,7 @@ const renderMessageContent = (text) => {
     const parsed = tryParseJson(text);
     if (parsed) return <StructuredReply data={parsed} />;
   }
-  // Strip markdown code block wrappers that the AI sometimes emits around
-  // its entire response (e.g. ```markdown\n...\n```). Without this,
-  // ReactMarkdown treats the whole reply as a single fenced code block
-  // instead of rendering the inner formatting (bold, lists, headers).
-  const cleanedText = text.replace(/^```markdown\s*\n?/i, '').replace(/\n?```\s*$/, '');
-  return <ReactMarkdown>{cleanedText}</ReactMarkdown>;
+  return <MarkdownMessage text={text} />;
 };
 
 function normalizeMessage(item) {
@@ -46,7 +43,7 @@ function normalizeMessage(item) {
     id: item?.id || `${item?.timestamp || Date.now()}-${Math.random().toString(16).slice(2)}`,
     senderId: item?.sender_id || item?.senderId || '',
     senderRole: String(item?.sender_role || item?.senderRole || '').toLowerCase(),
-    text: item?.message || item?.text || '',
+    text: sanitizeAiMessage(item?.message || item?.text || ''),
     timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
   };
 }
@@ -77,6 +74,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState('');
+  const [isAiProcessing, setIsAiProcessing] = useState(false);
   const messageEndRef = useRef(null);
 
   const selectedTargetPatientId = useMemo(
@@ -144,15 +142,8 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
       timestamp: new Date().toISOString(),
     };
 
-    const loadingMessage = {
-      id: 'assistant-loading',
-      senderId: 'doctalk-ai',
-      senderRole: 'doctor',
-      text: 'Typing...',
-      timestamp: new Date().toISOString(),
-    };
-
-    setMessages((current) => [...current, userMessage, loadingMessage]);
+    setMessages((current) => [...current, userMessage]);
+    setIsAiProcessing(true);
     setInputValue('');
     setSending(true);
     setStatus('connecting');
@@ -213,7 +204,12 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
         const chunkText = String(payload?.content || payload?.text || payload?.chunk || '');
 
         if ((eventType === 'token' || eventType === 'message') && chunkText) {
-          finalText += chunkText;
+          setIsAiProcessing(false);
+          console.log('[FE-DR] TOKEN_RAW:', JSON.stringify(chunkText));
+          const sanitizedChunk = sanitizeAiMessage(chunkText);
+          console.log('[FE-DR] TOKEN_SANITIZED:', JSON.stringify(sanitizedChunk));
+          finalText += sanitizedChunk;
+          console.log('[FE-DR] FINAL_ACCUMULATED:', JSON.stringify(finalText));
           setMessages((current) => {
             const filtered = current.filter((item) => item.id !== 'assistant-loading');
             const assistantMessage = {
@@ -245,7 +241,10 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
           || payload?.finished === true;
 
         if (isDoneEvent) {
-          const textReply = String(chunkText || finalText || '').trim() || 'Doctor Copilot Scaffold Online';
+          setIsAiProcessing(false);
+          console.log('[FE-DR] DONE_EVENT_RAW:', JSON.stringify(String(chunkText || finalText || '')));
+          const textReply = sanitizeAiMessage(String(chunkText || finalText || '').trim() || 'Doctor Copilot Scaffold Online');
+          console.log('[FE-DR] DONE_EVENT_SANITIZED:', JSON.stringify(textReply));
           setMessages((current) => {
             const filtered = current.filter((item) => item.id !== 'assistant-loading' && item.id !== 'assistant-stream');
             return [...filtered, {
@@ -262,6 +261,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
         }
 
         if (eventType === 'error') {
+          setIsAiProcessing(false);
           try { socket.close(); } catch (e) {}
           rejectOnce(new Error(chunkText || 'Doctor assistant stream failed'));
         }
@@ -276,13 +276,16 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
         if (finalText) {
           // Stream produced tokens before closing — finalize the
           // message list and resolve so the input unlocks cleanly.
+          console.log('[FE-DR] ONCLOSE_ACCUMULATED_RAW:', JSON.stringify(finalText));
+          const sanitizedFinal = sanitizeAiMessage(finalText);
+          console.log('[FE-DR] ONCLOSE_SANITIZED:', JSON.stringify(sanitizedFinal));
           setMessages((current) => {
             const filtered = current.filter((item) => item.id !== 'assistant-loading' && item.id !== 'assistant-stream');
             return [...filtered, {
               id: `assistant-final-${Date.now()}`,
               senderId: 'doctalk-ai',
               senderRole: 'doctor',
-              text: finalText,
+              text: sanitizedFinal,
               timestamp: new Date().toISOString(),
             }]});
           resolveOnce();
@@ -303,12 +306,13 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
             id: `assistant-final-${Date.now()}`,
             senderId: 'doctalk-ai',
             senderRole: 'doctor',
-            text: 'I am sorry, the connection timed out. Please try again.',
+            text: sanitizeAiMessage('I am sorry, the connection timed out. Please try again.'),
             timestamp: new Date().toISOString(),
           }];
         }
         return filtered;
       });
+      setIsAiProcessing(false);
       setError(err?.message || 'Failed to send assistant message');
     } finally {
       setSending(false);
@@ -360,7 +364,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
             </div>
           )}
 
-          {selectedConsultationId && messages.length === 0 && !loadingHistory && (
+          {selectedConsultationId && messages.length === 0 && !loadingHistory && !isAiProcessing && (
             <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '14px' }}>
               No messages yet. Send a prompt to the doctor AI assistant.
             </div>
@@ -372,7 +376,11 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
             return (
               <div key={message.id} style={{ display: 'flex', justifyContent: isOutgoing ? 'flex-end' : 'flex-start', marginBottom: '12px' }}>
                 <div style={{ maxWidth: '82%', padding: '12px 14px', borderRadius: '16px', background: isOutgoing ? 'linear-gradient(135deg, #8B7EFF 0%, #6C5CE7 100%)' : '#ffffff', color: isOutgoing ? '#fff' : '#1e293b', border: isOutgoing ? 'none' : '1px solid #e2e8f0', boxShadow: '0 8px 18px rgba(15, 23, 42, 0.06)' }}>
-                  <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: '14px' }}>{message.text}</div>
+                  {isOutgoing ? (
+                    <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: '14px' }}>{message.text}</div>
+                  ) : (
+                    <div style={{ lineHeight: 1.6, fontSize: '14px' }}>{renderMessageContent(message.text)}</div>
+                  )}
                   <div style={{ marginTop: '8px', fontSize: '11px', opacity: 0.72, display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
                     <span>{isOutgoing ? 'Doctor' : 'Doctor Copilot'}</span>
                     <span>{message.timestamp ? new Date(message.timestamp).toLocaleString() : ''}</span>
@@ -381,6 +389,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
               </div>
             );
           })}
+          {isAiProcessing && <AiProcessingCard active={isAiProcessing} />}
           <div ref={messageEndRef} />
         </div>
 

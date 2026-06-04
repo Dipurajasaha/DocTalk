@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, HTTPException, status
@@ -21,6 +23,153 @@ from ...workflows.unified_chat_graph import unified_chat_graph
 
 router = APIRouter(tags=["chat"])
 
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _sanitize_ai_message(text: str) -> str:
+    """Strip AI metadata (leading JSON, XML tags, json code fences) from text.
+
+    Preserves all leading/trailing whitespace from the model output so that
+    streamed chunks like ' How' are not collapsed to 'How'.
+    """
+    if not text:
+        return ""
+    cleaned = text
+    # 1. Remove markdown json code fences (only the fences, not surrounding space).
+    if cleaned.startswith("```json"):
+        cleaned = re.sub(r"^```json\s*\n?", "", cleaned)
+        cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+    # 2. Remove XML/HTML-like tags.
+    cleaned = re.sub(r"</?[a-z][\w-]*[^>]*>", "", cleaned)
+    # 3. Remove a single leading JSON object — but keep the whitespace that
+    #    precedes or follows it so streamed tokens retain their spacing.
+    if cleaned.lstrip().startswith("{"):
+        # Find the leading whitespace and the JSON object separately.
+        leading_ws_match = re.match(r"^(\s*)\{", cleaned)
+        if leading_ws_match:
+            leading_ws = leading_ws_match.group(1)
+            rest = cleaned[len(leading_ws) :]
+            depth = 0
+            close_index = -1
+            for i, ch in enumerate(rest):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                if depth == 0:
+                    close_index = i
+                    break
+            if close_index != -1:
+                remainder = rest[close_index + 1 :]
+                try:
+                    json.loads(rest[: close_index + 1])
+                    cleaned = leading_ws + remainder
+                except (ValueError, json.JSONDecodeError):
+                    pass
+    return cleaned
+
+
+class _StreamingMetadataBuffer:
+    """Buffer that strips a leading JSON metadata object from a token stream.
+
+    The model sometimes emits a JSON object (e.g. {"is_emergency":false}) as the
+    very first tokens, split across many small chunks. Each chunk on its own
+    looks like valid text, so the sanitizer cannot detect the JSON until the
+    entire object has been received.
+
+    This buffer accumulates tokens until it can make a decision:
+
+    * If the accumulated text starts with '{' and a complete JSON object is
+      found, the object is discarded and only the text after it is emitted.
+    * If the accumulated text does not start with '{' (or the JSON is
+      incomplete after a safety window), everything is flushed as-is.
+
+    Once a decision is made, the buffer is disabled and subsequent tokens
+    pass through immediately with no delay.
+    """
+
+    def __init__(self) -> None:
+        self._buf = ""
+        self._decided = False
+
+    @property
+    def decided(self) -> bool:
+        return self._decided
+
+    def feed(self, chunk: str) -> str:
+        """Feed a chunk. Returns text to emit (may be empty while buffering)."""
+        if self._decided:
+            return chunk
+
+        self._buf += chunk
+
+        # If the buffer does not look like it starts with JSON, flush
+        # everything — the stream is already producing visible text.
+        stripped = self._buf.lstrip()
+        if not stripped.startswith("{"):
+            self._decided = True
+            result = self._buf
+            print(f"[BUFFER] decided=non-json buf_len={len(self._buf)} return_len={len(result)} preview={result[:60]!r}")
+            return result
+
+        # Buffer starts with '{'. Try to find a complete JSON object.
+        # Walk through the buffer tracking brace depth, but skip the
+        # leading whitespace so we find the real opening brace.
+        brace_start = len(self._buf) - len(stripped)
+        depth = 0
+        close_index = -1
+        in_string = False
+        escape_next = False
+        for i in range(brace_start, len(self._buf)):
+            ch = self._buf[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == "\\" and in_string:
+                escape_next = True
+                continue
+            if ch == '"' and (depth > 0 or i == brace_start):
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            if depth == 0:
+                close_index = i
+                break
+
+        if close_index == -1:
+            # Incomplete JSON — keep buffering. But don't wait forever.
+            # If the buffer grows very large without closing, the model is
+            # probably not sending a JSON object after all.
+            if len(self._buf) > 2048:
+                self._decided = True
+                result = self._buf
+                print(f"[BUFFER] safety flush buf_len={len(self._buf)} return_len={len(result)} preview={result[:60]!r}")
+                return result
+            print(f"[BUFFER] buffering buf_len={len(self._buf)} return_len=0 preview={self._buf[:60]!r}")
+            return ""
+
+        # We have a candidate JSON object. Validate it.
+        candidate = self._buf[brace_start : close_index + 1]
+        try:
+            json.loads(candidate)
+        except (ValueError, json.JSONDecodeError):
+            # Not valid JSON — flush everything.
+            self._decided = True
+            result = self._buf
+            print(f"[BUFFER] invalid-json-flush buf_len={len(self._buf)} return_len={len(result)} preview={result[:60]!r}")
+            return result
+
+        # Valid JSON metadata object — discard it, emit only what follows.
+        remainder = self._buf[close_index + 1 :]
+        self._decided = True
+        print(f"[BUFFER] metadata removed candidate_len={len(candidate)} remainder_len={len(remainder)} preview={remainder[:60]!r}")
+        return remainder
+
 
 def get_chat_service() -> ChatService:
     return ChatService()
@@ -41,10 +190,10 @@ def _extract_message_text(output: Any) -> str:
             last_message = messages[-1]
             content = getattr(last_message, "content", None)
             if isinstance(content, str) and content.strip():
-                return content.strip()
+                return content
             if isinstance(last_message, dict):
-                text = str(last_message.get("content") or last_message.get("message") or "").strip()
-                if text:
+                text = str(last_message.get("content") or last_message.get("message") or "")
+                if text.strip():
                     return text
     return ""
 
@@ -411,12 +560,29 @@ async def _run_ai_websocket(
             final_response = ""
             streamed_token = False
             ai_config = {"configurable": {"thread_id": namespace}}
+            metadata_buffer = _StreamingMetadataBuffer()
 
             try:
                 async for event in unified_chat_graph.astream_events(workflow_state, config=ai_config, version="v2"):
                     event_name = str(event.get("event") or "")
                     node_name = str(event.get("name") or "")
                     data = dict(event.get("data") or {})
+
+                    # --- TEMPORARY INSTRUMENTATION (remove after debugging) ---
+                    _chunk_preview = ""
+                    if event_name in {"on_chat_model_stream", "on_llm_stream"}:
+                        _raw = _extract_stream_chunk_text(data.get("chunk"))
+                        _chunk_preview = _raw[:40].replace("\n", "\\n") if _raw else ""
+                    elif event_name == "on_chain_end" and node_name in {
+                        "patient_assistant_llm", "doctor_general_llm", "doctor_scoped_llm",
+                    }:
+                        _out = _extract_message_text(data.get("output"))
+                        _chunk_preview = _out[:40].replace("\n", "\\n") if _out else ""
+                    print(
+                        f"[WS-EVENT] event={event_name} node={node_name} "
+                        f"chunk_len={len(_chunk_preview)} preview={_chunk_preview!r}"
+                    )
+                    # --- END TEMPORARY INSTRUMENTATION ---
 
                     if event_name == "on_chain_end" and node_name in {
                         "patient_assistant_llm",
@@ -426,34 +592,48 @@ async def _run_ai_websocket(
                         output = data.get("output")
                         chunk = _extract_message_text(output)
                         if chunk:
-                            final_response = chunk
+                            final_response = _sanitize_ai_message(chunk)
+                            print(f"[WS-SEND] FINAL len={len(final_response)} preview={final_response[:60]!r}")
                             try:
-                                await websocket.send_text(chunk)
-                            except WebSocketDisconnect:
-                                return
+                                await websocket.send_text(final_response)
+                            except Exception as _ws_exc:
+                                print(f"[WS-SEND-FAILED] FINAL {repr(_ws_exc)}")
+                                raise
                             streamed_token = True
                         continue
 
                     if event_name in {"on_chat_model_stream", "on_llm_stream"}:
-                        chunk_text = _extract_stream_chunk_text(data.get("chunk")).strip()
+                        chunk_text = _extract_stream_chunk_text(data.get("chunk"))
                         if chunk_text:
-                            final_response += chunk_text
-                            try:
-                                await websocket.send_json({"type": "stream", "content": chunk_text})
-                            except WebSocketDisconnect:
-                                return
-                            streamed_token = True
+                            # Feed the chunk through the metadata buffer.
+                            # It will return text to emit once it can decide
+                            # whether the stream starts with a JSON object.
+                            emit_text = metadata_buffer.feed(chunk_text)
+                            if emit_text:
+                                sanitized_chunk = _sanitize_ai_message(emit_text)
+                                final_response += sanitized_chunk
+                                print(f"[WS-SEND] TOKEN len={len(sanitized_chunk)} preview={sanitized_chunk[:60]!r}")
+                                try:
+                                    await websocket.send_json({"type": "token", "content": sanitized_chunk})
+                                except Exception as _ws_exc:
+                                    print(f"[WS-SEND-FAILED] TOKEN {repr(_ws_exc)}")
+                                    raise
+                                streamed_token = True
 
                 if not final_response:
                     final_response = str(workflow_state.get("final_response") or "").strip()
                 if not final_response:
                     final_response = _role_scaffold_message(current_user.role)
 
+                final_response = _sanitize_ai_message(final_response)
+
                 if final_response and not streamed_token:
+                    print(f"[WS-SEND] FINAL (no-stream) len={len(final_response)} preview={final_response[:60]!r}")
                     try:
                         await websocket.send_text(final_response)
-                    except WebSocketDisconnect:
-                        return
+                    except Exception as _ws_exc:
+                        print(f"[WS-SEND-FAILED] FINAL (no-stream) {repr(_ws_exc)}")
+                        raise
 
                 db_history = await chat_service.append_ai_chat_exchange(
                     ai_session_id=ai_session_id,
@@ -461,6 +641,7 @@ async def _run_ai_websocket(
                     assistant_message=final_response,
                 )
 
+                print(f"[WS-SEND] FINAL event len={len(final_response)} preview={final_response[:60]!r}")
                 try:
                     await websocket.send_json(
                         {
@@ -471,11 +652,14 @@ async def _run_ai_websocket(
                             "content": final_response,
                         }
                     )
-                except WebSocketDisconnect:
-                    return
+                except Exception as _ws_exc:
+                    print(f"[WS-SEND-FAILED] FINAL event {repr(_ws_exc)}")
+                    raise
             except WebSocketDisconnect:
+                print("[WS-DISCONNECT] inner")
                 return
             except Exception as exc:
+                print(f"[WS-ERROR] {repr(exc)}")
                 try:
                     await websocket.send_json(
                         {
@@ -486,11 +670,13 @@ async def _run_ai_websocket(
                             "content": str(exc),
                         }
                     )
-                except Exception:
-                    pass
+                except Exception as _ws_exc:
+                    print(f"[WS-SEND-FAILED] ERROR {repr(_ws_exc)}")
     except WebSocketDisconnect:
+        print("[WS-DISCONNECT] outer")
         return
-    except Exception:
+    except Exception as _outer_exc:
+        print(f"[WS-ERROR] outer {repr(_outer_exc)}")
         try:
             await websocket.close(code=1011)
         except Exception:
@@ -587,3 +773,4 @@ async def websocket_consultation_messages(websocket: WebSocket, consultation_id:
             await websocket.close(code=1011)
         except Exception:
             pass
+        

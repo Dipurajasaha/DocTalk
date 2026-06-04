@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import MarkdownMessage from './chat/MarkdownMessage';
 import { buildAiChatWebSocketUrl } from '../lib/realTimeClient';
+import { sanitizeAiMessage } from '../utils/chatSanitizer';
+import AiProcessingCard from './AiProcessingCard';
 
 const normalizeMessage = (payload, fallbackText = '') => ({
   id: payload?.id || payload?.message_id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
   senderId: payload?.sender_id || payload?.senderId || payload?.sender || '',
   senderRole: String(payload?.sender_role || payload?.senderRole || payload?.role || '').toLowerCase(),
-  text: String(payload?.content || payload?.text || payload?.chunk || payload?.message || fallbackText || ''),
+  text: sanitizeAiMessage(String(payload?.content || payload?.text || payload?.chunk || payload?.message || fallbackText || '')),
   timestamp: payload?.timestamp || payload?.created_at || payload?.createdAt || new Date().toISOString(),
 });
 
@@ -45,6 +48,7 @@ export default function CopilotPanel({ patientList = [] }) {
   const [inputValue, setInputValue] = useState('');
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState('');
+  const [isAiProcessing, setIsAiProcessing] = useState(false);
   const socketRef = useRef(null);
   const messageEndRef = useRef(null);
 
@@ -135,13 +139,22 @@ export default function CopilotPanel({ patientList = [] }) {
       }
 
       if ((eventType === 'token' || eventType === 'message') && chunkText) {
-        finalText += chunkText;
+        setIsAiProcessing(false);
+        console.log('[FE-CP] TOKEN_RAW:', JSON.stringify(chunkText));
+        const sanitizedChunk = sanitizeAiMessage(chunkText);
+        console.log('[FE-CP] TOKEN_SANITIZED:', JSON.stringify(sanitizedChunk));
+        finalText += sanitizedChunk;
+        console.log('[FE-CP] FINAL_ACCUMULATED:', JSON.stringify(finalText));
         setMessages((currentMessages) => appendOrReplaceAssistantMessage(currentMessages, finalText, false));
         return;
       }
 
       if (eventType === 'final' || eventType === 'done' || eventType === 'end' || payload?.isFinal === true) {
-        const replyText = String(chunkText || finalText || '').trim() || 'Doctor Copilot is ready.';
+        setIsAiProcessing(false);
+        const rawReply = String(chunkText || finalText || '');
+        console.log('[FE-CP] FINAL_RAW:', JSON.stringify(rawReply));
+        const replyText = rawReply.trim() || 'Doctor Copilot is ready.';
+        console.log('[FE-CP] FINAL_TRIMMED:', JSON.stringify(replyText));
         setMessages((currentMessages) => appendOrReplaceAssistantMessage(currentMessages, replyText, true));
         finalText = replyText;
         try {
@@ -153,6 +166,7 @@ export default function CopilotPanel({ patientList = [] }) {
       }
 
       if (eventType === 'error') {
+        setIsAiProcessing(false);
         const message = chunkText || 'Doctor copilot stream failed';
         setError(message);
         try {
@@ -165,13 +179,16 @@ export default function CopilotPanel({ patientList = [] }) {
 
     socket.onerror = () => {
       if (cancelled) return;
+      setIsAiProcessing(false);
       setError('Doctor copilot websocket connection failed');
       setStatus('idle');
     };
 
     socket.onclose = () => {
       if (cancelled) return;
+      setIsAiProcessing(false);
       if (finalText) {
+        console.log('[FE-CP] ONCLOSE_ACCUMULATED:', JSON.stringify(finalText));
         setMessages((currentMessages) => {
           const hasFinal = currentMessages.some((item) => item.id.startsWith('assistant-final-'));
           if (hasFinal) return currentMessages;
@@ -216,13 +233,8 @@ export default function CopilotPanel({ patientList = [] }) {
     setMessages((currentMessages) => [
       ...currentMessages.filter((item) => item.id !== 'assistant-loading'),
       userMessage,
-      normalizeMessage({
-        id: 'assistant-loading',
-        sender_id: 'doctalk-ai',
-        sender_role: 'doctor',
-        content: 'Typing...',
-      }, 'Typing...'),
     ]);
+    setIsAiProcessing(true);
     setInputValue('');
     setError('');
 
@@ -271,7 +283,7 @@ export default function CopilotPanel({ patientList = [] }) {
         </div>
 
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px', background: 'linear-gradient(180deg, #fbfdff 0%, #f8fafc 100%)' }}>
-          {messages.length === 0 && !error && (
+          {messages.length === 0 && !error && !isAiProcessing && (
             <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '14px' }}>
               Pick a patient or stay in general chat, then send a prompt to the doctor copilot.
             </div>
@@ -284,7 +296,13 @@ export default function CopilotPanel({ patientList = [] }) {
             return (
               <div key={message.id} style={{ display: 'flex', justifyContent: isOutgoing ? 'flex-end' : 'flex-start', marginBottom: '12px' }}>
                 <div style={{ maxWidth: '82%', padding: '12px 14px', borderRadius: '16px', background: isOutgoing ? 'linear-gradient(135deg, #8B7EFF 0%, #6C5CE7 100%)' : '#ffffff', color: isOutgoing ? '#fff' : '#1e293b', border: isOutgoing ? 'none' : '1px solid #e2e8f0', boxShadow: '0 8px 18px rgba(15, 23, 42, 0.06)' }}>
-                  <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: '14px' }}>{message.text}</div>
+                  {isAssistant ? (
+                    <div style={{ lineHeight: 1.6, fontSize: '14px' }}>
+                      <MarkdownMessage text={message.text} />
+                    </div>
+                  ) : (
+                    <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: '14px' }}>{message.text}</div>
+                  )}
                   <div style={{ marginTop: '8px', fontSize: '11px', opacity: 0.72, display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
                     <span>{isOutgoing ? 'Doctor' : 'Doctor Copilot'}</span>
                     <span>{message.timestamp ? new Date(message.timestamp).toLocaleString() : ''}</span>
@@ -293,6 +311,7 @@ export default function CopilotPanel({ patientList = [] }) {
               </div>
             );
           })}
+          {isAiProcessing && <AiProcessingCard active={isAiProcessing} />}
           <div ref={messageEndRef} />
         </div>
 
