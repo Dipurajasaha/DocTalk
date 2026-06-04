@@ -14,7 +14,6 @@ from ..core_services.embeddings import embedding_service
 
 logger = logging.getLogger(__name__)
 SourceType = Literal["consultation", "ocr", "prescription", "xray"]
-AssetSourceType = Literal["report", "prescription", "xray"]
 
 
 @dataclass(slots=True)
@@ -75,31 +74,6 @@ class PgVectorService:
             "CREATE INDEX IF NOT EXISTS rag_documents_consultation_idx ON rag_documents (consultation_id)",
             "CREATE INDEX IF NOT EXISTS rag_documents_source_idx ON rag_documents (source_type)",
             "CREATE INDEX IF NOT EXISTS rag_documents_embedding_idx ON rag_documents USING ivfflat (embedding vector_cosine_ops) WITH (lists = 50)",
-            (
-                """
-                CREATE TABLE IF NOT EXISTS medical_asset_documents (
-                    id text PRIMARY KEY,
-                    asset_id text NOT NULL UNIQUE,
-                    source_type text NOT NULL,
-                    content text NOT NULL,
-                    summary text NOT NULL,
-                    embedding vector(%d) NOT NULL,
-                    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-                    created_at timestamptz NOT NULL DEFAULT now()
-                )
-                """
-                % self.dimension
-            ),
-            "ALTER TABLE medical_asset_documents ADD COLUMN IF NOT EXISTS asset_id text",
-            "ALTER TABLE medical_asset_documents ADD COLUMN IF NOT EXISTS source_type text",
-            "ALTER TABLE medical_asset_documents ADD COLUMN IF NOT EXISTS content text",
-            "ALTER TABLE medical_asset_documents ADD COLUMN IF NOT EXISTS summary text",
-            f"ALTER TABLE medical_asset_documents ADD COLUMN IF NOT EXISTS embedding vector({self.dimension})",
-            "ALTER TABLE medical_asset_documents ADD COLUMN IF NOT EXISTS metadata jsonb DEFAULT '{}'::jsonb",
-            "ALTER TABLE medical_asset_documents ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now()",
-            "CREATE INDEX IF NOT EXISTS medical_asset_documents_asset_idx ON medical_asset_documents (asset_id)",
-            "CREATE INDEX IF NOT EXISTS medical_asset_documents_source_idx ON medical_asset_documents (source_type)",
-            "CREATE INDEX IF NOT EXISTS medical_asset_documents_created_idx ON medical_asset_documents (created_at DESC)",
         ]
 
         for statement in statements:
@@ -152,65 +126,44 @@ class PgVectorService:
             raise RuntimeError("Unable to store medical memory")
         return self._serialize_row(rows[0])
 
-    async def ingest_asset_text(
+    async def delete_document_embeddings(
         self,
         *,
         asset_id: str,
-        source_type: AssetSourceType,
-        content: str,
-        summary: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> int:
+        """Delete every embedding row whose metadata->>'asset_id' matches.
+
+        Returns the number of rows deleted.  Idempotent — returns 0 when
+        no rows match.
+        """
         await self.ensure_schema()
 
-        normalized_asset_id = self._clean_text(asset_id, limit=128)
-        if not normalized_asset_id:
-            raise ValueError("asset_id is required")
-
-        normalized_content = self._clean_text(content, limit=5000)
-        normalized_summary = self._clean_text(summary or content, limit=1200)
-        embedding_vector = await self._safe_embedding(normalized_summary or normalized_content)
-        embedding_literal = embedding_service.to_vector_literal(embedding_vector)
-        payload_metadata = self._build_asset_metadata(metadata, source_type, normalized_asset_id)
-
-        rows = await prisma.query_raw(
-            "SELECT id, asset_id, source_type, content, summary, metadata, created_at FROM medical_asset_documents WHERE asset_id = $1 LIMIT 1",
-            normalized_asset_id,
-        )
-        if rows:
-            updated = await prisma.query_raw(
-                """
-                UPDATE medical_asset_documents
-                SET source_type = $2, content = $3, summary = $4, embedding = $5::vector, metadata = $6::jsonb
-                WHERE asset_id = $1
-                RETURNING id, asset_id, source_type, content, summary, metadata, created_at
-                """,
-                normalized_asset_id,
-                source_type,
-                normalized_content,
-                normalized_summary,
-                embedding_literal,
-                payload_metadata,
+        if not asset_id or not asset_id.strip():
+            logger.warning(
+                "delete_document_embeddings called with empty asset_id — skipping",
+                extra={"component": "rag"},
             )
-            return self._serialize_asset_row(updated[0] if updated else rows[0])
+            return 0
 
-        inserted = await prisma.query_raw(
-            """
-            INSERT INTO medical_asset_documents (id, asset_id, source_type, content, summary, embedding, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6::vector, $7::jsonb)
-            RETURNING id, asset_id, source_type, content, summary, metadata, created_at
-            """,
-            self._generate_id(),
-            normalized_asset_id,
-            source_type,
-            normalized_content,
-            normalized_summary,
-            embedding_literal,
-            payload_metadata,
+        try:
+            result = await prisma.execute_raw(
+                "DELETE FROM rag_documents WHERE metadata->>'asset_id' = $1",
+                asset_id,
+            )
+            # Prisma execute_raw returns the row-count string (e.g. "DELETE 3")
+            deleted = int(str(result or "0").split()[-1]) if result else 0
+        except Exception as exc:
+            logger.error(
+                "Failed to delete RAG embeddings for asset",
+                extra={"component": "rag", "asset_id": asset_id, "error": str(exc)},
+            )
+            raise
+
+        logger.info(
+            "Deleted RAG embeddings for asset",
+            extra={"component": "rag", "asset_id": asset_id, "deleted_count": deleted},
         )
-        if not inserted:
-            raise RuntimeError("Unable to store medical asset memory")
-        return self._serialize_asset_row(inserted[0])
+        return deleted
 
     async def search_documents(
         self,
@@ -455,17 +408,6 @@ class PgVectorService:
         return payload
 
     @staticmethod
-    def _build_asset_metadata(metadata: dict[str, Any] | None, source_type: AssetSourceType, asset_id: str) -> dict[str, Any]:
-        payload = dict(metadata or {})
-        payload.update(
-            {
-                "asset_id": asset_id,
-                "source_type": source_type,
-            }
-        )
-        return payload
-
-    @staticmethod
     def _serialize_row(row: Any) -> dict[str, Any]:
         data = row.model_dump() if hasattr(row, "model_dump") else dict(row)
         metadata = data.get("metadata") or {}
@@ -481,22 +423,6 @@ class PgVectorService:
             "metadata": metadata,
             "created_at": data.get("created_at"),
             "similarity": float(data.get("similarity") or 0.0),
-        }
-
-    @staticmethod
-    def _serialize_asset_row(row: Any) -> dict[str, Any]:
-        data = row.model_dump() if hasattr(row, "model_dump") else dict(row)
-        metadata = data.get("metadata") or {}
-        if isinstance(metadata, str):
-            metadata = {"raw": metadata}
-        return {
-            "id": data.get("id"),
-            "asset_id": data.get("asset_id"),
-            "source_type": data.get("source_type"),
-            "content": data.get("content") or "",
-            "summary": data.get("summary") or "",
-            "metadata": metadata,
-            "created_at": data.get("created_at"),
         }
 
     @staticmethod

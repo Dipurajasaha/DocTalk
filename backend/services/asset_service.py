@@ -109,6 +109,20 @@ class AssetService:
         record = await self._load_record(asset_id)
         self._assert_access(record, user_id)
         file_path = self._resolve_record_path(record)
+
+        # Delete associated RAG embeddings first so no orphaned vectors remain.
+        try:
+            deleted = await pgvector_service.delete_document_embeddings(asset_id=asset_id)
+            logger.info(
+                "RAG embeddings removed during asset deletion",
+                extra={"component": "asset", "asset_id": asset_id, "deleted_count": deleted},
+            )
+        except Exception as exc:
+            logger.warning(
+                "RAG embedding deletion failed during asset deletion — continuing with asset removal",
+                extra={"component": "asset", "asset_id": asset_id, "error": str(exc)},
+            )
+
         await self.client.medicalasset.delete(where={"id": asset_id})
         try:
             self._safe_unlink(file_path)
