@@ -6,24 +6,39 @@ import { useEffect, useRef } from 'react';
  * Graph-agnostic: this component only knows that AI is processing.
  * It has zero knowledge of LangGraph nodes, workflows, or agents.
  *
+ * The `status` prop is an opaque string (e.g. a LangGraph node name).
+ * The component maps it to a human-readable label via STATUS_LABELS.
+ * Future nodes require only adding one entry to STATUS_LABELS.
+ *
  * Lifecycle:
  *   - Renders as long as `active` is true.
  *   - Self-dismisses after `timeoutMs` (safety net) if no token arrives.
  *   - Parent controls visibility via the `active` prop.
  */
-export default function AiProcessingCard({ active, timeoutMs = 30000 }) {
+
+const STATUS_LABELS = {
+  triage_evaluator: 'Assessing symptoms...',
+  patient_rag_tool: 'Reading medical reports...',
+  patient_assistant_llm: 'Generating explanation...',
+  patient_general_llm: 'Generating explanation...',
+  doctor_general_llm: 'Preparing clinical response...',
+  doctor_scoped_llm: 'Preparing clinical response...',
+  guardrail: 'Validating response...',
+};
+
+function resolveStatusLabel(status) {
+  if (!status) return 'Processing...';
+  return STATUS_LABELS[status] || 'Processing...';
+}
+
+export default function AiProcessingCard({ active, status, timeoutMs = 30000 }) {
   const timeoutRef = useRef(null);
 
   useEffect(() => {
     if (!active) return;
 
-    // Safety net: if no token arrives within timeoutMs, hide the card
-    // to avoid a stuck UI. The parent will also clear `active` on
-    // the first token / final / error event.
     timeoutRef.current = setTimeout(() => {
-      // We don't call any parent callback here — the parent's own
-      // websocket handlers will clear `active`. This timeout is only
-      // a guard against a permanently stuck state.
+      // Safety net: parent's own websocket handlers will clear `active`.
     }, timeoutMs);
 
     return () => {
@@ -32,6 +47,8 @@ export default function AiProcessingCard({ active, timeoutMs = 30000 }) {
   }, [active, timeoutMs]);
 
   if (!active) return null;
+
+  const label = resolveStatusLabel(status);
 
   return (
     <div
@@ -67,7 +84,7 @@ export default function AiProcessingCard({ active, timeoutMs = 30000 }) {
             lineHeight: 1.4,
           }}
         >
-          AI is processing your request...
+          {label}
         </span>
       </div>
     </div>

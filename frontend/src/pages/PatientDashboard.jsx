@@ -71,6 +71,7 @@ export default function PatientDashboard() {
 
     const [isUploadingProfile, setIsUploadingProfile] = useState(false);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [processingState, setProcessingState] = useState(null);
     const { addNotification } = useNotifications();
     const { getAsset, setAsset, removeAsset } = useAssetCache();
     
@@ -812,6 +813,7 @@ export default function PatientDashboard() {
     setMessages(prev => [...prev, newMsg]);
     setInputMsg('');
     setIsAiProcessing(true);
+    setProcessingState(null);
 
     try {
       const token = localStorage.getItem('doctalk_token');
@@ -881,9 +883,14 @@ export default function PatientDashboard() {
             return;
           }
 
+          if (eventType === 'status') {
+            setProcessingState(String(payload?.node || ''));
+            return;
+          }
+
           if ((eventType === 'token' || eventType === 'message') && chunkText) {
-            // Hide processing card on first token
-            setIsAiProcessing(false);
+            // Processing card stays visible during streaming.
+            // It is only cleared by final / error / close events.
             finalText += chunkText;
             setMessages(prev => {
               const filtered = prev.filter(m => m.id !== 'loading');
@@ -900,6 +907,7 @@ export default function PatientDashboard() {
 
           if (eventType === 'final' || eventType === 'done' || eventType === 'end' || payload?.isFinal === true) {
             setIsAiProcessing(false);
+            setProcessingState(null);
             const textReply = String(chunkText || finalText || '').trim() || "I'm sorry, I was unable to generate a response. Please try again.";
             setMessages(prev => {
               const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
@@ -912,6 +920,7 @@ export default function PatientDashboard() {
 
           if (eventType === 'error') {
             setIsAiProcessing(false);
+            setProcessingState(null);
             try { socket.close(); } catch (e) {}
             rejectOnce(new Error(chunkText || 'Assistant stream failed'));
           }
@@ -947,6 +956,7 @@ export default function PatientDashboard() {
         return filtered;
       });
       setIsAiProcessing(false);
+      setProcessingState(null);
       try { addNotification({ type: 'error', message: "Failed to send message: " + err.message }); } catch (e) {}
     }
   };
@@ -1237,7 +1247,7 @@ export default function PatientDashboard() {
                     </div>
                   </div>
                 ))}
-                {isAiProcessing && <AiProcessingCard active={isAiProcessing} />}
+                {isAiProcessing && <AiProcessingCard active={isAiProcessing} status={processingState} />}
                 <div ref={chatEndRef} />
               </div>
 <form id="chatInputForm" style={{ position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)', width: 'calc(90% - 48px)', maxWidth: '720px', display: 'flex', alignItems: 'center', padding: '6px 6px 6px 12px', background: '#ffffff', borderRadius: '50px', boxShadow: '0 16px 32px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', zIndex: 10 }} onSubmit={handleChatSubmit}>

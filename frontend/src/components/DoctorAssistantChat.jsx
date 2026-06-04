@@ -75,6 +75,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState('');
   const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [processingState, setProcessingState] = useState(null);
   const messageEndRef = useRef(null);
 
   const selectedTargetPatientId = useMemo(
@@ -144,6 +145,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
 
     setMessages((current) => [...current, userMessage]);
     setIsAiProcessing(true);
+    setProcessingState(null);
     setInputValue('');
     setSending(true);
     setStatus('connecting');
@@ -203,8 +205,10 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
         const eventType = String(payload?.type || payload?.status || '').toLowerCase();
         const chunkText = String(payload?.content || payload?.text || payload?.chunk || '');
 
-        if ((eventType === 'token' || eventType === 'message') && chunkText) {
-          setIsAiProcessing(false);
+        if (eventType === 'status') {
+          setProcessingState(String(payload?.node || ''));
+        } else if ((eventType === 'token' || eventType === 'message') && chunkText) {
+          // Processing card stays visible during streaming.
           console.log('[FE-DR] TOKEN_RAW:', JSON.stringify(chunkText));
           const sanitizedChunk = sanitizeAiMessage(chunkText);
           console.log('[FE-DR] TOKEN_SANITIZED:', JSON.stringify(sanitizedChunk));
@@ -242,6 +246,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
 
         if (isDoneEvent) {
           setIsAiProcessing(false);
+          setProcessingState(null);
           console.log('[FE-DR] DONE_EVENT_RAW:', JSON.stringify(String(chunkText || finalText || '')));
           const textReply = sanitizeAiMessage(String(chunkText || finalText || '').trim() || 'Doctor Copilot Scaffold Online');
           console.log('[FE-DR] DONE_EVENT_SANITIZED:', JSON.stringify(textReply));
@@ -262,6 +267,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
 
         if (eventType === 'error') {
           setIsAiProcessing(false);
+          setProcessingState(null);
           try { socket.close(); } catch (e) {}
           rejectOnce(new Error(chunkText || 'Doctor assistant stream failed'));
         }
@@ -313,6 +319,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
         return filtered;
       });
       setIsAiProcessing(false);
+      setProcessingState(null);
       setError(err?.message || 'Failed to send assistant message');
     } finally {
       setSending(false);
@@ -389,7 +396,7 @@ export default function DoctorAssistantChat({ consultations = [], defaultConsult
               </div>
             );
           })}
-          {isAiProcessing && <AiProcessingCard active={isAiProcessing} />}
+          {isAiProcessing && <AiProcessingCard active={isAiProcessing} status={processingState} />}
           <div ref={messageEndRef} />
         </div>
 

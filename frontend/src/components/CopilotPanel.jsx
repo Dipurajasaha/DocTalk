@@ -49,6 +49,7 @@ export default function CopilotPanel({ patientList = [] }) {
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState('');
   const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [processingState, setProcessingState] = useState(null);
   const socketRef = useRef(null);
   const messageEndRef = useRef(null);
 
@@ -138,8 +139,13 @@ export default function CopilotPanel({ patientList = [] }) {
         return;
       }
 
+      if (eventType === 'status') {
+        setProcessingState(String(payload?.node || ''));
+        return;
+      }
+
       if ((eventType === 'token' || eventType === 'message') && chunkText) {
-        setIsAiProcessing(false);
+        // Processing card stays visible during streaming.
         console.log('[FE-CP] TOKEN_RAW:', JSON.stringify(chunkText));
         const sanitizedChunk = sanitizeAiMessage(chunkText);
         console.log('[FE-CP] TOKEN_SANITIZED:', JSON.stringify(sanitizedChunk));
@@ -151,6 +157,7 @@ export default function CopilotPanel({ patientList = [] }) {
 
       if (eventType === 'final' || eventType === 'done' || eventType === 'end' || payload?.isFinal === true) {
         setIsAiProcessing(false);
+        setProcessingState(null);
         const rawReply = String(chunkText || finalText || '');
         console.log('[FE-CP] FINAL_RAW:', JSON.stringify(rawReply));
         const replyText = rawReply.trim() || 'Doctor Copilot is ready.';
@@ -167,6 +174,7 @@ export default function CopilotPanel({ patientList = [] }) {
 
       if (eventType === 'error') {
         setIsAiProcessing(false);
+        setProcessingState(null);
         const message = chunkText || 'Doctor copilot stream failed';
         setError(message);
         try {
@@ -180,6 +188,7 @@ export default function CopilotPanel({ patientList = [] }) {
     socket.onerror = () => {
       if (cancelled) return;
       setIsAiProcessing(false);
+      setProcessingState(null);
       setError('Doctor copilot websocket connection failed');
       setStatus('idle');
     };
@@ -187,6 +196,7 @@ export default function CopilotPanel({ patientList = [] }) {
     socket.onclose = () => {
       if (cancelled) return;
       setIsAiProcessing(false);
+      setProcessingState(null);
       if (finalText) {
         console.log('[FE-CP] ONCLOSE_ACCUMULATED:', JSON.stringify(finalText));
         setMessages((currentMessages) => {
@@ -235,6 +245,7 @@ export default function CopilotPanel({ patientList = [] }) {
       userMessage,
     ]);
     setIsAiProcessing(true);
+    setProcessingState(null);
     setInputValue('');
     setError('');
 
@@ -311,7 +322,7 @@ export default function CopilotPanel({ patientList = [] }) {
               </div>
             );
           })}
-          {isAiProcessing && <AiProcessingCard active={isAiProcessing} />}
+          {isAiProcessing && <AiProcessingCard active={isAiProcessing} status={processingState} />}
           <div ref={messageEndRef} />
         </div>
 

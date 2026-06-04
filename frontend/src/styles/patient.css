@@ -100,7 +100,7 @@ body.dark .side-btn:hover {box-shadow:0 4px 10px rgba(0,0,0,.5);}
 .chat-message.model {justify-content:flex-start;}
 .chat-message.model .bubble {background:#f1f5f9;color:#222;border-bottom-left-radius:4px;}
 .chat-message .emoji {flex-shrink:0;}
-/* Old heading/list rules removed — .markdown-body in markdown.css now handles all AI message typography */
+5/* Old heading/list rules removed — .markdown-body in markdown.css now handles all AI message typography */
 
 .submit-btn {
     background: #4facfe;
@@ -588,49 +588,64 @@ body.dark .patient-nav button.active {
 }
 
 /* ------------------------------------------------------------------ */
-/* AI Processing Card — themed loader                                 */
+/* AI Processing Card — box-shadow spin loader                          */
 /* ------------------------------------------------------------------ */
 
-/* Triple-dot pulse loader — 20px, uses DocTalk violet brand color */
 .ai-processing-loader {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  width: 20px;
-  height: 20px;
+  transform: rotateZ(45deg);
+  perspective: 1000px;
+  border-radius: 50%;
+  width: 38px;
+  height: 38px;
+  color: #8B7EFF;
+  position: relative;
   flex-shrink: 0;
 }
 
-.ai-processing-loader,
-.ai-processing-loader::before,
-.ai-processing-loader::after {
+.ai-processing-loader:before,
+.ai-processing-loader:after {
   content: '';
-  width: 5px;
-  height: 5px;
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: inherit;
+  height: inherit;
   border-radius: 50%;
-  background: #8B7EFF;
-  animation: ai-processing-pulse 1.4s ease-in-out infinite;
+  transform: rotateX(70deg);
+  animation: 1s ai-processing-spin linear infinite;
 }
 
-.ai-processing-loader::before {
-  animation-delay: 0s;
+.ai-processing-loader:after {
+  color: #6C5CE7;
+  transform: rotateY(70deg);
+  animation-delay: .4s;
 }
 
-.ai-processing-loader {
-  animation-delay: 0.2s;
-}
-
-.ai-processing-loader::after {
-  animation-delay: 0.4s;
-}
-
-@keyframes ai-processing-pulse {
-  0%, 80%, 100% {
-    opacity: 0.3;
-    transform: scale(0.7);
+@keyframes ai-processing-spin {
+  0%,
+  100% {
+    box-shadow: .2em 0px 0 0px currentcolor;
   }
-  40% {
-    opacity: 1;
-    transform: scale(1);
+  12% {
+    box-shadow: .2em .2em 0 0 currentcolor;
+  }
+  25% {
+    box-shadow: 0 .2em 0 0px currentcolor;
+  }
+  37% {
+    box-shadow: -.2em .2em 0 0 currentcolor;
+  }
+  50% {
+    box-shadow: -.2em 0 0 0 currentcolor;
+  }
+  62% {
+    box-shadow: -.2em -.2em 0 0 currentcolor;
+  }
+  75% {
+    box-shadow: 0px -.2em 0 0 currentcolor;
+  }
+  87% {
+    box-shadow: .2em -.2em 0 0 currentcolor;
   }
 }

@@ -109,7 +109,6 @@ class _StreamingMetadataBuffer:
         if not stripped.startswith("{"):
             self._decided = True
             result = self._buf
-            print(f"[BUFFER] decided=non-json buf_len={len(self._buf)} return_len={len(result)} preview={result[:60]!r}")
             return result
 
         # Buffer starts with '{'. Try to find a complete JSON object.
@@ -148,9 +147,7 @@ class _StreamingMetadataBuffer:
             if len(self._buf) > 2048:
                 self._decided = True
                 result = self._buf
-                print(f"[BUFFER] safety flush buf_len={len(self._buf)} return_len={len(result)} preview={result[:60]!r}")
                 return result
-            print(f"[BUFFER] buffering buf_len={len(self._buf)} return_len=0 preview={self._buf[:60]!r}")
             return ""
 
         # We have a candidate JSON object. Validate it.
@@ -161,13 +158,11 @@ class _StreamingMetadataBuffer:
             # Not valid JSON — flush everything.
             self._decided = True
             result = self._buf
-            print(f"[BUFFER] invalid-json-flush buf_len={len(self._buf)} return_len={len(result)} preview={result[:60]!r}")
             return result
 
         # Valid JSON metadata object — discard it, emit only what follows.
         remainder = self._buf[close_index + 1 :]
         self._decided = True
-        print(f"[BUFFER] metadata removed candidate_len={len(candidate)} remainder_len={len(remainder)} preview={remainder[:60]!r}")
         return remainder
 
 
@@ -568,21 +563,17 @@ async def _run_ai_websocket(
                     node_name = str(event.get("name") or "")
                     data = dict(event.get("data") or {})
 
-                    # --- TEMPORARY INSTRUMENTATION (remove after debugging) ---
-                    _chunk_preview = ""
-                    if event_name in {"on_chat_model_stream", "on_llm_stream"}:
-                        _raw = _extract_stream_chunk_text(data.get("chunk"))
-                        _chunk_preview = _raw[:40].replace("\n", "\\n") if _raw else ""
-                    elif event_name == "on_chain_end" and node_name in {
-                        "patient_assistant_llm", "doctor_general_llm", "doctor_scoped_llm",
-                    }:
-                        _out = _extract_message_text(data.get("output"))
-                        _chunk_preview = _out[:40].replace("\n", "\\n") if _out else ""
-                    print(
-                        f"[WS-EVENT] event={event_name} node={node_name} "
-                        f"chunk_len={len(_chunk_preview)} preview={_chunk_preview!r}"
-                    )
-                    # --- END TEMPORARY INSTRUMENTATION ---
+                    # Emit status event when entering a node so the
+                    # frontend can show which stage the workflow is in.
+                    # We only emit for meaningful nodes (not START/END or
+                    # the log_entry_context bookkeeping node).
+                    if event_name == "on_chain_start" and node_name not in {"", "START", "END", "log_entry_context"}:
+                        try:
+                            await websocket.send_json({"type": "status", "node": node_name})
+                        except Exception:
+                            pass
+
+
 
                     if event_name == "on_chain_end" and node_name in {
                         "patient_assistant_llm",
@@ -593,11 +584,9 @@ async def _run_ai_websocket(
                         chunk = _extract_message_text(output)
                         if chunk:
                             final_response = _sanitize_ai_message(chunk)
-                            print(f"[WS-SEND] FINAL len={len(final_response)} preview={final_response[:60]!r}")
                             try:
                                 await websocket.send_text(final_response)
-                            except Exception as _ws_exc:
-                                print(f"[WS-SEND-FAILED] FINAL {repr(_ws_exc)}")
+                            except Exception:
                                 raise
                             streamed_token = True
                         continue
@@ -612,11 +601,9 @@ async def _run_ai_websocket(
                             if emit_text:
                                 sanitized_chunk = _sanitize_ai_message(emit_text)
                                 final_response += sanitized_chunk
-                                print(f"[WS-SEND] TOKEN len={len(sanitized_chunk)} preview={sanitized_chunk[:60]!r}")
                                 try:
                                     await websocket.send_json({"type": "token", "content": sanitized_chunk})
-                                except Exception as _ws_exc:
-                                    print(f"[WS-SEND-FAILED] TOKEN {repr(_ws_exc)}")
+                                except Exception:
                                     raise
                                 streamed_token = True
 
@@ -628,11 +615,9 @@ async def _run_ai_websocket(
                 final_response = _sanitize_ai_message(final_response)
 
                 if final_response and not streamed_token:
-                    print(f"[WS-SEND] FINAL (no-stream) len={len(final_response)} preview={final_response[:60]!r}")
                     try:
                         await websocket.send_text(final_response)
-                    except Exception as _ws_exc:
-                        print(f"[WS-SEND-FAILED] FINAL (no-stream) {repr(_ws_exc)}")
+                    except Exception:
                         raise
 
                 db_history = await chat_service.append_ai_chat_exchange(
@@ -641,7 +626,6 @@ async def _run_ai_websocket(
                     assistant_message=final_response,
                 )
 
-                print(f"[WS-SEND] FINAL event len={len(final_response)} preview={final_response[:60]!r}")
                 try:
                     await websocket.send_json(
                         {
@@ -652,14 +636,11 @@ async def _run_ai_websocket(
                             "content": final_response,
                         }
                     )
-                except Exception as _ws_exc:
-                    print(f"[WS-SEND-FAILED] FINAL event {repr(_ws_exc)}")
+                except Exception:
                     raise
             except WebSocketDisconnect:
-                print("[WS-DISCONNECT] inner")
                 return
             except Exception as exc:
-                print(f"[WS-ERROR] {repr(exc)}")
                 try:
                     await websocket.send_json(
                         {
@@ -670,13 +651,11 @@ async def _run_ai_websocket(
                             "content": str(exc),
                         }
                     )
-                except Exception as _ws_exc:
-                    print(f"[WS-SEND-FAILED] ERROR {repr(_ws_exc)}")
+                except Exception:
+                    pass
     except WebSocketDisconnect:
-        print("[WS-DISCONNECT] outer")
         return
-    except Exception as _outer_exc:
-        print(f"[WS-ERROR] outer {repr(_outer_exc)}")
+    except Exception:
         try:
             await websocket.close(code=1011)
         except Exception:
@@ -773,4 +752,3 @@ async def websocket_consultation_messages(websocket: WebSocket, consultation_id:
             await websocket.close(code=1011)
         except Exception:
             pass
-        
