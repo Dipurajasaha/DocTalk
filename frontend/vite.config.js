@@ -7,6 +7,12 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      '/health': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        timeout: PROXY_TIMEOUT_MS,
+        proxyTimeout: PROXY_TIMEOUT_MS,
+      },
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

@@ -4,11 +4,9 @@ import json
 from typing import Any
 
 from langchain_core.messages import SystemMessage
-from langchain_ollama import ChatOllama
 from pydantic import BaseModel, Field
 
-from ..common import get_ollama_chat_model, latest_message_text, message_content_text
-from backend.core.config import settings
+from ..common import get_gemini_workflow_model, latest_message_text, message_content_text
 from ..state import UnifiedChatState
 from .tools import patient_rag_tool
 
@@ -24,11 +22,7 @@ TRIAGE_SYSTEM_PROMPT = (
     "unconsciousness, blue lips, or other immediately life-threatening signs. Reply with a strict structured decision."
 )
 
-llm = ChatOllama(
-    model="qwen2.5:7b-instruct",
-    base_url=getattr(settings, "OLLAMA_BASE_URL", settings.ollama_base_url),
-    temperature=0.1,
-)
+llm = get_gemini_workflow_model(temperature=0.1)
 
 
 async def triage_evaluator(state: UnifiedChatState) -> dict[str, Any]:
@@ -36,7 +30,7 @@ async def triage_evaluator(state: UnifiedChatState) -> dict[str, Any]:
     if not latest_message:
         return {}
 
-    model = get_ollama_chat_model()
+    model = get_gemini_workflow_model()
     evaluator = model.with_structured_output(TriageEvaluation)
     evaluation = await evaluator.ainvoke(
         [

@@ -6,11 +6,8 @@ import math
 import re
 import logging
 import time
-from typing import Any
-
-import httpx
-
 from ...core.config import settings
+from .gemini import gemini_embed_text
 
 
 logger = logging.getLogger(__name__)
@@ -18,9 +15,10 @@ logger = logging.getLogger(__name__)
 
 class EmbeddingService:
     def __init__(self) -> None:
-        self.dimension = max(int(getattr(settings, "rag_embedding_dimension", 384) or 384), 64)
-        self.base_url = str(getattr(settings, "ollama_base_url", "http://localhost:11434")).rstrip("/")
-        self.model_name = str(getattr(settings, "ollama_embed_model", "nomic-embed-text")).strip() or "nomic-embed-text"
+        self.dimension = max(int(getattr(settings, "rag_embedding_dimension", 768) or 768), 64)
+        self.model_name = (
+            str(getattr(settings, "gemini_embed_model", "text-embedding-004")).strip() or "text-embedding-004"
+        )
         self.timeout_seconds = float(getattr(settings, "rag_embedding_timeout_seconds", 120.0) or 120.0)
         self._provider_checked = False
         self._provider_available = False
@@ -32,7 +30,7 @@ class EmbeddingService:
                 "component": "rag",
                 "model": self.model_name,
                 "dimension": self.dimension,
-                "provider": "ollama",
+                "provider": "gemini",
             },
         )
 
@@ -79,42 +77,32 @@ class EmbeddingService:
         if self._provider_checked:
             return self._provider_available
 
+        api_key = str(getattr(settings, "gemini_api_key", "") or "").strip()
+        if not api_key:
+            self._provider_available = False
+            self._provider_checked = True
+            logger.warning(
+                "Gemini API key missing for embeddings, using fallback",
+                extra={"component": "rag", "model": self.model_name},
+            )
+            return False
+
         try:
-            async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout_seconds) as client:
-                response = await client.get("/api/tags")
-                response.raise_for_status()
-                payload = response.json()
-                models = payload.get("models") if isinstance(payload, dict) else None
-                if isinstance(models, list):
-                    model_names = {str(item.get("name") or "") for item in models if isinstance(item, dict)}
-                    if model_names and not any(
-                        name == self.model_name or name.startswith(f"{self.model_name}:") for name in model_names
-                    ):
-                        raise RuntimeError(f"Embedding model {self.model_name} is not available in Ollama")
-                self._provider_available = True
-                self._provider_checked = True
-                return True
+            await gemini_embed_text("health check", model=self.model_name, dimensions=self.dimension)
+            self._provider_available = True
+            self._provider_checked = True
+            return True
         except Exception as exc:
             self._provider_available = False
             self._provider_checked = True
             logger.warning(
-                "Ollama embedding provider unavailable, using fallback",
+                "Gemini embedding provider unavailable, using fallback",
                 extra={"component": "rag", "error": str(exc), "model": self.model_name},
             )
             return False
 
     async def _embed_with_provider(self, text: str) -> list[float]:
-        async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout_seconds) as client:
-            response = await client.post(
-                "/api/embeddings",
-                json={"model": self.model_name, "prompt": text[:8192]},
-            )
-            response.raise_for_status()
-            payload = response.json()
-            embedding = payload.get("embedding") if isinstance(payload, dict) else None
-            if embedding is None:
-                raise RuntimeError("Embedding response missing vector")
-            return [float(value) for value in embedding]
+        return await gemini_embed_text(text, model=self.model_name, dimensions=self.dimension)
 
     def _fallback_embedding(self, text: str) -> list[float]:
         tokens = re.findall(r"[A-Za-z0-9]+", text.lower())

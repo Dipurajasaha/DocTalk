@@ -1,46 +1,35 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: doctalk-postgres
+  mysql:
+    image: mysql:8.0
+    container_name: doctalk-mysql
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-doctalk}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-doctalk}
-      POSTGRES_DB: ${POSTGRES_DB:-doctalk}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-doctalkroot}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-doctalk}
+      MYSQL_USER: ${MYSQL_USER:-doctalk}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-doctalk}
     ports:
-      - "5432:5432"
+      - "3307:3306"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./data/initdb:/docker-entrypoint-initdb.d:ro
+      - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-doctalk} -d ${POSTGRES_DB:-doctalk}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${MYSQL_USER:-doctalk}", "-p${MYSQL_PASSWORD:-doctalk}"]
       interval: 5s
       timeout: 5s
-      retries: 10
-      start_period: 10s
+      retries: 15
+      start_period: 15s
 
-  pgadmin:
-    image: dpage/pgadmin4:8.12
-    container_name: doctalk-pgadmin
+  adminer:
+    image: adminer:latest
+    container_name: doctalk-adminer
     restart: unless-stopped
-    profiles: ["tools"]
-    env_file:
-      - .env
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@local}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
-      PGADMIN_CONFIG_SERVER_MODE: "True"
     ports:
-      - "8080:80"
+      - "8080:8080"
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
 
 volumes:
-  postgres_data:
-  pgadmin_data:
-
+  mysql_data:

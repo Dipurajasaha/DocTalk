@@ -5,26 +5,22 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage
 
+from backend.ai.core_services.gemini import GeminiChatModel, get_gemini_chat_model
 from backend.core.config import settings
 
-try:
-    from langchain_ollama import ChatOllama
-except ImportError:  # pragma: no cover - fallback for older environments
-    from langchain_community.chat_models import ChatOllama
-
-
-DEFAULT_CHAT_MODEL = "qwen2.5:7b-instruct"
-DEFAULT_CHAT_BASE_URL = str(getattr(settings, "ollama_base_url", "http://localhost:11434")).rstrip("/")
-
-
-llm = ChatOllama(model=DEFAULT_CHAT_MODEL, base_url=DEFAULT_CHAT_BASE_URL, temperature=0.2)
+llm = get_gemini_chat_model()
 
 
 @lru_cache(maxsize=1)
-def get_ollama_chat_model(temperature: float = 0.2) -> ChatOllama:
+def get_gemini_workflow_model(temperature: float = 0.2) -> GeminiChatModel:
     if temperature == 0.2:
         return llm
-    return ChatOllama(model=DEFAULT_CHAT_MODEL, base_url=DEFAULT_CHAT_BASE_URL, temperature=temperature)
+    return get_gemini_chat_model(temperature=temperature)
+
+
+def get_ollama_chat_model(temperature: float = 0.2) -> GeminiChatModel:
+    """Backward-compatible alias; all chat flows use Gemini."""
+    return get_gemini_workflow_model(temperature=temperature)
 
 
 def latest_message_text(messages: list[BaseMessage] | list[Any] | None) -> str:

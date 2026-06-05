@@ -45,11 +45,10 @@ export default function XrayAnalyzerPanel() {
     }
   };
 
-  const imageBase = 'http://127.0.0.1:8000';
   const resolveImageUrl = (path) => {
     if (!path) return '';
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
-    if (path.startsWith('/')) return `${imageBase}${path}`;
+    if (path.startsWith('/')) return path;
     return path;
   };
 

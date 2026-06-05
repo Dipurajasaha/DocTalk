@@ -4,8 +4,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
+from langchain_core.messages import HumanMessage
 
 from ..core.database import prisma
+from ..workflows.state import create_workflow_state
+from ..workflows.unified_chat_graph import unified_chat_graph
 
 class ChatService:
     def __init__(self, client: Any = prisma) -> None:
@@ -136,12 +139,55 @@ class ChatService:
     async def process_chat_message(self, user_id: str, role: str, consultation_id: str, message: str) -> dict[str, Any]:
         saved_message = await self.save_message(consultation_id, user_id, role, message)
 
-        # TODO: Implement LangGraph Orchestration here
+        ai_session_id = f"consultation-{consultation_id}"
+        normalized_role = str(role or "").strip().lower()
+        if normalized_role not in {"patient", "doctor"}:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid role for chat")
+
+        consultation = await self._load_consultation(consultation_id)
+        target_patient_id = str(getattr(consultation, "patientUsername", "") or "").strip() or None
+        mode = "patient_scoped" if normalized_role == "doctor" and target_patient_id else "general"
+
+        await self.ensure_ai_session(user_id, normalized_role, ai_session_id, mode)
+
+        workflow_state = create_workflow_state(
+            messages=[HumanMessage(content=str(message or "").strip())],
+            role=normalized_role,  # type: ignore[arg-type]
+            user_id=user_id,
+            ai_session_id=ai_session_id,
+            target_patient_id=target_patient_id if normalized_role == "doctor" else None,
+            context_payload={
+                "consultation_id": consultation_id,
+                "ai_session_id": ai_session_id,
+                "user_id": user_id,
+                "target_patient_id": target_patient_id,
+                "role": normalized_role,
+            },
+        )
+
+        ai_text = ""
+        try:
+            result = await unified_chat_graph.ainvoke(
+                workflow_state,
+                config={"configurable": {"thread_id": f"{user_id}:{ai_session_id}"}},
+            )
+            ai_text = str(result.get("final_response") or "").strip()
+        except Exception as exc:
+            ai_text = (
+                "AI assistance is temporarily unavailable. "
+                f"Your message was saved. ({type(exc).__name__})"
+            )
+
+        if not ai_text:
+            ai_text = "I received your message and saved it to this consultation."
+
+        assistant_record = await self.save_assistant_message(consultation_id, normalized_role, ai_text)
+
         return {
             "success": True,
             "consultation_id": consultation_id,
             "user_message": saved_message,
-            "ai_message": "LangGraph AI is offline.",
+            "ai_message": assistant_record,
         }
 
     @staticmethod

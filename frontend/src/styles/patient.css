@@ -100,7 +100,7 @@ body.dark .side-btn:hover {box-shadow:0 4px 10px rgba(0,0,0,.5);}
 .chat-message.model {justify-content:flex-start;}
 .chat-message.model .bubble {background:#f1f5f9;color:#222;border-bottom-left-radius:4px;}
 .chat-message .emoji {flex-shrink:0;}
-5/* Old heading/list rules removed — .markdown-body in markdown.css now handles all AI message typography */
+/* Old heading/list rules removed — .markdown-body in markdown.css now handles all AI message typography */
 
 .submit-btn {
     background: #4facfe;

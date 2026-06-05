@@ -15,9 +15,11 @@ import remarkGfm from 'remark-gfm';
  *   <MarkdownMessage text={message.text} />
  */
 export default function MarkdownMessage({ text }) {
-  const cleanedText = (text || '')
-    .replace(/^```markdown\s*\n?/i, '')
-    .replace(/\n?```\s*$/, '');
+  const cleanedText = String(text || '')
+    .replace(/^\uFEFF/, '')
+    .replace(/^```(?:markdown|md)?\s*\n?/i, '')
+    .replace(/\n?```\s*$/, '')
+    .trim();
 
   return (
     <div className="markdown-body chat-markdown">

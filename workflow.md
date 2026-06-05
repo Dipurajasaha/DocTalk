@@ -285,8 +285,10 @@ point:
 
 ## Model Configuration
 
-- **Chat model:** `qwen2.5:7b-instruct` via Ollama (default base URL:
-  `http://localhost:11434`)
+All models are served through the **Google Gemini API** (`backend/ai/core_services/gemini.py`).
+
+- **Chat model:** `gemini-2.0-flash` (override with `GEMINI_MODEL`)
 - **Temperature:** `0.1` for all LLM nodes (low randomness for clinical safety)
-- **Embeddings:** `nomic-embed-text` (384 dimensions) for pgvector retrieval
+- **Embeddings:** `text-embedding-004` (768 dimensions, override with `GEMINI_EMBED_MODEL`)
+- **API key:** `GEMINI_API_KEY` (required for full AI functionality)
 - **Checkpointer:** `MemorySaver` (in-memory; resets on server restart)

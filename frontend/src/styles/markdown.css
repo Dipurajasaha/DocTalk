@@ -5,7 +5,7 @@
 .markdown-body {
   font-size: 14px;
   line-height: 1.6;
-  color: #1e293b;
+  color: #0f172a;
   word-wrap: break-word;
   overflow-wrap: anywhere;
 }
@@ -49,12 +49,12 @@
 
 /* Links */
 .markdown-body a {
-  color: #6c5ce7;
+  color: #0f766e;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .markdown-body a:hover {
-  color: #5a4bd6;
+  color: #115e59;
 }
 
 /* Strong / Em */
@@ -100,26 +100,26 @@
 
 /* Inline code */
 .markdown-body code {
-  background: #f1f5f9;
+  background: #e2e8f0;
   border-radius: 4px;
   padding: 1px 5px;
   font-size: 0.85em;
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  color: #e11d48;
+  color: #7c2d12;
 }
 
 /* Fenced code blocks */
 .markdown-body pre {
   margin: 6px 0;
   padding: 10px 12px;
-  background: #1e293b;
+  background: #0f172a;
   border-radius: 8px;
   overflow-x: auto;
 }
 .markdown-body pre code {
   background: none;
   padding: 0;
-  color: #e2e8f0;
+  color: #e5e7eb;
   font-size: 0.82em;
   line-height: 1.5;
 }

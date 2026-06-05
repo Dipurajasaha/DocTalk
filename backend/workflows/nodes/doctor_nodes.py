@@ -4,10 +4,8 @@ import json
 from typing import Any
 
 from langchain_core.messages import SystemMessage
-from langchain_ollama import ChatOllama
 
-from ..common import latest_message_text, message_content_text
-from backend.core.config import settings
+from ..common import get_gemini_workflow_model, latest_message_text, message_content_text
 from ..state import UnifiedChatState
 from .tools import doctor_rag_tool
 
@@ -17,11 +15,7 @@ DOCTOR_SYSTEM_PROMPT = (
     "focus on differential considerations, red-flag assessment, and next-step clinical thinking. Be concise but detailed."
 )
 
-llm = ChatOllama(
-    model="qwen2.5:7b-instruct",
-    base_url=getattr(settings, "OLLAMA_BASE_URL", settings.ollama_base_url),
-    temperature=0.1,
-)
+llm = get_gemini_workflow_model(temperature=0.1)
 
 
 async def doctor_general_llm(state: UnifiedChatState) -> dict[str, Any]:

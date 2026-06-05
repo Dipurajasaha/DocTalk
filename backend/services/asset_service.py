@@ -10,11 +10,11 @@ from typing import Any, Literal
 from uuid import uuid4
 
 import fitz
-import httpx
 from fastapi import HTTPException, UploadFile, status
 from PIL import Image as PILImage
 from prisma import Prisma
 
+from ..ai.core_services.gemini import gemini_complete_json
 from ..ai.core_services.ocr import ocr_service
 from ..ai.vectorstore.pgvector_service import pgvector_service
 from ..core.config import DATA_ROOT, settings
@@ -436,7 +436,7 @@ async def _classify_pdf_text(extracted_text: str) -> AssetCategory:
         "Choose PRESCRIPTION for medication orders, pharmacy slips, dosage instructions, and doctor prescriptions."
     )
     sample_text = (extracted_text or "").strip()[:1000]
-    response = await _call_ollama_json(prompt, sample_text or "No readable text was extracted from the PDF.")
+    response = await _call_gemini_json(prompt, sample_text or "No readable text was extracted from the PDF.")
     return _normalize_category(response.get("category") or response.get("assetCategory") or response.get("label") or sample_text)
 
 
@@ -497,37 +497,22 @@ def _normalize_category(value: Any) -> AssetCategory:
     raise ValueError(f"Unable to classify asset category from response: {value!r}")
 
 
-async def _call_ollama_json(prompt: str, payload: str) -> dict[str, Any]:
-    base_url = str(getattr(settings, "ollama_base_url", "http://localhost:11434")).rstrip("/")
-    model_name = str(getattr(settings, "ollama_chat_model", "")).strip() or "qwen2.5:7b-instruct"
-    timeout_seconds = float(getattr(settings, "ai_request_timeout_seconds", 45.0) or 45.0)
-    body = {
-        "model": model_name,
-        "messages": _build_ollama_messages(prompt, payload),
-        "format": "json",
-        "stream": False,
-        "keep_alive": "8m",
-        "options": {
-            "temperature": 0.1,
-            "num_ctx": 3072,
-            "num_predict": 256,
-        },
-    }
-
-    async with httpx.AsyncClient(base_url=base_url, timeout=timeout_seconds) as client:
-        response = await client.post("/api/chat", json=body)
-        response.raise_for_status()
-        return _parse_ollama_response(response.json())
+async def _call_gemini_json(prompt: str, payload: str) -> dict[str, Any]:
+    return await gemini_complete_json(
+        _build_gemini_messages(prompt, payload),
+        temperature=0.1,
+        max_output_tokens=256,
+    )
 
 
-def _build_ollama_messages(prompt: str, payload: str) -> list[dict[str, Any]]:
+def _build_gemini_messages(prompt: str, payload: str) -> list[dict[str, Any]]:
     return [
         {"role": "system", "content": prompt},
         {"role": "user", "content": str(payload)},
     ]
 
 
-def _parse_ollama_response(payload: Any) -> dict[str, Any]:
+def _parse_gemini_response(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
 

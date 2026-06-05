@@ -7,19 +7,7 @@ export const authApi = {
   loginDoctor: (doctorId, password) => apiClient.post('/api/auth/doctor/login', { doctor_id: doctorId, password }, { retries: 0 }),
   signupPatient: (username, name, password) => apiClient.post('/api/auth/patient/signup', { username, name, password }, { retries: 0 }),
   signupDoctor: (doctorId, name, password) => apiClient.post('/api/auth/doctor/signup', { doctor_id: doctorId, name, password }, { retries: 0 }),
-  me: async (token) => {
-    // Try common session endpoints used by different backend versions.
-    const endpoints = ['/api/me', '/api/doctor_session', '/api/patient_session', '/me'];
-    for (const ep of endpoints) {
-      try {
-        const data = await apiClient.get(ep, { auth: true, token, retries: 0 });
-        if (data) return data;
-      } catch (e) {
-        // ignore and try next
-      }
-    }
-    return null;
-  },
+  me: (token) => apiClient.get('/api/me', { auth: true, token, retries: 0 }),
 };
 
 export const patientApi = {

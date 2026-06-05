@@ -9,7 +9,7 @@ rem   start_dev.bat
 rem   start_dev.bat --logs      (opens docker logs terminal)
 rem   start_dev.bat --check     (validation only, no terminals)
 rem Environment toggles:
-rem   DOCTALK_PRISMA_SYNC=1     (force prisma generate + db push)
+rem   DOCTALK_PRISMA_SYNC=1     (bypassed/no-op in mysql mode)
 rem ------------------------------------------------------------
 
 call :init_colors
@@ -53,15 +53,8 @@ if not exist "frontend\package.json" (
 )
 
 if not exist "docker-compose.yml" (
-    call :err "Missing docker-compose.yml. Cannot start PostgreSQL service."
+    call :err "Missing docker-compose.yml. Cannot start MySQL service."
     exit /b 1
-)
-
-if not exist "prisma\schema.prisma" (
-    call :warn "Missing prisma\schema.prisma. Prisma sync checks will be skipped."
-    set "PRISMA_SCHEMA_OK=0"
-) else (
-    set "PRISMA_SCHEMA_OK=1"
 )
 
 call :detect_frontend_pm
@@ -91,73 +84,36 @@ if errorlevel 1 (
 )
 call :ok "Docker CLI and daemon are available"
 
-call :info "[2/6] Starting PostgreSQL via Docker Compose"
-docker compose up -d postgres >nul 2>&1
+call :info "[2/6] Starting MySQL via Docker Compose"
+docker compose up -d mysql >nul 2>&1
 if errorlevel 1 (
-    call :err "Failed to start postgres service with docker compose."
+    call :err "Failed to start mysql service with docker compose."
     exit /b 1
 )
 
-call :wait_postgres 60
+call :wait_mysql 60
 if errorlevel 1 (
-    call :err "PostgreSQL did not become healthy in time."
+    call :err "MySQL did not become healthy in time."
     exit /b 1
 )
-call :ok "PostgreSQL is healthy"
+call :ok "MySQL is healthy"
 
-call :info "[3/6] Checking Ollama and required models"
-set "OLLAMA_READY=0"
-set "MODEL_QWEN=0"
-set "MODEL_EMBED=0"
-set "MODEL_VISION=0"
-
-where ollama >nul 2>&1
-if errorlevel 1 (
-    call :warn "Ollama CLI not found. Install Ollama for AI features."
+call :info "[3/6] Checking Gemini API configuration"
+set "GEMINI_READY=0"
+if not exist ".env" (
+    call :warn "Missing .env. Copy .env.example and set GEMINI_API_KEY for AI features."
 ) else (
-    call :wait_ollama 20
+    findstr /I /B "GEMINI_API_KEY=" ".env" | findstr /V /I "your_gemini_api_key_here" >nul 2>&1
     if errorlevel 1 (
-        call :warn "Ollama is installed but not responding. Start Ollama and retry."
+        call :warn "GEMINI_API_KEY is missing or still a placeholder. AI chat, vision, and RAG embeddings will fall back or fail."
     ) else (
-        set "OLLAMA_READY=1"
-        call :ok "Ollama is reachable"
-        call :check_ollama_models
+        set "GEMINI_READY=1"
+        call :ok "GEMINI_API_KEY is configured"
     )
 )
 
-call :info "[4/6] Prisma sync checks"
-set "RUN_PRISMA_SYNC=0"
-if "%PRISMA_SCHEMA_OK%"=="1" (
-    if not exist "prisma\client.py" set "RUN_PRISMA_SYNC=1"
-    if /I "%DOCTALK_PRISMA_SYNC%"=="1" set "RUN_PRISMA_SYNC=1"
-
-    if "%RUN_PRISMA_SYNC%"=="1" (
-        if "%VENV_OK%"=="1" (
-            call :info "Running prisma generate"
-            call ".venv\Scripts\activate.bat" >nul 2>&1
-            python -m prisma generate >nul 2>&1
-            if errorlevel 1 (
-                call :warn "prisma generate failed. Backend may fail if Prisma client is not generated."
-            ) else (
-                call :ok "prisma generate completed"
-            )
-
-            call :info "Running prisma db push"
-            python -m prisma db push >nul 2>&1
-            if errorlevel 1 (
-                call :warn "prisma db push failed. Check DATABASE_URL and migration state."
-            ) else (
-                call :ok "prisma db push completed"
-            )
-        ) else (
-            call :warn "Skipping Prisma sync because .venv is missing."
-        )
-    ) else (
-        call :ok "Prisma client appears present. Skipping sync. Set DOCTALK_PRISMA_SYNC=1 to force."
-    )
-) else (
-    call :warn "Skipping Prisma sync checks because schema file is missing."
-)
+call :info "[4/6] Database schema checks"
+call :ok "Schema checks bypassed (schema auto-initializes on startup)"
 
 if "%CHECK_ONLY%"=="1" (
     call :info "Check-only mode complete. No terminals were started."
@@ -167,7 +123,7 @@ if "%CHECK_ONLY%"=="1" (
 call :info "[5/6] Starting backend and frontend under the orchestrator"
 
 set "DOCTALK_ROOT=%ROOT%"
-set "DOCTALK_BACKEND_EXE=%ROOT%\.venv\Scripts\python.exe"
+set "DOCTALK_BACKEND_EXE=C:\Program Files\Python312\python.exe"
 set "DOCTALK_BACKEND_ARGS=-m uvicorn backend.main:app --reload --reload-dir backend --host 127.0.0.1 --port %BACKEND_PORT%"
 set "DOCTALK_BACKEND_PORT=%BACKEND_PORT%"
 set "DOCTALK_FRONTEND_DIR=%ROOT%\frontend"
@@ -279,13 +235,13 @@ for /L %%P in (5173,1,5183) do (
 call :err "No free frontend port found in the 5173-5183 range."
 exit /b 1
 
-:wait_postgres
+:wait_mysql
 set /a "MAX_TRIES=%~1"
 if "%MAX_TRIES%"=="" set "MAX_TRIES=60"
 for /L %%I in (1,1,%MAX_TRIES%) do (
-    for /f "usebackq delims=" %%S in (`docker inspect -f "{{.State.Health.Status}}" doctalk-postgres 2^>nul`) do set "PG_STATUS=%%S"
+    for /f "usebackq delims=" %%S in (`docker inspect -f "{{.State.Health.Status}}" doctalk-mysql 2^>nul`) do set "PG_STATUS=%%S"
     if /I "!PG_STATUS!"=="healthy" exit /b 0
-    >nul timeout /t 1 /nobreak
+    ping -n 2 127.0.0.1 >nul
 )
 exit /b 1
 
@@ -295,7 +251,7 @@ if "%MAX_TRIES%"=="" set "MAX_TRIES=20"
 for /L %%I in (1,1,%MAX_TRIES%) do (
     ollama list >nul 2>&1
     if not errorlevel 1 exit /b 0
-    >nul timeout /t 1 /nobreak
+    ping -n 2 127.0.0.1 >nul
 )
 exit /b 1
 
@@ -324,7 +280,7 @@ if "%WAIT_TRIES%"=="" set "WAIT_TRIES=45"
 for /L %%I in (1,1,%WAIT_TRIES%) do (
     curl -fsS "%WAIT_URL%" >nul 2>&1
     if not errorlevel 1 exit /b 0
-    >nul timeout /t 1 /nobreak
+    ping -n 2 127.0.0.1 >nul
 )
 exit /b 1
 
@@ -337,18 +293,18 @@ echo Backend:  http://127.0.0.1:%BACKEND_PORT%   [%BACKEND_STATUS%]
 echo API docs: http://127.0.0.1:%BACKEND_PORT%/docs
 echo Frontend: http://127.0.0.1:%FRONTEND_PORT%   [%FRONTEND_STATUS%]
 
-docker inspect -f "{{.State.Health.Status}}" doctalk-postgres >nul 2>&1
+docker inspect -f "{{.State.Health.Status}}" doctalk-mysql >nul 2>&1
 if errorlevel 1 (
-    echo Database: postgres container not detected
+    echo Database: mysql container not detected
 ) else (
-    for /f "usebackq delims=" %%S in (`docker inspect -f "{{.State.Health.Status}}" doctalk-postgres 2^>nul`) do set "PG_SUM=%%S"
-    echo Database: postgres container health = !PG_SUM!
+    for /f "usebackq delims=" %%S in (`docker inspect -f "{{.State.Health.Status}}" doctalk-mysql 2^>nul`) do set "PG_SUM=%%S"
+    echo Database: mysql container health = !PG_SUM!
 )
 
-if "%OLLAMA_READY%"=="1" (
-    echo Ollama:   reachable
+if "%GEMINI_READY%"=="1" (
+    echo Gemini:   API key configured
 ) else (
-    echo Ollama:   unavailable
+    echo Gemini:   API key missing
 )
 echo.
 set "TERMINALS=Backend, Frontend"
@@ -358,5 +314,5 @@ echo.
 exit /b 0
 
 :orchestrate
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $root=$env:DOCTALK_ROOT; $backend=$null; $frontend=$null; $streamlit=$null; $shutdown=$false; $backendReady=$false; $frontendReady=$false; $streamlitReady=$false; $backendStatus='not reachable yet'; $frontendStatus='not reachable yet'; $streamlitStatus='not reachable yet'; $nextStatus=Get-Date; $handler=[ConsoleCancelEventHandler]{ param($sender,$e) $e.Cancel=$true; $script:shutdown=$true; Write-Host ''; Write-Host '[INFO] CTRL+C received. Stopping backend and frontend...' }; [Console]::add_CancelKeyPress($handler); function StopP([System.Diagnostics.Process]$p){ if($p -and -not $p.HasExited){ try{ taskkill /PID $p.Id /T /F | Out-Null } catch{} } }; try { if($env:DOCTALK_NEED_FRONTEND_INSTALL -eq '1'){ Write-Host '[INFO] Installing frontend dependencies...'; $install=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/s','/c',$env:DOCTALK_FRONTEND_INSTALL_CMD) -WorkingDirectory $env:DOCTALK_FRONTEND_DIR -Wait -PassThru; if($install.ExitCode -ne 0){ throw 'Frontend install failed.' } }; $backend=Start-Process -FilePath $env:DOCTALK_BACKEND_EXE -ArgumentList @('-m','uvicorn','backend.main:app','--reload','--reload-dir','backend','--host','127.0.0.1','--port',$env:DOCTALK_BACKEND_PORT) -WorkingDirectory $root -PassThru -NoNewWindow; $frontendCommand=$env:DOCTALK_FRONTEND_DEV_CMD + ' -- --host 127.0.0.1 --port ' + $env:DOCTALK_FRONTEND_PORT + ' --strictPort'; $frontend=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/s','/c',$frontendCommand) -WorkingDirectory $env:DOCTALK_FRONTEND_DIR -PassThru -NoNewWindow; if($env:DOCTALK_LAUNCH_STREAMLIT -eq '1'){ $streamlitCmd='streamlit run "' + ($root + '\streamlit_app\app.py') + '" --server.port ' + $env:DOCTALK_STREAMLIT_PORT; $streamlit=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/s','/c',$streamlitCmd) -WorkingDirectory $root -PassThru -NoNewWindow } Write-Host '[INFO] [6/6] Waiting for service readiness'; $deadline=(Get-Date).AddSeconds(45); while(-not $shutdown -and (-not $backendReady -or -not $frontendReady -or ($env:DOCTALK_LAUNCH_STREAMLIT -eq '1' -and -not $streamlitReady))){ if(-not $backendReady){ try{ Invoke-WebRequest -UseBasicParsing ('http://127.0.0.1:' + $env:DOCTALK_BACKEND_PORT + '/health') -TimeoutSec 2 | Out-Null; $backendReady=$true; $backendStatus='ready'; Write-Host '[OK] Backend health endpoint is reachable' }catch{} }; if(-not $frontendReady){ try{ Invoke-WebRequest -UseBasicParsing ('http://127.0.0.1:' + $env:DOCTALK_FRONTEND_PORT) -TimeoutSec 2 | Out-Null; $frontendReady=$true; $frontendStatus='ready'; Write-Host '[OK] Frontend dev server is reachable' }catch{} }; if($env:DOCTALK_LAUNCH_STREAMLIT -eq '1' -and -not $streamlitReady){ try{ Invoke-WebRequest -UseBasicParsing ('http://127.0.0.1:' + $env:DOCTALK_STREAMLIT_PORT) -TimeoutSec 2 | Out-Null; $streamlitReady=$true; $streamlitStatus='ready'; Write-Host '[OK] Streamlit dev server is reachable' }catch{} }; if((Get-Date) -ge $nextStatus){ $ollamaStatus=if($env:OLLAMA_READY -eq '1'){ 'reachable' } else { 'unavailable' }; Write-Host ('[STATUS] backend={0} frontend={1} streamlit={2} postgres=healthy ollama={3}' -f $backendStatus, $frontendStatus, $streamlitStatus, $ollamaStatus); $nextStatus=(Get-Date).AddSeconds(15) }; if((Get-Date) -ge $deadline -and (-not $backendReady -or -not $frontendReady -or ($env:DOCTALK_LAUNCH_STREAMLIT -eq '1' -and -not $streamlitReady))){ if(-not $backendReady){ Write-Host '[WARN] Backend health endpoint is not reachable yet.' }; if(-not $frontendReady){ Write-Host '[WARN] Frontend dev server is not reachable yet.' }; if($env:DOCTALK_LAUNCH_STREAMLIT -eq '1' -and -not $streamlitReady){ Write-Host '[WARN] Streamlit dev server is not reachable yet.' }; break }; Start-Sleep -Seconds 1 }; Write-Host ''; Write-Host '=============================================================='; Write-Host '  Startup Summary'; Write-Host '=============================================================='; Write-Host ('Backend:  http://127.0.0.1:{0}   [{1}]' -f $env:DOCTALK_BACKEND_PORT, $backendStatus); Write-Host ('API docs: http://127.0.0.1:{0}/docs' -f $env:DOCTALK_BACKEND_PORT); Write-Host ('Frontend: http://127.0.0.1:{0}   [{1}]' -f $env:DOCTALK_FRONTEND_PORT, $frontendStatus); Write-Host ('Streamlit: http://127.0.0.1:{0}   [{1}]' -f $env:DOCTALK_STREAMLIT_PORT, $streamlitStatus); Write-Host 'Database: postgres container health = healthy'; Write-Host ('Ollama:   {0}' -f $(if($env:OLLAMA_READY -eq '1'){ 'reachable' } else { 'unavailable' })); Write-Host ''; Write-Host 'Terminals started: Backend, Frontend'; Write-Host ''; Write-Host '[INFO] Development orchestrator is running. Press Ctrl+C to stop all services.'; while(-not $shutdown){ if((Get-Date) -ge $nextStatus){ $backendStatus=if($backend -and $backend.HasExited){ 'stopped' } else { 'running' }; $frontendStatus=if($frontend -and $frontend.HasExited){ 'stopped' } else { 'running' }; $streamlitStatus=if($streamlit -and $streamlit.HasExited){ 'stopped' } else { 'running' }; $ollamaStatus=if($env:OLLAMA_READY -eq '1'){ 'reachable' } else { 'unavailable' }; Write-Host ('[STATUS] backend={0} frontend={1} streamlit={2} postgres=healthy ollama={3}' -f $backendStatus, $frontendStatus, $streamlitStatus, $ollamaStatus); $nextStatus=(Get-Date).AddSeconds(15) }; if(($backend -and $backend.HasExited) -or ($frontend -and $frontend.HasExited) -or ($streamlit -and $streamlit.HasExited)){ if($backend -and $backend.HasExited){ Write-Host ('[WARN] Backend exited with code ' + $backend.ExitCode + '.') }; if($frontend -and $frontend.HasExited){ Write-Host ('[WARN] Frontend exited with code ' + $frontend.ExitCode + '.') }; if($streamlit -and $streamlit.HasExited){ Write-Host ('[WARN] Streamlit exited with code ' + $streamlit.ExitCode + '.') }; break }; Start-Sleep -Seconds 1 } } finally { $shutdown=$true; StopP $streamlit; StopP $frontend; StopP $backend; [Console]::remove_CancelKeyPress($handler) }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $root=$env:DOCTALK_ROOT; $backend=$null; $frontend=$null; $streamlit=$null; $shutdown=$false; $backendReady=$false; $frontendReady=$false; $streamlitReady=$false; $backendStatus='not reachable yet'; $frontendStatus='not reachable yet'; $streamlitStatus='not reachable yet'; $nextStatus=Get-Date; $handler=[ConsoleCancelEventHandler]{ param($sender,$e) $e.Cancel=$true; $script:shutdown=$true; Write-Host ''; Write-Host '[INFO] CTRL+C received. Stopping backend and frontend...' }; [Console]::add_CancelKeyPress($handler); function StopP([System.Diagnostics.Process]$p){ if($p -and -not $p.HasExited){ try{ taskkill /PID $p.Id /T /F | Out-Null } catch{} } }; try { if($env:DOCTALK_NEED_FRONTEND_INSTALL -eq '1'){ Write-Host '[INFO] Installing frontend dependencies...'; $install=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/s','/c',$env:DOCTALK_FRONTEND_INSTALL_CMD) -WorkingDirectory $env:DOCTALK_FRONTEND_DIR -Wait -PassThru; if($install.ExitCode -ne 0){ throw 'Frontend install failed.' } }; $backend=Start-Process -FilePath $env:DOCTALK_BACKEND_EXE -ArgumentList @('-m','uvicorn','backend.main:app','--reload','--reload-dir','backend','--host','127.0.0.1','--port',$env:DOCTALK_BACKEND_PORT) -WorkingDirectory $root -PassThru -NoNewWindow; $frontendCommand=$env:DOCTALK_FRONTEND_DEV_CMD + ' -- --host 127.0.0.1 --port ' + $env:DOCTALK_FRONTEND_PORT + ' --strictPort'; $frontend=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/s','/c',$frontendCommand) -WorkingDirectory $env:DOCTALK_FRONTEND_DIR -PassThru -NoNewWindow; if($env:DOCTALK_LAUNCH_STREAMLIT -eq '1'){ $streamlitCmd='streamlit run "' + ($root + '\streamlit_app\app.py') + '" --server.port ' + $env:DOCTALK_STREAMLIT_PORT; $streamlit=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d','/s','/c',$streamlitCmd) -WorkingDirectory $root -PassThru -NoNewWindow } Write-Host '[INFO] [6/6] Waiting for service readiness'; $deadline=(Get-Date).AddSeconds(45); while(-not $shutdown -and (-not $backendReady -or -not $frontendReady -or ($env:DOCTALK_LAUNCH_STREAMLIT -eq '1' -and -not $streamlitReady))){ if(-not $backendReady){ try{ Invoke-WebRequest -UseBasicParsing ('http://127.0.0.1:' + $env:DOCTALK_BACKEND_PORT + '/health') -TimeoutSec 2 | Out-Null; $backendReady=$true; $backendStatus='ready'; Write-Host '[OK] Backend health endpoint is reachable' }catch{} }; if(-not $frontendReady){ try{ Invoke-WebRequest -UseBasicParsing ('http://127.0.0.1:' + $env:DOCTALK_FRONTEND_PORT) -TimeoutSec 2 | Out-Null; $frontendReady=$true; $frontendStatus='ready'; Write-Host '[OK] Frontend dev server is reachable' }catch{} }; if($env:DOCTALK_LAUNCH_STREAMLIT -eq '1' -and -not $streamlitReady){ try{ Invoke-WebRequest -UseBasicParsing ('http://127.0.0.1:' + $env:DOCTALK_STREAMLIT_PORT) -TimeoutSec 2 | Out-Null; $streamlitReady=$true; $streamlitStatus='ready'; Write-Host '[OK] Streamlit dev server is reachable' }catch{} }; if((Get-Date) -ge $nextStatus){ $ollamaStatus=if($env:OLLAMA_READY -eq '1'){ 'reachable' } else { 'unavailable' }; Write-Host ('[STATUS] backend={0} frontend={1} streamlit={2} mysql=healthy ollama={3}' -f $backendStatus, $frontendStatus, $streamlitStatus, $ollamaStatus); $nextStatus=(Get-Date).AddSeconds(15) }; if((Get-Date) -ge $deadline -and (-not $backendReady -or -not $frontendReady -or ($env:DOCTALK_LAUNCH_STREAMLIT -eq '1' -and -not $streamlitReady))){ if(-not $backendReady){ Write-Host '[WARN] Backend health endpoint is not reachable yet.' }; if(-not $frontendReady){ Write-Host '[WARN] Frontend dev server is not reachable yet.' }; if($env:DOCTALK_LAUNCH_STREAMLIT -eq '1' -and -not $streamlitReady){ Write-Host '[WARN] Streamlit dev server is not reachable yet.' }; break }; Start-Sleep -Seconds 1 }; Write-Host ''; Write-Host '=============================================================='; Write-Host '  Startup Summary'; Write-Host '=============================================================='; Write-Host ('Backend:  http://127.0.0.1:{0}   [{1}]' -f $env:DOCTALK_BACKEND_PORT, $backendStatus); Write-Host ('API docs: http://127.0.0.1:{0}/docs' -f $env:DOCTALK_BACKEND_PORT); Write-Host ('Frontend: http://127.0.0.1:{0}   [{1}]' -f $env:DOCTALK_FRONTEND_PORT, $frontendStatus); Write-Host ('Streamlit: http://127.0.0.1:{0}   [{1}]' -f $env:DOCTALK_STREAMLIT_PORT, $streamlitStatus); Write-Host 'Database: mysql container health = healthy'; Write-Host ('Ollama:   {0}' -f $(if($env:OLLAMA_READY -eq '1'){ 'reachable' } else { 'unavailable' })); Write-Host ''; Write-Host 'Terminals started: Backend, Frontend'; Write-Host ''; Write-Host '[INFO] Development orchestrator is running. Press Ctrl+C to stop all services.'; while(-not $shutdown){ if((Get-Date) -ge $nextStatus){ $backendStatus=if($backend -and $backend.HasExited){ 'stopped' } else { 'running' }; $frontendStatus=if($frontend -and $frontend.HasExited){ 'stopped' } else { 'running' }; $streamlitStatus=if($streamlit -and $streamlit.HasExited){ 'stopped' } else { 'running' }; $ollamaStatus=if($env:OLLAMA_READY -eq '1'){ 'reachable' } else { 'unavailable' }; Write-Host ('[STATUS] backend={0} frontend={1} streamlit={2} mysql=healthy ollama={3}' -f $backendStatus, $frontendStatus, $streamlitStatus, $ollamaStatus); $nextStatus=(Get-Date).AddSeconds(15) }; if(($backend -and $backend.HasExited) -or ($frontend -and $frontend.HasExited) -or ($streamlit -and $streamlit.HasExited)){ if($backend -and $backend.HasExited){ Write-Host ('[WARN] Backend exited with code ' + $backend.ExitCode + '.') }; if($frontend -and $frontend.HasExited){ Write-Host ('[WARN] Frontend exited with code ' + $frontend.ExitCode + '.') }; if($streamlit -and $streamlit.HasExited){ Write-Host ('[WARN] Streamlit exited with code ' + $streamlit.ExitCode + '.') }; break }; Start-Sleep -Seconds 1 } } finally { $shutdown=$true; StopP $streamlit; StopP $frontend; StopP $backend; [Console]::remove_CancelKeyPress($handler) }"
 exit /b %errorlevel%

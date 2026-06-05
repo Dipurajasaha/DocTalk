@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import base64
 import json
 import logging
 from pathlib import Path
 from typing import Any
 
-import httpx
-
+from ..ai.core_services.gemini import gemini_complete_image_json
 from ..ai.core_services.ocr import ocr_service
 from ..ai.prompts.templates import medical_prompt_service
-from ..core.config import settings
 
 
 logger = logging.getLogger(__name__)
@@ -18,9 +15,8 @@ logger = logging.getLogger(__name__)
 
 class XRayAnalysisService:
     def __init__(self) -> None:
-        self.base_url = str(getattr(settings, "ollama_base_url", "http://localhost:11434")).rstrip("/")
-        self.model_name = str(getattr(settings, "ollama_vision_model", "llama3.2-vision")).strip() or "llama3.2-vision"
-        self.timeout_seconds = float(getattr(settings, "xray_analysis_timeout_seconds", 120.0) or 120.0)
+        self.model_name = None
+        self.timeout_seconds = 120.0
 
     async def analyze_image(
         self,
@@ -44,46 +40,34 @@ class XRayAnalysisService:
         *,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        payload = {
-            "model": self.model_name,
-            "messages": [
-                {"role": "system", "content": prompt},
-                {
-                    "role": "user",
-                    "content": "Analyze this X-ray image and return valid JSON with success, summary, findings, recommendations, warnings, and metadata.",
-                    "images": [self._encode_image_base64(image_path)],
-                },
-            ],
-            "format": "json",
-            "stream": False,
-            "keep_alive": "30s",
-            "options": {
-                "temperature": 0.2,
-                "num_ctx": 4096,
-                "num_predict": 1024,
-            },
-        }
-
         try:
-            async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout_seconds) as client:
-                response = await client.post("/api/chat", json=payload)
-                response.raise_for_status()
-                parsed = self._parse_response(response.json())
-        except httpx.TimeoutException:
+            parsed = await gemini_complete_image_json(
+                prompt=prompt,
+                image_path=image_path,
+                model=self.model_name,
+                temperature=0.2,
+                max_output_tokens=1024,
+            )
+        except Exception:
             logger.warning(
-                "X-ray vision model timed out; falling back to OCR summary",
+                "X-ray analysis failed; falling back to OCR summary",
                 extra={"component": "xray_analysis", "file_path": str(image_path)},
             )
             fallback_text = await self._fallback_from_ocr(image_path)
             merged_metadata = dict(metadata or {})
             merged_metadata.setdefault("source", "xray_analysis")
-            merged_metadata["fallback"] = "ocr_timeout"
+            merged_metadata["fallback"] = "ocr"
             return {
                 "success": True,
                 "summary": fallback_text,
                 "findings": fallback_text,
+                "analysis": fallback_text,
+                "has_defect": False,
+                "severity": 0,
+                "defect_type": "",
                 "recommendations": [],
-                "warnings": ["X-ray vision model timed out; OCR fallback used."],
+                "warnings": ["X-ray analysis fallback used."],
+                "images": {},
                 "metadata": merged_metadata,
             }
 
@@ -92,19 +76,21 @@ class XRayAnalysisService:
         if isinstance(parsed.get("metadata"), dict):
             merged_metadata.update(parsed["metadata"])
 
-        findings = str(parsed.get("findings") or parsed.get("summary") or "").strip()
+        findings = str(parsed.get("findings") or parsed.get("analysis") or parsed.get("summary") or "").strip()
+        analysis = str(parsed.get("analysis") or findings or parsed.get("summary") or "").strip()
         return {
             "success": True,
             "summary": str(parsed.get("summary") or findings).strip(),
             "findings": findings,
+            "analysis": analysis,
+            "has_defect": bool(parsed.get("has_defect", bool(findings))),
+            "severity": parsed.get("severity") or 0,
+            "defect_type": str(parsed.get("defect_type") or "").strip(),
             "recommendations": parsed.get("recommendations") or [],
             "warnings": parsed.get("warnings") or [],
+            "images": parsed.get("images") or {},
             "metadata": merged_metadata,
         }
-
-    @staticmethod
-    def _encode_image_base64(image_path: Path) -> str:
-        return base64.b64encode(image_path.read_bytes()).decode("ascii")
 
     async def _fallback_from_ocr(self, image_path: Path) -> str:
         try:
@@ -116,21 +102,6 @@ class XRayAnalysisService:
             logger.debug("OCR fallback for x-ray analysis failed", exc_info=True)
 
         return "X-ray analysis timed out before findings could be generated."
-
-    @staticmethod
-    def _parse_response(payload: Any) -> dict[str, Any]:
-        if isinstance(payload, dict):
-            message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
-            content = message.get("content") if isinstance(message, dict) else None
-            if isinstance(content, str):
-                try:
-                    parsed = json.loads(content.strip())
-                    if isinstance(parsed, dict):
-                        return parsed
-                except Exception:
-                    return {"summary": content.strip()}
-            return {}
-        return {}
 
 
 xray_analysis_service = XRayAnalysisService()
