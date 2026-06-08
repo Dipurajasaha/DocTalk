@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -41,6 +41,15 @@ class PgVectorService:
         return embedding_service.dimension
 
     async def ensure_schema(self) -> None:
+        if self._schema_ready:
+            return
+        try:
+            await prisma.execute_raw("CREATE EXTENSION IF NOT EXISTS vector")
+        except Exception as exc:
+            logger.warning(
+                "Could not ensure pgvector extension (may already exist on Supabase)",
+                extra={"component": "rag", "error": str(exc)},
+            )
         self._schema_ready = True
 
     async def ingest_document(
@@ -64,18 +73,30 @@ class PgVectorService:
         if existing is not None:
             return self._serialize_row(existing)
 
-        row = await prisma.ragdocument.create(
-            data={
-                "id": self._generate_id(),
-                "patientId": patient_id,
-                "consultationId": consultation_id,
-                "sourceType": source_type,
-                "content": normalized_content,
-                "summary": normalized_summary,
-                "embedding": embedding_vector,
-                "metadata": payload_metadata,
-            }
+        doc_id = self._generate_id()
+        vector_literal = self._vector_to_sql(embedding_vector)
+
+        await prisma.execute_raw(
+            """
+            INSERT INTO rag_documents (
+                id, patient_id, consultation_id, source_type,
+                content, summary, embedding, metadata, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8::jsonb, NOW())
+            """,
+            doc_id,
+            patient_id,
+            consultation_id,
+            source_type,
+            normalized_content,
+            normalized_summary,
+            vector_literal,
+            json.dumps(payload_metadata),
         )
+
+        row = await prisma.ragdocument.find_unique(where={"id": doc_id})
+        if row is None:
+            raise RuntimeError(f"Failed to load inserted RAG document {doc_id}")
         return self._serialize_row(row)
 
     async def delete_document_embeddings(
@@ -94,7 +115,7 @@ class PgVectorService:
 
         try:
             result = await prisma.execute_raw(
-                "DELETE FROM rag_documents WHERE JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.asset_id')) = %s",
+                "DELETE FROM rag_documents WHERE metadata->>'asset_id' = $1",
                 asset_id,
             )
             deleted = int(result) if isinstance(result, int) else 0
@@ -188,7 +209,7 @@ class PgVectorService:
 
         rows = await prisma.ragdocument.find_many(
             where={"patientId": patient_id},
-            order={"createdAt": "desc"}
+            order={"createdAt": "desc"},
         )
 
         filtered = []
@@ -225,54 +246,67 @@ class PgVectorService:
         similarity_threshold: float,
     ) -> list[dict[str, Any]]:
         query_vector = await embedding_service.embed_text(query)
+        vector_literal = self._vector_to_sql(query_vector)
+        memory_cutoff = self._memory_cutoff()
 
-        rows = await prisma.ragdocument.find_many(
-            where={"patientId": patient_id},
-            order={"createdAt": "desc"}
+        rows = await prisma.query_raw(
+            """
+            SELECT
+                id,
+                patient_id,
+                consultation_id,
+                source_type,
+                content,
+                summary,
+                metadata,
+                created_at,
+                1 - (embedding <=> $1::vector) AS similarity
+            FROM rag_documents
+            WHERE patient_id = $2
+              AND ($3::text IS NULL OR consultation_id = $3)
+              AND ($4::text IS NULL OR source_type = $4)
+              AND ($5::timestamptz IS NULL OR created_at >= $5)
+            ORDER BY embedding <=> $1::vector
+            LIMIT $6
+            """,
+            vector_literal,
+            patient_id,
+            consultation_id,
+            source_type,
+            memory_cutoff,
+            top_k * 5,
         )
 
-        def cosine_similarity(v1: list[float], v2: list[float]) -> float:
-            if not v1 or not v2 or len(v1) != len(v2):
-                return 0.0
-            dot_product = sum(a * b for a, b in zip(v1, v2))
-            norm_a = math.sqrt(sum(a * a for a in v1))
-            norm_b = math.sqrt(sum(b * b for b in v2))
-            if norm_a == 0.0 or norm_b == 0.0:
-                return 0.0
-            return dot_product / (norm_a * norm_b)
-
-        results = []
+        results: list[dict[str, Any]] = []
         for row in rows:
-            meta = row.metadata or {}
-            if metadata_user_id is not None and meta.get("user_id") != metadata_user_id:
-                continue
-            if consultation_id is not None and row.consultationId != consultation_id:
-                continue
-            if source_type is not None and row.sourceType != source_type:
-                continue
-
-            memory_cutoff = self._memory_cutoff()
-            if memory_cutoff is not None and row.createdAt is not None:
-                row_dt = row.createdAt
-                if row_dt.tzinfo is None:
-                    row_dt = row_dt.replace(tzinfo=timezone.utc)
-                if row_dt < memory_cutoff:
+            row_dict = dict(row)
+            if metadata_user_id is not None:
+                meta = row_dict.get("metadata") or {}
+                if isinstance(meta, str):
+                    try:
+                        meta = json.loads(meta)
+                    except Exception:
+                        meta = {}
+                if meta.get("user_id") != metadata_user_id:
                     continue
 
-            emb = row.embedding
-            if isinstance(emb, str):
-                try:
-                    emb = json.loads(emb)
-                except Exception:
-                    emb = None
-            if not isinstance(emb, list):
+            similarity = float(row_dict.get("similarity") or 0.0)
+            if similarity < similarity_threshold:
                 continue
 
-            sim = cosine_similarity(query_vector, emb)
-            if sim >= similarity_threshold:
-                row_dict = dict(row.__dict__)
-                row_dict["similarity"] = sim
-                results.append(row_dict)
+            results.append(
+                {
+                    "id": row_dict.get("id"),
+                    "patientId": row_dict.get("patient_id"),
+                    "consultationId": row_dict.get("consultation_id"),
+                    "sourceType": row_dict.get("source_type"),
+                    "content": row_dict.get("content") or "",
+                    "summary": row_dict.get("summary") or "",
+                    "metadata": row_dict.get("metadata") or {},
+                    "createdAt": row_dict.get("created_at"),
+                    "similarity": similarity,
+                }
+            )
 
         results.sort(key=lambda item: item["similarity"], reverse=True)
         return [self._serialize_row(r) for r in results[:top_k]]
@@ -354,6 +388,10 @@ class PgVectorService:
         return None
 
     @staticmethod
+    def _vector_to_sql(vector: list[float]) -> str:
+        return "[" + ",".join(str(float(v)) for v in vector) + "]"
+
+    @staticmethod
     def _build_metadata(metadata: dict[str, Any] | None, source_type: str, patient_id: str, consultation_id: str | None) -> dict[str, Any]:
         payload = dict(metadata or {})
         payload.update(
@@ -368,22 +406,30 @@ class PgVectorService:
 
     @staticmethod
     def _serialize_row(row: Any) -> dict[str, Any]:
-        data = row.model_dump() if hasattr(row, "model_dump") else dict(row)
+        if isinstance(row, dict):
+            data = row
+        elif hasattr(row, "model_dump"):
+            data = row.model_dump()
+        else:
+            data = dict(row)
+
         metadata = data.get("metadata") or {}
         if isinstance(metadata, str):
             try:
                 metadata = json.loads(metadata)
             except Exception:
                 metadata = {"raw": metadata}
+
+        created_at = data.get("createdAt") or data.get("created_at")
         return {
             "id": data.get("id"),
-            "patient_id": data.get("patientId"),
-            "consultation_id": data.get("consultationId"),
-            "source_type": data.get("sourceType"),
+            "patient_id": data.get("patientId") or data.get("patient_id"),
+            "consultation_id": data.get("consultationId") or data.get("consultation_id"),
+            "source_type": data.get("sourceType") or data.get("source_type"),
             "content": data.get("content") or "",
             "summary": data.get("summary") or "",
             "metadata": metadata,
-            "created_at": data.get("createdAt"),
+            "created_at": created_at,
             "similarity": float(data.get("similarity") or 0.0),
         }
 
@@ -434,4 +480,3 @@ class PgVectorService:
 
 
 pgvector_service = PgVectorService()
-from collections import Counter

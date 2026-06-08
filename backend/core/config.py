@@ -17,9 +17,20 @@ class Settings(BaseSettings):
         default="doc-talk-dev-secret",
         env=["JWT_SECRET", "JWT_SECRET_KEY", "SESSION_SECRET_KEY"],
     )
-    database_url: str = Field(default="", env="DATABASE_URL")
     jwt_algorithm: str = Field(default="HS256", env="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(default=60, env="ACCESS_TOKEN_EXPIRE_MINUTES")
+
+    # Supabase / PostgreSQL (Prisma)
+    database_url: str = Field(default="", env="DATABASE_URL")
+    direct_url: str = Field(default="", env="DIRECT_URL")
+    shadow_database_url: str = Field(default="", env="SHADOW_DATABASE_URL")
+
+    # Supabase project credentials
+    supabase_url: str = Field(default="", env="SUPABASE_URL")
+    supabase_anon_key: str = Field(default="", env="SUPABASE_ANON_KEY")
+    supabase_service_role_key: str = Field(default="", env="SUPABASE_SERVICE_ROLE_KEY")
+    supabase_jwt_secret: str = Field(default="", env="SUPABASE_JWT_SECRET")
+
     gemini_api_key: str = Field(default="", env="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-2.0-flash", env="GEMINI_MODEL")
     gemini_embed_model: str = Field(default="text-embedding-004", env="GEMINI_EMBED_MODEL")
