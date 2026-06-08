@@ -6,7 +6,7 @@ import '../styles/login.css';
 
 export default function Login() {
   const [view, setView] = useState('login'); // 'login' or 'register'
-  const [category, setCategory] = useState('patient'); // 'patient' or 'doctor'
+  const [category, setCategory] = useState('patient'); // 'patient', 'doctor', or 'hospital'
   const [errorMsg, setErrorMsg] = useState(null);
   const navigate = useNavigate();
   const { login } = useSession();
@@ -16,21 +16,30 @@ export default function Login() {
     const formData = new FormData(e.target);
     formData.append('category', category);
 
-    // Call our FastAPI login endpoint (uses bearer token)
     try {
       const username = formData.get('username');
       const password = formData.get('password');
-      const data = category === 'doctor'
-        ? await authApi.loginDoctor(username, password)
-        : await authApi.loginPatient(username, password);
+      let data;
 
-      // Expected backend TokenResponse: { access_token, token_type, user_id, role }
+      if (category === 'doctor') {
+        data = await authApi.loginDoctor(username, password);
+      } else if (category === 'hospital') {
+        const { hospitalApi } = await import('../lib/api');
+        data = await hospitalApi.login(username, password);
+      } else {
+        data = await authApi.loginPatient(username, password);
+      }
+
       if (data && data.access_token) {
         const token = data.access_token;
-        const sess = { role: data.role || category, user_id: data.user_id || null };
+        const uid = data.hospital_id || data.user_id || username;
+        const sess = { role: data.role || category, user_id: uid };
         try { localStorage.setItem('doctalk_token', token); localStorage.setItem('doctalk_session', JSON.stringify(sess)); } catch (e) {}
         if (login) await login({ token, sessionHint: sess });
-        if (data.role === 'patient' || category === 'patient') navigate('/patient/dashboard'); else navigate('/doctor/dashboard');
+
+        if (category === 'hospital') navigate('/hospital/dashboard');
+        else if (data.role === 'patient' || category === 'patient') navigate('/patient/dashboard');
+        else navigate('/doctor/dashboard');
       } else {
         setErrorMsg((data && (data.detail || data.error)) || 'Invalid credentials');
       }
@@ -44,23 +53,30 @@ export default function Login() {
     const formData = new FormData(e.target);
     formData.append('category', category);
     try {
-      // Backend expects minimal fields for signup
       const username = formData.get('username');
       const name = formData.get('name');
       const password = formData.get('password');
-      const data = category === 'patient'
-        ? await authApi.signupPatient(username, name, password)
-        : await authApi.signupDoctor(username, name, password);
+      let data;
+
+      if (category === 'hospital') {
+        const { hospitalApi } = await import('../lib/api');
+        data = await hospitalApi.signup(username, name, password);
+      } else if (category === 'patient') {
+        data = await authApi.signupPatient(username, name, password);
+      } else {
+        data = await authApi.signupDoctor(username, name, password);
+      }
 
       if (data && data.access_token) {
-        // Auto-login on successful signup
         const token = data.access_token;
         try { localStorage.setItem('doctalk_token', token); localStorage.setItem('doctalk_session', JSON.stringify({ role: data.role })); } catch (e) {}
-        if (login) await login({ token, sessionHint: { role: data.role, user_id: data.user_id } });
+        if (login) await login({ token, sessionHint: { role: data.role, user_id: data.user_id || data.hospital_id } });
         setView('login');
         setErrorMsg(null);
         alert('Registration successful! You are logged in.');
-        if (data.role === 'patient') navigate('/patient/dashboard'); else navigate('/doctor/dashboard');
+        if (category === 'hospital') navigate('/hospital/dashboard');
+        else if (data.role === 'patient') navigate('/patient/dashboard');
+        else navigate('/doctor/dashboard');
       } else {
         setErrorMsg((data && (data.detail || data.error)) || 'Registration failed');
       }
@@ -92,6 +108,7 @@ export default function Login() {
       <div className="category-btns">
         <button className={`toggle-tab ${category === 'patient' ? 'active' : ''}`} onClick={() => setCategory('patient')}>Patient</button>
         <button className={`toggle-tab ${category === 'doctor' ? 'active' : ''}`} onClick={() => setCategory('doctor')}>Doctor</button>
+        <button className={`toggle-tab ${category === 'hospital' ? 'active' : ''}`} onClick={() => setCategory('hospital')}>🏥 Hospital</button>
       </div>
 
       <div key={view + category} className="fade-in">
@@ -107,7 +124,7 @@ export default function Login() {
                 <input type="password" name="password" placeholder="Enter password" required />
               </div>
               <button type="submit" className="action-btn" style={{ width: '100%', marginTop: '10px' }}>
-                Login as {category === 'patient' ? 'Patient' : 'Doctor'}
+                Login as {category === 'patient' ? 'Patient' : category === 'doctor' ? 'Doctor' : 'Hospital'}
               </button>
             </form>
           </div>
@@ -154,6 +171,28 @@ export default function Login() {
               </div>
               <div className="input-field full-width">
                 <button type="submit" className="action-btn" style={{ width: '100%', marginTop: '10px' }}>Register as Patient</button>
+              </div>
+            </div>
+          </form>
+        )}
+
+        {view === 'register' && category === 'hospital' && (
+          <form onSubmit={handleRegisterSubmit}>
+            <div className="form-grid">
+              <div className="input-field full-width">
+                <label>Hospital Name</label>
+                <input type="text" name="name" placeholder="Full hospital name" required />
+              </div>
+              <div className="input-field">
+                <label>Hospital ID</label>
+                <input type="text" name="username" placeholder="Choose hospital ID" required />
+              </div>
+              <div className="input-field">
+                <label>Password</label>
+                <input type="password" name="password" placeholder="Choose password (min 8 chars)" required />
+              </div>
+              <div className="input-field full-width">
+                <button type="submit" className="action-btn" style={{ width: '100%', marginTop: '10px' }}>Register as Hospital</button>
               </div>
             </div>
           </form>

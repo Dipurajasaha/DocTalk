@@ -11,6 +11,7 @@ from .api.compat import router as compat_router
 from .api.chat import router as chat_router
 from .api.appointments import router as appointments_router
 from .api.medical_assets import router as assets_router
+from .api.hospital import router as hospital_router, public_router as hospital_public_router
 from .api.users import doctor_router as user_doctor_router, router as users_router
 from .core.database import connect_prisma, disconnect_prisma, ensure_connected, ping_database
 
@@ -69,6 +70,8 @@ app.include_router(users_router, prefix="/api/users", tags=["users"])
 app.include_router(user_doctor_router, prefix="/api/doctor", tags=["users"])
 app.include_router(appointments_router, prefix="/api/appointments", tags=["appointments"])
 app.include_router(assets_router, prefix="/api/assets", tags=["assets"])
+app.include_router(hospital_router, prefix="/api/hospital", tags=["hospital"])
+app.include_router(hospital_public_router, prefix="/api/hospital/public", tags=["hospital"])
 
 
 @app.get("/health", tags=["system"])

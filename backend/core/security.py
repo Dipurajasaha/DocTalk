@@ -25,7 +25,7 @@ _PASSWORD_ITERATIONS = 390000
 
 class CurrentUser(BaseModel):
     user_id: str
-    role: Literal["patient", "doctor"]
+    role: Literal["patient", "doctor", "hospital"]
 
 
 def _encode_bytes(value: bytes) -> str:
@@ -107,7 +107,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
     user_id = payload.get("user_id")
     role = payload.get("role")
 
-    if not user_id or role not in {"patient", "doctor"}:
+    if not user_id or role not in {"patient", "doctor", "hospital"}:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
 
     return CurrentUser(user_id=str(user_id), role=role)

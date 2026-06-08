@@ -54,6 +54,29 @@ export const patientApi = {
   requestAppointment: (body) => apiClient.post('/api/appointment_request', body, { retries: 0, auth: true }),
 };
 
+export const hospitalApi = {
+  login: (hospitalId, password) => apiClient.post('/api/hospital/auth/login', { hospital_id: hospitalId, password }, { retries: 0 }),
+  signup: (hospitalId, name, password) => apiClient.post('/api/hospital/auth/signup', { hospital_id: hospitalId, name, password }, { retries: 0 }),
+  dashboard: () => apiClient.get('/api/hospital/dashboard', { retries: 0, auth: true }),
+  createReport: (data) => apiClient.post('/api/hospital/reports', data, { retries: 0, auth: true }),
+  listReports: (page = 1, perPage = 20, disease = '', severity = '') => {
+    const params = new URLSearchParams({ page, per_page: perPage });
+    if (disease) params.set('disease', disease);
+    if (severity) params.set('severity', severity);
+    return apiClient.get(`/api/hospital/reports?${params}`, { retries: 1, auth: true });
+  },
+  getReport: (reportId) => apiClient.get(`/api/hospital/reports/${encodeURIComponent(reportId)}`, { retries: 0, auth: true }),
+  createNews: (data) => apiClient.post('/api/hospital/news', data, { retries: 0, auth: true }),
+  listNews: () => apiClient.get('/api/hospital/news', { retries: 1, auth: true }),
+  getGlobalNews: (limit = 10) => apiClient.get(`/api/hospital/public/news/global?limit=${limit}`, { retries: 1 }),
+  getGlobalReports: (page = 1, perPage = 20, disease = '') => {
+    const params = new URLSearchParams({ page, per_page: perPage });
+    if (disease) params.set('disease', disease);
+    return apiClient.get(`/api/hospital/public/reports/global?${params}`, { retries: 1 });
+  },
+  getDiseaseSummary: () => apiClient.get('/api/hospital/public/disease-summary', { retries: 1 }),
+};
+
 export const doctorApi = {
   createSlots: (slots) => apiClient.post('/api/appointments/slots', slots, { retries: 0, auth: true }),
   getSlots: (doctorId) => apiClient.get(`/api/appointments/slots/${encodeURIComponent(doctorId)}`, { retries: 1, auth: true }),
