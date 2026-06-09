@@ -4,7 +4,7 @@ import { useNotifications, useAssetCache } from '../contexts';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { authApi, patientApi, buildAssetDownloadUrl } from '../lib/api';
 import { buildAiChatWebSocketUrl, createRealTimeClient } from '../lib/realTimeClient';
-import '../styles/patient.css'; // Uses your existing patient CSS
+import '../styles/patient.css';
 import XrayAnalyzerPanel from '../components/XrayAnalyzerPanel';
 import MarkdownMessage from '../components/chat/MarkdownMessage';
 import FileViewer from '../components/FileViewer';
@@ -123,7 +123,7 @@ export default function PatientDashboard() {
   const [bookingInProgress, setBookingInProgress] = useState(false);
   
   // Patient-to-Doctor Chat System
-  const [docChats, setDocChats] = useState([]); // List of doctors the patient has chatted with
+  const [docChats, setDocChats] = useState([]);
   const [activeDocChat, setActiveDocChat] = useState(null);
   const [consultations, setConsultations] = useState([]);
   const [docMessagePage, setDocMessagePage] = useState(1);
@@ -147,7 +147,7 @@ export default function PatientDashboard() {
   // Analyze panel selection state
   const [analysisCurrentFolder, setAnalysisCurrentFolder] = useState(null);
   const [selectedDocForAnalysis, setSelectedDocForAnalysis] = useState(null);
-  const [analysisMode, setAnalysisMode] = useState('upload'); // 'upload' or 'select'
+  const [analysisMode, setAnalysisMode] = useState('upload');
 
   // 1. Fetch User Session on Mount
   useEffect(() => {
@@ -165,7 +165,6 @@ export default function PatientDashboard() {
           return;
         }
         setUser(data);
-        // Load dependent page data, but guard each to avoid uncaught rejections
         try { loadChatHistory(); } catch (e) { console.error(e); }
         try { loadAppointments(); } catch (e) { console.error(e); }
         try { loadDoctors(); } catch (e) { console.error(e); }
@@ -215,7 +214,7 @@ export default function PatientDashboard() {
     useEffect(() => {
         if(activePanel === 'documents') {
             loadAssets();
-            setCurrentFolder(null); // root by default
+            setCurrentFolder(null);
         }
         if(activePanel === 'explain') {
         loadAssets();
@@ -231,8 +230,7 @@ export default function PatientDashboard() {
       const file = e.target.files && e.target.files[0];
       if (!file) return;
 
-      // Basic client-side validation
-      const maxSize = 15 * 1024 * 1024; // 15MB
+      const maxSize = 15 * 1024 * 1024;
       const allowedTypes = ['application/pdf', 'image/png', 'image/jpg', 'image/jpeg', 'image/webp', 'image/gif'];
       if (file.size > maxSize) { try { addNotification({ type: 'error', message: 'File too large. Max 15MB allowed.' }); } catch (e) {} e.target.value = null; return; }
       if (!allowedTypes.includes(file.type) && !file.name.toLowerCase().endsWith('.pdf')) { try { addNotification({ type: 'error', message: 'Unsupported file type. Use PDF or images.' }); } catch (e) {} e.target.value = null; return; }
@@ -641,7 +639,6 @@ export default function PatientDashboard() {
     try {
       const messageText = docMsgInput;
       await patientApi.postConsultationMessage(consultationId, messageText);
-      // Refresh authoritative history from server
       await loadDocChat(consultationId, docMessagePage);
       setDocMsgInput('');
       setDocAttachmentFile(null);
@@ -657,7 +654,6 @@ export default function PatientDashboard() {
   const handleDocAttachChange = (e) => {
     const f = e.target.files && e.target.files[0];
     setDocAttachmentFile(f || null);
-    // clear input value to allow reselecting same file
     if (e.target) e.target.value = null;
   };
 
@@ -828,7 +824,8 @@ export default function PatientDashboard() {
       let settleTimeout = null;
 
       await new Promise((resolve, reject) => {
-        const INACTIVITY_TIMEOUT_MS = 25000;
+        // ⬇︎ INCREASED TIMEOUT from 25s to 60s ⬇︎
+        const INACTIVITY_TIMEOUT_MS = 60000;
         let inactivityTimeout = null;
 
         const clearInactivityTimeout = () => {
@@ -873,7 +870,7 @@ export default function PatientDashboard() {
             payload = { type: 'token', content: String(event.data || '') };
           }
 
-          // Reset inactivity timer on every incoming message chunk
+          // Reset inactivity timer on ANY incoming message
           resetInactivityTimeout();
 
           const eventType = String(payload?.type || payload?.status || '').toLowerCase();
@@ -889,8 +886,6 @@ export default function PatientDashboard() {
           }
 
           if ((eventType === 'token' || eventType === 'message') && chunkText) {
-            // Processing card stays visible during streaming.
-            // It is only cleared by final / error / close events.
             finalText += chunkText;
             setMessages(prev => {
               const filtered = prev.filter(m => m.id !== 'loading');
@@ -990,14 +985,12 @@ export default function PatientDashboard() {
       return;
     }
     
-    // Analyze each uploaded file
     setMessages(prev => [...prev, { sender: 'model', id: 'loading', text: 'Analyzing files... Please wait.' }]);
 
     try {
       for (const fileObj of uploadedFiles) {
         const formData = new FormData();
         
-        // Determine if it's a report or medical image based on file type
         if (fileObj.type === 'application/pdf' || fileObj.name.toLowerCase().endsWith('.pdf')) {
           formData.append('report', fileObj.file);
         } else {
@@ -1019,10 +1012,8 @@ export default function PatientDashboard() {
           const filtered = prev.filter(m => m.id !== 'loading');
           if (data.success) {
             const reply = data.reply;
-            // Convert any structured response to plain text string
             let textReply = '';
             if (typeof reply === 'object' && reply) {
-              // Flatten structured object into readable text
               const parts = [];
               if (reply.summary) parts.push(reply.summary);
               if (reply.key_findings && Array.isArray(reply.key_findings)) {
@@ -1051,7 +1042,6 @@ export default function PatientDashboard() {
         });
       }
       
-      // Clear uploaded files after analysis
       setUploadedFiles([]);
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== 'loading'));
@@ -1101,7 +1091,6 @@ export default function PatientDashboard() {
     try {
       await logout();
     } catch (e) {
-      // fallback: clear storage and redirect
       try { localStorage.removeItem('doctalk_token'); localStorage.removeItem('doctalk_session'); } catch (e) {}
     }
     navigate('/login');
@@ -1223,7 +1212,7 @@ export default function PatientDashboard() {
                         style={{ width: '100%', padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', fontSize: '11px', backgroundColor: '#FFF', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
                     >
                       <option value="en">English</option>
-                      <option value="es">EspaÃ±ol</option>
+                      <option value="es">Español</option>
                       <option value="hi">Hindi</option>
                       <option value="bn">Bengali</option>
                     </select>
@@ -1292,7 +1281,6 @@ export default function PatientDashboard() {
                 </div>
 
                 {analysisMode === 'upload' ? (
-                  // UPLOAD NEW FILES MODE
                   uploadedFiles.length === 0 ? (
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: '16px' }}>
                       <div className="styled-dropzone" style={{ border: '2px dashed #CBD5E1', borderRadius: '16px', padding: '48px 24px', textAlign: 'center', background: '#F8FAFC', position: 'relative', transition: 'all 0.2s', cursor: 'pointer', width: '100%', boxSizing: 'border-box' }} onMouseEnter={(e) => e.currentTarget.style.borderColor='#8B7EFF'} onMouseLeave={(e) => e.currentTarget.style.borderColor='#CBD5E1'}>
@@ -1347,7 +1335,6 @@ export default function PatientDashboard() {
                     </div>
                   )
                 ) : (
-                  // SELECT FROM MY DOCUMENTS MODE
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
                     {analysisCurrentFolder !== null && (
                       <span onClick={() => setAnalysisCurrentFolder(null)} style={{ color: '#8B7EFF', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>
@@ -1506,25 +1493,7 @@ export default function PatientDashboard() {
                       </div>
                     </div>
                   )}
-                  {(() => {
-                    const getAssetIcon = (file) => {
-                      const kind = String(file?.asset_kind || 'medical_image');
-                      const mime = String(file?.mime_type || '').toLowerCase();
-                      const baseStyle = { width: '20px', height: '20px' };
-                      if (kind === 'report') {
-                        return <svg {...baseStyle} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><path d="M8 13h8" /><path d="M8 17h8" /></svg>;
-                      }
-                      if (kind === 'prescription') {
-                        return <svg {...baseStyle} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h9l7 7v9H4z" /><path d="M13 4v7h7" /><path d="M8 14h8" /><path d="M10 10a2 2 0 1 1 0 4" /><path d="M12 10v4" /></svg>;
-                      }
-                      if (mime.startsWith('image/')) {
-                        return <svg {...baseStyle} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>;
-                      }
-                      return <svg {...baseStyle} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>;
-                    };
 
-                    return null;
-                  })()}
                   {/* UNIFIED 1D LIST VIEW */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {/* Folders (only in root) */}
@@ -1775,14 +1744,12 @@ export default function PatientDashboard() {
                      </div>
                      {docMessages.length === 0 && <div style={{textAlign: 'center', fontSize: '11px', color: '#94A3B8', marginTop: '40px'}}>Start a secure end-to-end conversation with your doctor.</div>}
                      {docMessages.map((m, idx) => {
-                       // render grouped/attachment-aware message
                        const isPatient = String(m.sender || '').toLowerCase().includes('patient') || String(m.sender || '').toLowerCase() === 'user';
                        return (
                          <div key={m.id || idx} style={{ display: 'flex', flexDirection: 'column', alignItems: isPatient ? 'flex-end' : 'flex-start', gap: '4px' }}>
                            <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '2px', width: '100%', justifyContent: isPatient ? 'flex-end' : 'flex-start' }}>
                              <div style={{ maxWidth: '74%' , background: isPatient ? '#8B7EFF' : '#FFF', color: isPatient ? '#FFF' : '#1E293B', padding: '14px 16px', borderRadius: isPatient ? '18px 18px 4px 18px' : '18px 18px 18px 4px', boxShadow: '0 2px 8px rgba(15,23,42,0.06)', border: isPatient ? '1px solid rgba(139,126,255,0.18)' : '1px solid #E2E8F0' }}>
                                <div style={{ fontSize: '14px', lineHeight: '1.55', fontWeight: '500', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.text}</div>
-                               {/* attachments preview */}
                                {m.attachments && m.attachments.length > 0 && (
                                  <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                    {m.attachments.map((a, ai) => (
@@ -1809,22 +1776,22 @@ export default function PatientDashboard() {
 
                    <div style={{ padding: '12px 32px 32px 32px', background: 'transparent', flexShrink: 0 }}>
                      <form onSubmit={handleDocChatSubmit} className="rich-input-row" style={{ display: 'flex', alignItems: 'center', padding: '8px 8px 8px 24px', background: '#F1F5F9', borderRadius: '50px', border: `1px solid ${docInputFocused ? 'rgba(139, 126, 255, 0.45)' : '#E2E8F0'}`, boxShadow: docInputFocused ? '0 0 0 3px rgba(139, 126, 255, 0.10), 0 8px 24px rgba(0,0,0,0.06)' : '0 8px 24px rgba(0,0,0,0.06)', transition: 'border-color 0.18s ease, box-shadow 0.18s ease' }}>
-                        <label title="Attach media" style={{ color: '#64748B', fontWeight: '300', fontSize: '18px', marginRight: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-                          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif" onChange={handleDocAttachChange} style={{ display: 'none' }} />
-                          +
-                        </label>
-                        <div style={{ display: 'flex', flexDirection: 'column', marginRight: '12px' }}>
-                          {docAttachmentFile && (
-                            <div style={{ fontSize: '11px', color: '#475569', background: '#FFF', padding: '6px 8px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>{docAttachmentFile.name}</div>
-                          )}
-                        </div>
-                        <input type="text" value={docMsgInput} onChange={e=>setDocMsgInput(e.target.value)} onFocus={() => setDocInputFocused(true)} onBlur={() => setDocInputFocused(false)} disabled={docChatDisabled || docSending} placeholder={docChatDisabled ? 'Chat disabled' : 'Type a secure message...'} style={{flex: 1, padding: '10px 0', border: 'none', background: 'transparent', outline: 'none', boxShadow: 'none', fontSize: '14px', lineHeight: '1.5', color: '#0F172A', caretColor: '#8B7EFF', borderRadius: '12px'}} />
-                        <button disabled={docChatDisabled || docSending || !activeDocChat || !docMsgInput.trim()} type="submit" style={{ marginLeft: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '42px', height: '42px', borderRadius: '50%', background: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? '#E2E8F0' : '#8B7EFF', color: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? '#94A3B8' : '#FFF', border: 'none', cursor: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? 'default' : 'pointer', fontWeight: '700', fontSize: '11px', transition: 'all 0.2s', boxShadow: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? 'none' : '0 4px 12px rgba(139, 126, 255, 0.3)' }}>
-                          {docSending ? '...' : (
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-                          )}
-                        </button>
-                     </form>
+                         <label title="Attach media" style={{ color: '#64748B', fontWeight: '300', fontSize: '18px', marginRight: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                           <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif" onChange={handleDocAttachChange} style={{ display: 'none' }} />
+                           +
+                         </label>
+                         <div style={{ display: 'flex', flexDirection: 'column', marginRight: '12px' }}>
+                           {docAttachmentFile && (
+                             <div style={{ fontSize: '11px', color: '#475569', background: '#FFF', padding: '6px 8px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>{docAttachmentFile.name}</div>
+                           )}
+                         </div>
+                         <input type="text" value={docMsgInput} onChange={e=>setDocMsgInput(e.target.value)} onFocus={() => setDocInputFocused(true)} onBlur={() => setDocInputFocused(false)} disabled={docChatDisabled || docSending} placeholder={docChatDisabled ? 'Chat disabled' : 'Type a secure message...'} style={{flex: 1, padding: '10px 0', border: 'none', background: 'transparent', outline: 'none', boxShadow: 'none', fontSize: '14px', lineHeight: '1.5', color: '#0F172A', caretColor: '#8B7EFF', borderRadius: '12px'}} />
+                         <button disabled={docChatDisabled || docSending || !activeDocChat || !docMsgInput.trim()} type="submit" style={{ marginLeft: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '42px', height: '42px', borderRadius: '50%', background: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? '#E2E8F0' : '#8B7EFF', color: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? '#94A3B8' : '#FFF', border: 'none', cursor: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? 'default' : 'pointer', fontWeight: '700', fontSize: '11px', transition: 'all 0.2s', boxShadow: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? 'none' : '0 4px 12px rgba(139, 126, 255, 0.3)' }}>
+                           {docSending ? '...' : (
+                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                           )}
+                         </button>
+                      </form>
                    </div>
                  </>
                ) : (

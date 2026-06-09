@@ -60,7 +60,26 @@ export default function Login() {
 
       if (category === 'hospital') {
         const { hospitalApi } = await import('../lib/api');
-        data = await hospitalApi.signup(username, name, password);
+        const payload = {
+          hospital_id: username,
+          name: name,
+          password: password,
+        };
+        const address = formData.get('address');
+        const city = formData.get('city');
+        const state = formData.get('state');
+        const registration_number = formData.get('registration_number');
+        const phone = formData.get('phone');
+        const email = formData.get('email');
+        const website = formData.get('website');
+        if (address) payload.address = address;
+        if (city) payload.city = city;
+        if (state) payload.state = state;
+        if (registration_number) payload.registration_number = registration_number;
+        if (phone) payload.phone = phone;
+        if (email) payload.email = email;
+        if (website) payload.website = website;
+        data = await hospitalApi.signup(payload);
       } else if (category === 'patient') {
         data = await authApi.signupPatient(username, name, password);
       } else {
@@ -108,7 +127,7 @@ export default function Login() {
       <div className="category-btns">
         <button className={`toggle-tab ${category === 'patient' ? 'active' : ''}`} onClick={() => setCategory('patient')}>Patient</button>
         <button className={`toggle-tab ${category === 'doctor' ? 'active' : ''}`} onClick={() => setCategory('doctor')}>Doctor</button>
-        <button className={`toggle-tab ${category === 'hospital' ? 'active' : ''}`} onClick={() => setCategory('hospital')}>🏥 Hospital</button>
+        <button className={`toggle-tab ${category === 'hospital' ? 'active' : ''}`} onClick={() => setCategory('hospital')}>Hospital</button>
       </div>
 
       <div key={view + category} className="fade-in">
@@ -190,6 +209,34 @@ export default function Login() {
               <div className="input-field">
                 <label>Password</label>
                 <input type="password" name="password" placeholder="Choose password (min 8 chars)" required />
+              </div>
+              <div className="input-field full-width">
+                <label>Address</label>
+                <input type="text" name="address" placeholder="Hospital address" />
+              </div>
+              <div className="input-field">
+                <label>City</label>
+                <input type="text" name="city" placeholder="City" />
+              </div>
+              <div className="input-field">
+                <label>State</label>
+                <input type="text" name="state" placeholder="State" />
+              </div>
+              <div className="input-field">
+                <label>Registration Number</label>
+                <input type="text" name="registration_number" placeholder="Registration number" />
+              </div>
+              <div className="input-field">
+                <label>Phone</label>
+                <input type="tel" name="phone" placeholder="Contact phone number" />
+              </div>
+              <div className="input-field">
+                <label>Email</label>
+                <input type="email" name="email" placeholder="Email address" />
+              </div>
+              <div className="input-field">
+                <label>Website</label>
+                <input type="url" name="website" placeholder="Website URL" />
               </div>
               <div className="input-field full-width">
                 <button type="submit" className="action-btn" style={{ width: '100%', marginTop: '10px' }}>Register as Hospital</button>

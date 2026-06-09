@@ -18,7 +18,7 @@ class HospitalService:
 
     # ────────────────────────── AUTH ──────────────────────────
 
-    async def register(self, hospital_id: str, name: str, password: str) -> dict[str, Any]:
+    async def register(self, hospital_id: str, name: str, password: str, **extra: Any) -> dict[str, Any]:
         hospital_id = hospital_id.strip()
         name = name.strip()
 
@@ -30,12 +30,32 @@ class HospitalService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Hospital ID already registered")
 
         hashed = hash_password(password)
+
+        # Build create data with optional fields
+        create_data: dict[str, Any] = {
+            "hospitalId": hospital_id,
+            "name": name,
+            "password": hashed,
+        }
+
+        # Map snake_case API fields to Prisma camelCase fields
+        field_map = {
+            "address": "address",
+            "city": "city",
+            "state": "state",
+            "registration_number": "registrationNumber",
+            "phone": "phone",
+            "email": "email",
+            "website": "website",
+        }
+
+        for api_key, prisma_key in field_map.items():
+            value = extra.get(api_key)
+            if value is not None:
+                create_data[prisma_key] = value
+
         try:
-            await self.client.hospital.create(data={
-                "hospitalId": hospital_id,
-                "name": name,
-                "password": hashed,
-            })
+            await self.client.hospital.create(data=create_data)
         except Exception as exc:
             if "unique" in str(exc).lower() or "already exists" in str(exc).lower():
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Hospital ID already registered") from exc

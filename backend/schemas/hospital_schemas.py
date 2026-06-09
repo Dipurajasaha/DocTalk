@@ -21,6 +21,13 @@ class HospitalRegisterRequest(BaseModel):
     hospital_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     password: str = Field(min_length=8)
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    registration_number: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    website: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 

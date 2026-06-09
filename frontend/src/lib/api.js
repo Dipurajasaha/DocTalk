@@ -56,7 +56,7 @@ export const patientApi = {
 
 export const hospitalApi = {
   login: (hospitalId, password) => apiClient.post('/api/hospital/auth/login', { hospital_id: hospitalId, password }, { retries: 0 }),
-  signup: (hospitalId, name, password) => apiClient.post('/api/hospital/auth/signup', { hospital_id: hospitalId, name, password }, { retries: 0 }),
+  signup: (data) => apiClient.post('/api/hospital/auth/signup', data, { retries: 0 }),
   dashboard: () => apiClient.get('/api/hospital/dashboard', { retries: 0, auth: true }),
   createReport: (data) => apiClient.post('/api/hospital/reports', data, { retries: 0, auth: true }),
   listReports: (page = 1, perPage = 20, disease = '', severity = '') => {

@@ -41,7 +41,18 @@ async def hospital_signup(
     payload: HospitalRegisterRequest,
     service: HospitalService = Depends(get_hospital_service),
 ) -> HospitalTokenResponse:
-    return await service.register(payload.hospital_id, payload.name, payload.password)
+    return await service.register(
+        payload.hospital_id,
+        payload.name,
+        payload.password,
+        address=payload.address,
+        city=payload.city,
+        state=payload.state,
+        registration_number=payload.registration_number,
+        phone=payload.phone,
+        email=payload.email,
+        website=payload.website,
+    )
 
 
 # ───────────────────────── SYMPTOM REPORTS ─────────────────────────
