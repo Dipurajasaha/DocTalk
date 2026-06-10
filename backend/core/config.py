@@ -31,9 +31,39 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = Field(default="", env="SUPABASE_SERVICE_ROLE_KEY")
     supabase_jwt_secret: str = Field(default="", env="SUPABASE_JWT_SECRET")
 
+    # Gemini AI
     gemini_api_key: str = Field(default="", env="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-2.0-flash", env="GEMINI_MODEL")
-    gemini_embed_model: str = Field(default="text-embedding-004", env="GEMINI_EMBED_MODEL")
+    gemini_model: str = Field(default="", env="GEMINI_MODEL")
+    gemini_embed_model: str = Field(default="", env="GEMINI_EMBED_MODEL")
+    gemini_base_url: str = Field(default="", env="GEMINI_BASE_URL")
+
+    # --- Provider selection ---
+    # Values: gemini | openai | nvidia | longchat
+    ai_provider: str = Field(default="", env="AI_PROVIDER")
+
+    # --- OpenAI ---
+    openai_api_key: str = Field(default="", env="OPENAI_API_KEY")
+    openai_model: str = Field(default="", env="OPENAI_MODEL")
+    openai_base_url: str = Field(default="", env="OPENAI_BASE_URL")
+
+    # --- NVIDIA ---
+    nvidia_api_key: str = Field(default="", env="NVIDIA_API_KEY")
+    nvidia_model: str = Field(default="", env="NVIDIA_MODEL")
+    nvidia_base_url: str = Field(default="", env="NVIDIA_BASE_URL")
+
+    # --- LongChat ---
+    longchat_api_key: str = Field(default="", env="LONGCHAT_API_KEY")
+    longchat_model: str = Field(default="", env="LONGCHAT_MODEL")
+    longchat_base_url: str = Field(default="", env="LONGCHAT_BASE_URL")
+
+    # --- Imagga ---
+    imgaga_api_key: str = Field(default="", env="IMGAGA_API_KEY")
+    imgaga_api_url: str = Field(default="", env="IMGAGA_API_URL")
+
+    # --- Fallback ---
+    ai_fallback_enabled: bool = Field(default=True, env="AI_FALLBACK_ENABLED")
+    ai_fallback_chain: str = Field(default="", env="AI_FALLBACK_CHAIN")
+
     ai_request_timeout_seconds: float = Field(default=45.0, env="AI_REQUEST_TIMEOUT_SECONDS")
     xray_analysis_timeout_seconds: float = Field(default=300.0, env="XRAY_ANALYSIS_TIMEOUT_SECONDS")
     rag_embedding_timeout_seconds: float = Field(default=120.0, env="RAG_EMBEDDING_TIMEOUT_SECONDS")

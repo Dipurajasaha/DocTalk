@@ -416,6 +416,8 @@ async def chat(
         current_user.role,
         payload.consultation_id,
         payload.message,
+        use_reasoning=payload.use_reasoning,
+        model=payload.model,
     )
 
 

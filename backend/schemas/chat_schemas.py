@@ -33,6 +33,15 @@ class ChatRequest(BaseModel):
     consultation_id: str = Field(alias="consultationId", min_length=1)
     message: str = Field(min_length=1, max_length=10000)
     language: str = Field(default="en", min_length=1)
+    use_reasoning: bool = Field(
+        default=False,
+        alias="useReasoning",
+        description="If true, uses the configured reasoning model (e.g. o1-mini) instead of the default chat model.",
+    )
+    model: str | None = Field(
+        default=None,
+        description="Explicit model override. If set, this model is used regardless of the provider default.",
+    )
 
 
 class MessageCreateRequest(BaseModel):

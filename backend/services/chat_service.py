@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
+from backend.ai.core_services.gemini import gemini_reasoning_complete, gemini_complete_text
+from backend.core.config import settings
 
 from ..core.database import prisma
 from ..workflows.state import create_workflow_state
@@ -136,7 +138,16 @@ class ChatService:
         await self.client.consultation.update(where={"id": consultation_id}, data={"lastMessageAt": timestamp})
         return self._serialize_message(record)
 
-    async def process_chat_message(self, user_id: str, role: str, consultation_id: str, message: str) -> dict[str, Any]:
+    async def process_chat_message(
+        self,
+        user_id: str,
+        role: str,
+        consultation_id: str,
+        message: str,
+        *,
+        use_reasoning: bool = False,
+        model: str | None = None,
+    ) -> dict[str, Any]:
         saved_message = await self.save_message(consultation_id, user_id, role, message)
 
         ai_session_id = f"consultation-{consultation_id}"
@@ -150,44 +161,81 @@ class ChatService:
 
         await self.ensure_ai_session(user_id, normalized_role, ai_session_id, mode)
 
-        workflow_state = create_workflow_state(
-            messages=[HumanMessage(content=str(message or "").strip())],
-            role=normalized_role,  # type: ignore[arg-type]
-            user_id=user_id,
-            ai_session_id=ai_session_id,
-            target_patient_id=target_patient_id if normalized_role == "doctor" else None,
-            context_payload={
-                "consultation_id": consultation_id,
-                "ai_session_id": ai_session_id,
-                "user_id": user_id,
-                "target_patient_id": target_patient_id,
-                "role": normalized_role,
-            },
-        )
+        if use_reasoning:
+            # Use the dedicated reasoning model (e.g. o1-mini, o3-mini)
+            langchain_messages = [HumanMessage(content=str(message or "").strip())]
+            try:
+                ai_text = await gemini_reasoning_complete(
+                    langchain_messages,
+                    model=model,
+                    max_output_tokens=4096,
+                    reasoning_effort="medium",
+                )
+            except Exception as exc:
+                ai_text = (
+                    "AI reasoning assistance is temporarily unavailable. "
+                    f"Your message was saved. ({type(exc).__name__})"
+                )
+        elif model:
+            # Use an explicit model override with the standard completion path
+            langchain_messages = [HumanMessage(content=str(message or "").strip())]
+            try:
+                ai_text = await gemini_complete_text(
+                    langchain_messages,
+                    model=model,
+                    temperature=0.2,
+                    max_output_tokens=1024,
+                )
+            except Exception as exc:
+                ai_text = (
+                    "AI assistance is temporarily unavailable. "
+                    f"Your message was saved. ({type(exc).__name__})"
+                )
+        else:
+            # Default: use the unified chat graph
+            workflow_state = create_workflow_state(
+                messages=[HumanMessage(content=str(message or "").strip())],
+                role=normalized_role,  # type: ignore[arg-type]
+                user_id=user_id,
+                ai_session_id=ai_session_id,
+                target_patient_id=target_patient_id if normalized_role == "doctor" else None,
+                context_payload={
+                    "consultation_id": consultation_id,
+                    "ai_session_id": ai_session_id,
+                    "user_id": user_id,
+                    "target_patient_id": target_patient_id,
+                    "role": normalized_role,
+                },
+            )
 
-        ai_text = ""
-        try:
-            result = await unified_chat_graph.ainvoke(
-                workflow_state,
-                config={"configurable": {"thread_id": f"{user_id}:{ai_session_id}"}},
-            )
-            ai_text = str(result.get("final_response") or "").strip()
-        except Exception as exc:
-            ai_text = (
-                "AI assistance is temporarily unavailable. "
-                f"Your message was saved. ({type(exc).__name__})"
-            )
+            ai_text = ""
+            try:
+                result = await unified_chat_graph.ainvoke(
+                    workflow_state,
+                    config={"configurable": {"thread_id": f"{user_id}:{ai_session_id}"}},
+                )
+                ai_text = str(result.get("final_response") or "").strip()
+            except Exception as exc:
+                ai_text = (
+                    "AI assistance is temporarily unavailable. "
+                    f"Your message was saved. ({type(exc).__name__})"
+                )
 
         if not ai_text:
             ai_text = "I received your message and saved it to this consultation."
 
         assistant_record = await self.save_assistant_message(consultation_id, normalized_role, ai_text)
 
+        model_used = model
+        if use_reasoning and not model_used:
+            model_used = str(getattr(settings, "openai_model", "o1-mini") or "o1-mini")
+
         return {
             "success": True,
             "consultation_id": consultation_id,
             "user_message": saved_message,
             "ai_message": assistant_record,
+            "model_used": model_used,
         }
 
     @staticmethod
