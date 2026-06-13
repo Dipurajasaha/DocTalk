@@ -35,6 +35,9 @@ class WorkflowState(TypedDict):
     planner_metadata: dict[str, Any]
     shadow_execution_completed: bool
     shadow_response: str
+    need_more_actions: bool
+    execution_iteration: int
+    pending_tasks: list[dict[str, Any]]
 
 
 
@@ -80,6 +83,9 @@ def create_workflow_state(
         planner_metadata={},
         shadow_execution_completed=False,
         shadow_response="",
+        need_more_actions=False,
+        execution_iteration=0,
+        pending_tasks=[],
     )
 
 

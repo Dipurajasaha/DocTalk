@@ -14,6 +14,7 @@ from .nodes.retrieval_strategy import retrieval_strategy_node
 from .nodes.routing import classify_intent
 from .nodes.shared_nodes import medical_safety_guardrail
 from .nodes.task_executor import task_executor_node
+from .nodes.need_action_decision import need_action_decision_node
 from .state import WorkflowState
 
 
@@ -27,9 +28,24 @@ async def run_shadow_pipeline(state: WorkflowState) -> dict[str, Any]:
     if isinstance(p_out, dict):
         st.update(p_out)
         
-    t_out = await task_executor_node(st)
-    if isinstance(t_out, dict):
-        st.update(t_out)
+    while True:
+        t_out = await task_executor_node(st)
+        if isinstance(t_out, dict):
+            st.update(t_out)
+            
+        n_out = await need_action_decision_node(st)
+        if isinstance(n_out, dict):
+            st.update(n_out)
+            
+        if not st.get("need_more_actions"):
+            break
+            
+        # replace execution_plan with pending_tasks before next executor pass
+        st["execution_plan"] = st.get("pending_tasks", [])
+        st["pending_tasks"] = []
+        
+        # execution_iteration += 1 then task_executor again
+        st["execution_iteration"] = st.get("execution_iteration", 0) + 1
         
     r_out = await response_composer_node(st)
     if isinstance(r_out, dict):

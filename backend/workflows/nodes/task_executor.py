@@ -18,6 +18,7 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     asset_selection_context = {}
     rag_scope = {}
     evidence = []
+    pending_tasks = []
     
     for task_info in execution_plan:
         task_name = task_info.get("task")
@@ -51,6 +52,11 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
         elif task_name == "appointment":
             action = task_info.get("action", "search")
             appointment_context = {"action": action}
+            if action == "search":
+                pending_tasks.append({
+                    "task": "appointment",
+                    "action": "search_slots"
+                })
             
         elif task_name == "asset_index":
             action = task_info.get("action", "latest")
@@ -96,7 +102,6 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                     "asset_ids": asset_ids
                 })
 
-    # Skeleton implementation
     return {
         "evidence": evidence,
         "memory_context": memory_context,
@@ -104,4 +109,5 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
         "consultation_context": consultation_context,
         "asset_selection_context": asset_selection_context,
         "rag_scope": rag_scope,
+        "pending_tasks": pending_tasks,
     }
