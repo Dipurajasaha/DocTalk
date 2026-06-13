@@ -18,6 +18,12 @@ class PatientHistoryService:
         doc = await prisma.patientmedicalhistory.delete(where={"id": entry_id})
         return bool(doc)
 
+    async def delete_by_source_id(self, source: str, source_id: str) -> int:
+        doc = await prisma.patientmedicalhistory.delete_many(
+            where={"source": source, "sourceId": source_id}
+        )
+        return doc.count if hasattr(doc, "count") else 0
+
     async def list_entries(self, patient_id: str, limit: int = 50) -> list[dict[str, Any]]:
         docs = await prisma.patientmedicalhistory.find_many(
             where={"patientId": patient_id},
