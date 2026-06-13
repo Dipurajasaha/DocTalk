@@ -33,6 +33,8 @@ class WorkflowState(TypedDict):
     rag_scope: dict[str, Any]
     patient_history_context: list[dict[str, Any]]
     planner_metadata: dict[str, Any]
+    shadow_execution_completed: bool
+    shadow_response: str
 
 
 
@@ -76,6 +78,8 @@ def create_workflow_state(
         rag_scope={},
         patient_history_context=[],
         planner_metadata={},
+        shadow_execution_completed=False,
+        shadow_response="",
     )
 
 
