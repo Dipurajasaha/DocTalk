@@ -21,6 +21,17 @@ class WorkflowState(TypedDict):
     triage_level: str
     context_payload: dict[str, Any]
     final_response: str
+    workflow_version: str
+    execution_plan: list[dict[str, Any]]
+    evidence: list[dict[str, Any]]
+    action_results: list[dict[str, Any]]
+    retrieval_strategy: str | None
+    memory_context: list[dict[str, Any]]
+    appointment_context: dict[str, Any]
+    consultation_context: list[dict[str, Any]]
+    asset_selection_context: dict[str, Any]
+    planner_metadata: dict[str, Any]
+
 
 
 UnifiedChatState = WorkflowState
@@ -51,6 +62,16 @@ def create_workflow_state(
         triage_level=triage_level,
         context_payload=dict(context_payload or {}),
         final_response=final_response,
+        workflow_version="v1",
+        execution_plan=[],
+        evidence=[],
+        action_results=[],
+        retrieval_strategy=None,
+        memory_context=[],
+        appointment_context={},
+        consultation_context=[],
+        asset_selection_context={},
+        planner_metadata={},
     )
 
 

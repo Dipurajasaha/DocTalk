@@ -110,6 +110,13 @@ class AssetService:
         self._assert_access(record, user_id)
         file_path = self._resolve_record_path(record)
 
+        # Remove AssetIndex entry
+        from .asset_index_service import AssetIndexService
+        try:
+            await AssetIndexService(self.client).delete_by_asset_id(asset_id)
+        except Exception as exc:
+            logger.warning("AssetIndex deletion failed", extra={"asset_id": asset_id, "error": str(exc)})
+
         # Delete associated RAG embeddings first so no orphaned vectors remain.
         try:
             deleted = await pgvector_service.delete_document_embeddings(asset_id=asset_id)
@@ -400,6 +407,22 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
 
         if not asset:
             raise ValueError(f"Asset {asset_id} not found")
+        
+        from .document_analyzer import document_analyzer
+        from .asset_index_service import AssetIndexService
+        
+        index_data = await document_analyzer.analyze_document(
+            asset_id=asset_id,
+            patient_id=str(asset.userId),
+            file_name=str(asset.fileName),
+            category=str(category),
+            extracted_text=extracted_text,
+            created_at=asset.createdAt
+        )
+        try:
+            await AssetIndexService(db).create_index(index_data)
+        except Exception as exc:
+            logger.exception("AssetIndex creation failed", extra={"asset_id": asset_id, "error": str(exc)})
         
         await pgvector_service.ingest_document(
             patient_id=str(asset.userId),

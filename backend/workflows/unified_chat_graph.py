@@ -8,8 +8,12 @@ from langgraph.graph import END, START, StateGraph
 
 from .nodes.doctor_nodes import doctor_general_llm, doctor_scoped_llm
 from .nodes.patient_nodes import patient_assistant_llm, patient_general_llm, triage_evaluator
+from .nodes.planner import planner_node
+from .nodes.response_composer import response_composer_node
+from .nodes.retrieval_strategy import retrieval_strategy_node
 from .nodes.routing import classify_intent
 from .nodes.shared_nodes import medical_safety_guardrail
+from .nodes.task_executor import task_executor_node
 from .state import WorkflowState
 
 
@@ -50,6 +54,13 @@ def build_unified_chat_graph() -> Any:
     graph.add_node("doctor_general_llm", doctor_general_llm)
     graph.add_node("doctor_scoped_llm", doctor_scoped_llm)
     graph.add_node("guardrail", medical_safety_guardrail)
+    
+    # Planner Architecture Foundation nodes (Isolated)
+    graph.add_node("planner", planner_node)
+    graph.add_node("task_executor", task_executor_node)
+    graph.add_node("response_composer", response_composer_node)
+    graph.add_node("retrieval_strategy", retrieval_strategy_node)
+    
     graph.add_edge(START, "log_entry_context")
     graph.add_conditional_edges(
         "log_entry_context",

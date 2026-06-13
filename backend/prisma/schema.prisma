@@ -334,3 +334,30 @@ model AiChatMessage {
   @@index([sessionId])
   @@map("ai_chat_messages")
 }
+
+model AssetIndex {
+  id            String   @id @default(cuid())
+  assetId       String   @unique
+  patientId     String
+  
+  fileName      String?
+  fileCategory  String?
+  sourceType    String?
+  
+  documentType  String?
+  reportType    String?
+  
+  documentDate  DateTime?
+  title         String?
+  summary       String?
+  
+  keywords      Json?    @db.JsonB
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([patientId, documentType])
+  @@index([patientId, reportType])
+  @@index([patientId, documentDate])
+  @@map("asset_indexes")
+}
