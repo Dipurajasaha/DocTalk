@@ -31,6 +31,7 @@ class WorkflowState(TypedDict):
     consultation_context: list[dict[str, Any]]
     asset_selection_context: dict[str, Any]
     rag_scope: dict[str, Any]
+    patient_history_context: list[dict[str, Any]]
     planner_metadata: dict[str, Any]
 
 
@@ -73,6 +74,7 @@ def create_workflow_state(
         consultation_context=[],
         asset_selection_context={},
         rag_scope={},
+        patient_history_context=[],
         planner_metadata={},
     )
 

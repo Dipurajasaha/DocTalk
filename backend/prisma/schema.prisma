@@ -361,3 +361,21 @@ model AssetIndex {
   @@index([patientId, documentDate])
   @@map("asset_indexes")
 }
+
+model PatientMedicalHistory {
+  id          String    @id @default(cuid())
+  patientId   String
+  historyType String
+  title       String
+  value       String    @db.Text
+  source      String?
+  sourceId    String?
+  recordDate  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([patientId])
+  @@index([patientId, historyType])
+  @@index([recordDate])
+  @@map("patient_medical_histories")
+}
