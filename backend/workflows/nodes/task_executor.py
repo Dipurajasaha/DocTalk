@@ -5,6 +5,7 @@ from typing import Any
 from ..retrieval_strategy import RetrievalStrategy
 from ..retrievers import retrieve_conversation_memory, retrieve_consultations
 from ..retrievers.asset_index_retriever import get_latest_document, get_latest_report_by_type, get_reports_by_report_type
+from ..retrievers.asset_scoped_rag import retrieve_asset_scoped_context
 from ..state import UnifiedChatState
 
 
@@ -101,6 +102,24 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                     "type": "asset_selection",
                     "asset_ids": asset_ids
                 })
+                
+                query = ""
+                messages = state.get("messages", [])
+                if messages:
+                    query = messages[-1].content
+                    
+                if p_id and query:
+                    rag_result = await retrieve_asset_scoped_context(
+                        query=query,
+                        asset_ids=asset_ids,
+                        patient_id=p_id
+                    )
+                    for item in rag_result.get("items", []):
+                        evidence.append({
+                            "type": "rag",
+                            "content": item.get("content", ""),
+                            "source_asset": item.get("metadata", {}).get("asset_id", "")
+                        })
 
     return {
         "evidence": evidence,

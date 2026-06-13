@@ -38,6 +38,7 @@ class WorkflowState(TypedDict):
     need_more_actions: bool
     execution_iteration: int
     pending_tasks: list[dict[str, Any]]
+    response_sections: list[dict[str, Any]]
 
 
 
@@ -86,6 +87,7 @@ def create_workflow_state(
         need_more_actions=False,
         execution_iteration=0,
         pending_tasks=[],
+        response_sections=[],
     )
 
 
