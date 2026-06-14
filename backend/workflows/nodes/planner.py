@@ -8,6 +8,7 @@ from .retrieval_strategy import retrieval_strategy_node
 from ..planner_rule_registry import PLANNER_RULES
 from ..parsers.intent_parser import parse_intent
 from ..models.planner_task import PlannerTask
+from ..task_template_registry import build_task_from_template
 
 async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
     text = latest_message_text(state.get("messages") or []).lower()
@@ -24,9 +25,13 @@ async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
     
     parsed_intent = parse_intent(text)
     
+    templates = []
     for rule in PLANNER_RULES:
         if rule.matches(parsed_intent, strategy):
-            execution_plan.extend(rule.build_tasks(parsed_intent, planner_metadata, strategy))
+            templates.extend(rule.build_tasks(parsed_intent, planner_metadata, strategy))
+            
+    for template in templates:
+        execution_plan.extend(build_task_from_template(template))
             
     # Deduplicate while preserving order
     final_plan = []

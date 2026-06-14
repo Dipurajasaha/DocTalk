@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from ..planner_rule_config import APPOINTMENT_RULE_CONFIG, CONSULTATION_RULE_CONFIG, PATIENT_HISTORY_RULE_CONFIG
 
 @dataclass
 class ParsedIntent:
@@ -18,50 +19,42 @@ def parse_intent(text: str) -> ParsedIntent:
     intent = ParsedIntent(original_text=text)
     
     # Appointment extraction
-    if "cardiologist" in text and "book" in text:
+    has_appointment_entity = any(entity in text for entity in APPOINTMENT_RULE_CONFIG["entities"])
+    has_appointment_action = False
+    
+    for action_key, action_aliases in APPOINTMENT_RULE_CONFIG["appointment_actions"].items():
+        if any(a in text for a in action_aliases):
+            has_appointment_action = True
+            if action_key not in intent.actions:
+                intent.actions.append(action_key)
+                
+    if has_appointment_entity and has_appointment_action:
         intent.is_appointment = True
         intent.intent_type = "appointment"
-        intent.entities.append("cardiologist")
-        intent.actions.append("book")
-        
-    if "cancel" in text:
-        intent.actions.append("cancel")
-    elif "reschedule" in text:
-        intent.actions.append("reschedule")
-    elif "book" in text or "schedule" in text:
-        intent.actions.append("book")
-    elif "upcoming" in text or "show" in text or "list" in text:
-        intent.actions.append("list")
+        intent.entities.extend([e for e in APPOINTMENT_RULE_CONFIG["entities"] if e in text])
         
     # Consultation extraction
-    if "chest pain" in text:
+    if any(entity in text for entity in CONSULTATION_RULE_CONFIG["entities"]):
         intent.is_consultation = True
         intent.intent_type = "symptom"
-        intent.entities.append("chest pain")
-    elif "recommend" in text:
+        intent.entities.extend([e for e in CONSULTATION_RULE_CONFIG["entities"] if e in text])
+    elif any(trigger in text for trigger in CONSULTATION_RULE_CONFIG["consultation_triggers"]):
         intent.is_consultation = True
         intent.intent_type = "consultation"
         
-    if "last time" in text:
-        intent.actions.append("last_time")
-    if "previous" in text or "history" in text or "last" in text:
-        intent.actions.append("history")
+    for action_key, action_aliases in CONSULTATION_RULE_CONFIG.get("consultation_actions", {}).items():
+        if any(a in text for a in action_aliases):
+            if action_key not in intent.actions:
+                intent.actions.append(action_key)
 
     # Patient History extraction
-    history_keywords = [
-        "do i have", "medical history", "history", "medications", "medication", 
-        "surgery", "surgeries", "allergy", "allergies", "diagnosed with", "conditions"
-    ]
-    if any(kw in text for kw in history_keywords):
+    if any(kw in text for kw in PATIENT_HISTORY_RULE_CONFIG["trigger_phrases"]):
         intent.is_history = True
         intent.intent_type = "patient_history"
-        if "medication" in text or "medications" in text:
-            intent.history_type = "medication"
-        elif "surgery" in text or "surgeries" in text:
-            intent.history_type = "surgery"
-        elif "allergy" in text or "allergies" in text:
-            intent.history_type = "allergy"
-        elif "condition" in text or "conditions" in text or "diagnosed with" in text:
-            intent.history_type = "condition"
+        
+        for htype in PATIENT_HISTORY_RULE_CONFIG["history_types"]:
+            if htype in text or htype + "s" in text or (htype == "condition" and "diagnosed" in text):
+                intent.history_type = htype
+                break
 
     return intent
