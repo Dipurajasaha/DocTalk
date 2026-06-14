@@ -3,16 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from ..retrieval_strategy import RetrievalStrategy
-from ..retrievers import retrieve_conversation_memory, retrieve_consultations
-from ..retrievers.asset_index_retriever import get_latest_document, get_latest_report_by_type, get_reports_by_report_type
-from ..retrievers.asset_scoped_rag import retrieve_asset_scoped_context
-from ..retrievers.patient_history_retriever import get_patient_history, get_history_by_type
+from ..retrieval_registry import get_retriever
 from ..state import UnifiedChatState
 
 
 async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     execution_plan = state.get("execution_plan") or []
-    ai_session_id = str(state.get("ai_session_id") or "")
     
     memory_context = []
     appointment_context = {}
@@ -26,131 +22,38 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     for task_info in execution_plan:
         task_name = task_info.get("task")
         
-        if task_name == "memory":
-            if ai_session_id:
-                memory_context = await retrieve_conversation_memory(session_id=ai_session_id)
-                
-        elif task_name == "consultation":
-            user_id = str(state.get("user_id") or "")
-            role = str(state.get("role") or "")
-            target_patient_id = state.get("target_patient_id")
-            
-            c_patient_id = None
-            c_doctor_id = None
-            
-            if role == "patient":
-                c_patient_id = user_id
-            elif role == "doctor":
-                c_doctor_id = user_id
-                if target_patient_id:
-                    c_patient_id = str(target_patient_id)
+        if task_name == "retrieve":
+            retriever_name = task_info.get("retriever")
+            if retriever_name:
+                retriever_def = get_retriever(retriever_name)
+                if retriever_def:
+                    role = str(state.get("role") or "")
+                    has_patient = bool(state.get("user_id") if role == "patient" else state.get("target_patient_id"))
+                    has_doctor = role == "doctor"
                     
-            if c_patient_id or c_doctor_id:
-                consultation_context = await retrieve_consultations(
-                    patient_id=c_patient_id, 
-                    doctor_id=c_doctor_id, 
-                    limit=5
-                )
-                
-        elif task_name == "appointment":
-            action = task_info.get("action", "search")
-            appointment_context = {"action": action}
-            if action == "search":
-                pending_tasks.append({
-                    "task": "appointment",
-                    "action": "search_slots"
-                })
-                
-        elif task_name == "patient_history":
-            p_metadata = state.get("planner_metadata", {})
-            history_type = p_metadata.get("history_type")
-            
-            user_id = str(state.get("user_id") or "")
-            role = str(state.get("role") or "")
-            target_patient_id = state.get("target_patient_id")
-            
-            p_id = None
-            if role == "patient":
-                p_id = user_id
-            elif role == "doctor" and target_patient_id:
-                p_id = str(target_patient_id)
-                
-            if p_id:
-                if history_type:
-                    history_entries = await get_history_by_type(p_id, history_type)
-                else:
-                    history_entries = await get_patient_history(p_id)
-                    
-                patient_history_context.extend(history_entries)
-                for entry in history_entries:
-                    evidence.append({
-                        "type": "patient_history",
-                        "history_type": entry.get("historyType"),
-                        "title": entry.get("title"),
-                        "value": entry.get("value")
-                    })
-            
-        elif task_name == "asset_index":
-            action = task_info.get("action", "latest")
-            p_metadata = state.get("planner_metadata", {})
-            report_type = p_metadata.get("report_type", "general")
-            document_type = p_metadata.get("document_type", "medical_record")
-            
-            user_id = str(state.get("user_id") or "")
-            role = str(state.get("role") or "")
-            target_patient_id = state.get("target_patient_id")
-            
-            p_id = None
-            if role == "patient":
-                p_id = user_id
-            elif role == "doctor" and target_patient_id:
-                p_id = str(target_patient_id)
-                
-            asset_ids = []
-            
-            if p_id:
-                if action == "latest":
-                    if report_type == "general":
-                        doc = await get_latest_document(p_id)
-                    else:
-                        doc = await get_latest_report_by_type(p_id, report_type)
-                    if doc:
-                        asset_ids.append(doc.get("assetId"))
-                elif action == "compare":
-                    docs = await get_reports_by_report_type(p_id, report_type)
-                    for d in docs:
-                        asset_ids.append(d.get("assetId"))
+                    if retriever_def.get("requires_patient") and not has_patient:
+                        continue
+                    if retriever_def.get("requires_doctor") and not has_doctor:
+                        continue
                         
-            asset_selection_context = {
-                "asset_ids": asset_ids,
-                "document_type": document_type,
-                "report_type": report_type,
-                "selection_reason": action
-            }
-            if asset_ids:
-                rag_scope = {"asset_ids": asset_ids}
-                evidence.append({
-                    "type": "asset_selection",
-                    "asset_ids": asset_ids
-                })
+                    result = await retriever_def["retriever"](state, task_info)
                 
-                query = ""
-                messages = state.get("messages", [])
-                if messages:
-                    query = messages[-1].content
-                    
-                if p_id and query:
-                    rag_result = await retrieve_asset_scoped_context(
-                        query=query,
-                        asset_ids=asset_ids,
-                        patient_id=p_id
-                    )
-                    for item in rag_result.get("items", []):
-                        evidence.append({
-                            "type": "rag",
-                            "content": item.get("content", ""),
-                            "source_asset": item.get("metadata", {}).get("asset_id", "")
-                        })
+                    if "memory_context" in result:
+                        memory_context.extend(result["memory_context"])
+                    if "appointment_context" in result:
+                        appointment_context.update(result["appointment_context"])
+                    if "consultation_context" in result:
+                        consultation_context.extend(result["consultation_context"])
+                    if "asset_selection_context" in result:
+                        asset_selection_context.update(result["asset_selection_context"])
+                    if "rag_scope" in result:
+                        rag_scope.update(result["rag_scope"])
+                    if "patient_history_context" in result:
+                        patient_history_context.extend(result["patient_history_context"])
+                    if "evidence" in result:
+                        evidence.extend(result["evidence"])
+                    if "pending_tasks" in result:
+                        pending_tasks.extend(result["pending_tasks"])
 
     return {
         "evidence": evidence,

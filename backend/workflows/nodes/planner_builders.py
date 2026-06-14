@@ -22,7 +22,7 @@ def build_patient_history_tasks(text: str, metadata: dict[str, Any]) -> list[dic
         if history_type:
             metadata["history_type"] = history_type
             
-        return [{"task": "patient_history", "action": None, "parameters": {}}]
+        return [{"task": "retrieve", "retriever": "PATIENT_HISTORY", "action": None, "parameters": {}}]
     return []
 
 def build_document_tasks(text: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
@@ -36,7 +36,7 @@ def build_document_tasks(text: str, metadata: dict[str, Any]) -> list[dict[str, 
         if doc_intent.detected_entities:
             metadata["detected_entities"].extend(doc_intent.detected_entities)
             
-        return [{"task": "asset_index", "action": doc_intent.action, "parameters": {}}]
+        return [{"task": "retrieve", "retriever": "ASSET_INDEX", "action": doc_intent.action, "parameters": {}}]
     return []
 
 def build_appointment_tasks(text: str, metadata: dict[str, Any], strategy: str | None = None) -> list[dict[str, Any]]:
@@ -45,8 +45,8 @@ def build_appointment_tasks(text: str, metadata: dict[str, Any], strategy: str |
         metadata["detected_entities"].append("cardiologist")
         metadata["detected_actions"].append("book")
         return [
-            {"task": "appointment", "action": "search", "parameters": {}}, 
-            {"task": "doctor_search", "action": None, "parameters": {}}
+            {"task": "retrieve", "retriever": "APPOINTMENT", "action": "search", "parameters": {}}, 
+            {"task": "retrieve", "retriever": "DOCTOR_SEARCH", "action": None, "parameters": {}}
         ]
         
     if strategy == RetrievalStrategy.APPOINTMENT_QUERY.value:
@@ -60,30 +60,30 @@ def build_appointment_tasks(text: str, metadata: dict[str, Any], strategy: str |
         elif "upcoming" in text or "show" in text or "list" in text:
             action = "list"
             
-        return [{"task": "appointment", "action": action, "parameters": {"retrieval_strategy": strategy}}]
+        return [{"task": "retrieve", "retriever": "APPOINTMENT", "action": action, "parameters": {"retrieval_strategy": strategy}}]
     return []
 
 def build_consultation_tasks(text: str, metadata: dict[str, Any], strategy: str | None = None) -> list[dict[str, Any]]:
     if "chest pain" in text:
         metadata["query_type"] = "symptom"
         metadata["detected_entities"].append("chest pain")
-        return [{"task": "memory", "action": None, "parameters": {}}, {"task": "consultation", "action": None, "parameters": {}}]
+        return [{"task": "retrieve", "retriever": "MEMORY", "action": None, "parameters": {}}, {"task": "retrieve", "retriever": "CONSULTATION", "action": None, "parameters": {}}]
         
     elif "recommend" in text:
         metadata["query_type"] = "consultation"
         if "last time" in text:
-            return [{"task": "memory", "action": None, "parameters": {}}, {"task": "consultation", "action": None, "parameters": {}}]
-        return [{"task": "consultation", "action": None, "parameters": {}}]
+            return [{"task": "retrieve", "retriever": "MEMORY", "action": None, "parameters": {}}, {"task": "retrieve", "retriever": "CONSULTATION", "action": None, "parameters": {}}]
+        return [{"task": "retrieve", "retriever": "CONSULTATION", "action": None, "parameters": {}}]
             
     if strategy == RetrievalStrategy.CONSULTATION_QUERY.value:
         action = "retrieve"
         if "previous" in text or "history" in text or "last" in text:
             action = "history"
-        return [{"task": "consultation", "action": action, "parameters": {"retrieval_strategy": strategy}}]
+        return [{"task": "retrieve", "retriever": "CONSULTATION", "action": action, "parameters": {"retrieval_strategy": strategy}}]
         
     return []
 
 def build_memory_tasks(text: str, metadata: dict[str, Any], strategy: str | None = None) -> list[dict[str, Any]]:
     if strategy == RetrievalStrategy.MEMORY_QUERY.value:
-        return [{"task": "memory", "action": None, "parameters": {"retrieval_strategy": strategy}}]
+        return [{"task": "retrieve", "retriever": "MEMORY", "action": None, "parameters": {"retrieval_strategy": strategy}}]
     return []
