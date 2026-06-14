@@ -6,6 +6,7 @@ from .planner_rule_registry import (
     MemoryRule,
     PlannerRule
 )
+from .planner_rule_order import RULE_EXECUTION_ORDER
 
 RULE_REGISTRY: dict[str, type[PlannerRule]] = {
     "PATIENT_HISTORY": PatientHistoryRule,
@@ -16,4 +17,9 @@ RULE_REGISTRY: dict[str, type[PlannerRule]] = {
 }
 
 def load_planner_rules() -> list[PlannerRule]:
-    return [rule_class() for rule_class in RULE_REGISTRY.values()]
+    rules = []
+    for rule_name in RULE_EXECUTION_ORDER:
+        if rule_name not in RULE_REGISTRY:
+            raise ValueError(f"Rule '{rule_name}' in RULE_EXECUTION_ORDER not found in RULE_REGISTRY.")
+        rules.append(RULE_REGISTRY[rule_name]())
+    return rules

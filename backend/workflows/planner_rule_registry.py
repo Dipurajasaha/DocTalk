@@ -30,11 +30,11 @@ class AppointmentRule(PlannerRule):
             if "book" in parsed_intent.actions:
                 metadata["detected_actions"].append("book")
             return [
-                TaskTemplate("APPOINTMENT_SEARCH"),
+                TaskTemplate("APPOINTMENT"),
                 TaskTemplate("DOCTOR_SEARCH")
             ]
             
-        action_handler = "APPOINTMENT_SEARCH"
+        action_handler = "APPOINTMENT"
         if "cancel" in parsed_intent.actions:
             action_handler = "APPOINTMENT_CANCEL"
         elif "reschedule" in parsed_intent.actions:
@@ -42,7 +42,7 @@ class AppointmentRule(PlannerRule):
         elif "book" in parsed_intent.actions:
             action_handler = "APPOINTMENT_BOOK"
         elif "list" in parsed_intent.actions:
-            action_handler = "APPOINTMENT_LIST"
+            action_handler = "APPOINTMENT"
             
         return [TaskTemplate(action_handler, {"retrieval_strategy": strategy})]
 

@@ -11,11 +11,32 @@ from .retrievers import retrieve_conversation_memory, retrieve_consultations
 from .retrievers.asset_index_retriever import get_latest_document, get_latest_report_by_type, get_reports_by_report_type
 from .retrievers.asset_scoped_rag import retrieve_asset_scoped_context
 from .retrievers.patient_history_retriever import get_patient_history, get_history_by_type
+from .retrievers.appointment_retriever import retrieve_appointments
 
 async def retrieve_memory_wrapper(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
     ai_session_id = str(state.get("ai_session_id") or "")
     if ai_session_id:
         return {"memory_context": await retrieve_conversation_memory(session_id=ai_session_id)}
+    return {}
+
+async def retrieve_appointment_wrapper(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
+    user_id = str(state.get("user_id") or "")
+    role = str(state.get("role") or "")
+    target_patient_id = state.get("target_patient_id")
+    
+    c_patient_id = user_id if role == "patient" else str(target_patient_id) if target_patient_id else None
+    c_doctor_id = user_id if role == "doctor" else None
+            
+    if c_patient_id or c_doctor_id:
+        appointments = await retrieve_appointments(
+            patient_id=c_patient_id, 
+            doctor_id=c_doctor_id
+        )
+        evidence = []
+        for appt in appointments:
+            appt["type"] = "appointment"
+            evidence.append(appt)
+        return {"appointment_context": {"action": "list", "appointments": appointments}, "evidence": evidence}
     return {}
 
 async def retrieve_consultation_wrapper(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
@@ -134,6 +155,12 @@ REGISTRY: dict[str, RetrievalDefinition] = {
         "name": "ASSET_INDEX",
         "retriever": retrieve_asset_index_wrapper,
         "requires_patient": True,
+        "requires_doctor": False
+    },
+    "APPOINTMENT": {
+        "name": "APPOINTMENT",
+        "retriever": retrieve_appointment_wrapper,
+        "requires_patient": False,
         "requires_doctor": False
     }
 }

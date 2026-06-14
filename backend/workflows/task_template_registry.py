@@ -16,8 +16,8 @@ def build_asset_index(template: TaskTemplate) -> list[PlannerTask]:
     action = template.parameters.pop("action", None)
     return [PlannerTask.create_retrieve("ASSET_INDEX", action, template.parameters)]
 
-def build_appointment_search(template: TaskTemplate) -> list[PlannerTask]:
-    return [PlannerTask.create_action("APPOINTMENT_SEARCH", template.parameters)]
+def build_appointment(template: TaskTemplate) -> list[PlannerTask]:
+    return [PlannerTask.create_retrieve("APPOINTMENT", parameters=template.parameters)]
 
 def build_appointment_book(template: TaskTemplate) -> list[PlannerTask]:
     return [PlannerTask.create_action("APPOINTMENT_BOOK", template.parameters)]
@@ -28,9 +28,6 @@ def build_appointment_cancel(template: TaskTemplate) -> list[PlannerTask]:
 def build_appointment_reschedule(template: TaskTemplate) -> list[PlannerTask]:
     return [PlannerTask.create_action("APPOINTMENT_RESCHEDULE", template.parameters)]
 
-def build_appointment_list(template: TaskTemplate) -> list[PlannerTask]:
-    return [PlannerTask.create_action("APPOINTMENT_LIST", template.parameters)]
-
 def build_doctor_search(template: TaskTemplate) -> list[PlannerTask]:
     return [PlannerTask.create_action("DOCTOR_SEARCH", template.parameters)]
 
@@ -39,11 +36,10 @@ TASK_TEMPLATE_REGISTRY: dict[str, Callable[[TaskTemplate], list[PlannerTask]]] =
     "CONSULTATION": build_consultation,
     "MEMORY": build_memory,
     "ASSET_INDEX": build_asset_index,
-    "APPOINTMENT_SEARCH": build_appointment_search,
+    "APPOINTMENT": build_appointment,
     "APPOINTMENT_BOOK": build_appointment_book,
     "APPOINTMENT_CANCEL": build_appointment_cancel,
     "APPOINTMENT_RESCHEDULE": build_appointment_reschedule,
-    "APPOINTMENT_LIST": build_appointment_list,
     "DOCTOR_SEARCH": build_doctor_search
 }
 

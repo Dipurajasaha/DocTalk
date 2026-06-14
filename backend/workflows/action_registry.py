@@ -7,11 +7,7 @@ class ActionDefinition(TypedDict):
     requires_patient: bool
     requires_doctor: bool
 
-async def handle_appointment_search(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "action_results": [{"type": "appointment_context", "action": "search"}],
-        "pending_tasks": [{"task": "action", "action_handler": "APPOINTMENT_SEARCH_SLOTS", "parameters": {}}]
-    }
+
 
 async def handle_appointment_book(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -25,9 +21,6 @@ async def handle_appointment_cancel(state: UnifiedChatState, task_info: dict[str
 async def handle_appointment_reschedule(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
     return {"action_results": [{"type": "appointment_context", "action": "reschedule"}], "pending_tasks": []}
 
-async def handle_appointment_list(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
-    return {"action_results": [{"type": "appointment_context", "action": "list"}], "pending_tasks": []}
-
 async def handle_appointment_search_slots(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
     return {"action_results": [], "pending_tasks": []}
 
@@ -35,12 +28,7 @@ async def handle_doctor_search(state: UnifiedChatState, task_info: dict[str, Any
     return {"action_results": [], "pending_tasks": []}
 
 ACTION_REGISTRY: dict[str, ActionDefinition] = {
-    "APPOINTMENT_SEARCH": {
-        "name": "APPOINTMENT_SEARCH",
-        "handler": handle_appointment_search,
-        "requires_patient": False,
-        "requires_doctor": False
-    },
+
     "APPOINTMENT_BOOK": {
         "name": "APPOINTMENT_BOOK",
         "handler": handle_appointment_book,
@@ -59,12 +47,7 @@ ACTION_REGISTRY: dict[str, ActionDefinition] = {
         "requires_patient": False,
         "requires_doctor": False
     },
-    "APPOINTMENT_LIST": {
-        "name": "APPOINTMENT_LIST",
-        "handler": handle_appointment_list,
-        "requires_patient": False,
-        "requires_doctor": False
-    },
+
     "APPOINTMENT_SEARCH_SLOTS": {
         "name": "APPOINTMENT_SEARCH_SLOTS",
         "handler": handle_appointment_search_slots,

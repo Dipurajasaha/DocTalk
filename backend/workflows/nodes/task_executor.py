@@ -5,11 +5,13 @@ from typing import Any
 from ..retrieval_strategy import RetrievalStrategy
 from ..retrieval_registry import get_retriever
 from ..action_registry import get_action_handler
+from ..models.evidence_collector import EvidenceCollector
 from ..state import UnifiedChatState
 
 
 async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     execution_plan = state.get("execution_plan") or []
+    collector = EvidenceCollector()
     
     memory_context = []
     appointment_context = {}
@@ -17,7 +19,6 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     asset_selection_context = {}
     rag_scope = {}
     patient_history_context = []
-    evidence = []
     pending_tasks = []
     
     for task_info in execution_plan:
@@ -52,7 +53,7 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                     if "patient_history_context" in result:
                         patient_history_context.extend(result["patient_history_context"])
                     if "evidence" in result:
-                        evidence.extend(result["evidence"])
+                        collector.extend(result["evidence"])
                     if "pending_tasks" in result:
                         pending_tasks.extend(result["pending_tasks"])
                         
@@ -75,12 +76,14 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                     for r in result.get("action_results", []):
                         if r.get("type") == "appointment_context":
                             appointment_context["action"] = r.get("action")
+                        elif r.get("type") == "evidence":
+                            collector.add(r["payload"])
                             
                     if "pending_tasks" in result:
                         pending_tasks.extend(result["pending_tasks"])
 
     return {
-        "evidence": evidence,
+        "evidence": collector.build(),
         "memory_context": memory_context,
         "appointment_context": appointment_context,
         "consultation_context": consultation_context,
