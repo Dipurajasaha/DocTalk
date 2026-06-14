@@ -24,8 +24,7 @@ async def handle_appointment_reschedule(state: UnifiedChatState, task_info: dict
 async def handle_appointment_search_slots(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
     return {"action_results": [], "pending_tasks": []}
 
-async def handle_doctor_search(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
-    return {"action_results": [], "pending_tasks": []}
+
 
 ACTION_REGISTRY: dict[str, ActionDefinition] = {
 
@@ -51,12 +50,6 @@ ACTION_REGISTRY: dict[str, ActionDefinition] = {
     "APPOINTMENT_SEARCH_SLOTS": {
         "name": "APPOINTMENT_SEARCH_SLOTS",
         "handler": handle_appointment_search_slots,
-        "requires_patient": False,
-        "requires_doctor": False
-    },
-    "DOCTOR_SEARCH": {
-        "name": "DOCTOR_SEARCH",
-        "handler": handle_doctor_search,
         "requires_patient": False,
         "requires_doctor": False
     }

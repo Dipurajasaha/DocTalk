@@ -6,6 +6,7 @@ class ComposedResponse:
     memory_context: list[Any] = field(default_factory=list)
     consultation_context: list[Any] = field(default_factory=list)
     patient_history_context: list[Any] = field(default_factory=list)
+    doctor_availability_context: list[Any] = field(default_factory=list)
     appointment_context: dict[str, Any] = field(default_factory=dict)
     asset_selection_context: dict[str, Any] = field(default_factory=dict)
     rag_scope: dict[str, Any] = field(default_factory=dict)
@@ -42,6 +43,12 @@ class ComposedResponse:
             response_sections.append({"type": "appointment", "content": msg})
             text_parts.append(msg)
             
+        # Doctor Availability Context
+        if self.doctor_availability_context:
+            msg = f"Found {len(self.doctor_availability_context)} available doctors."
+            response_sections.append({"type": "doctor_availability", "content": msg})
+            text_parts.append(msg)
+            
         # Consultation Context
         if self.consultation_context:
             msg = f"Previous consultation notes indicate {len(self.consultation_context)} past records."
@@ -70,6 +77,7 @@ class ComposedResponse:
             "memory_context": self.memory_context,
             "consultation_context": self.consultation_context,
             "patient_history_context": self.patient_history_context,
+            "doctor_availability_context": self.doctor_availability_context,
             "appointment_context": self.appointment_context,
             "asset_selection_context": self.asset_selection_context,
             "rag_scope": self.rag_scope,

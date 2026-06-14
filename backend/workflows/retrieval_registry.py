@@ -12,6 +12,7 @@ from .retrievers.asset_index_retriever import get_latest_document, get_latest_re
 from .retrievers.asset_scoped_rag import retrieve_asset_scoped_context
 from .retrievers.patient_history_retriever import get_patient_history, get_history_by_type
 from .retrievers.appointment_retriever import retrieve_appointments
+from .retrievers.doctor_availability_retriever import retrieve_doctor_availability
 
 async def retrieve_memory_wrapper(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
     ai_session_id = str(state.get("ai_session_id") or "")
@@ -38,6 +39,15 @@ async def retrieve_appointment_wrapper(state: UnifiedChatState, task_info: dict[
             evidence.append(appt)
         return {"appointment_context": {"action": "list", "appointments": appointments}, "evidence": evidence}
     return {}
+
+async def retrieve_doctor_availability_wrapper(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
+    docs = await retrieve_doctor_availability()
+    evidence = []
+    for d in docs:
+        d_copy = dict(d)
+        d_copy["type"] = "doctor_availability"
+        evidence.append(d_copy)
+    return {"doctor_availability_context": docs, "evidence": evidence}
 
 async def retrieve_consultation_wrapper(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
     user_id = str(state.get("user_id") or "")
@@ -160,6 +170,12 @@ REGISTRY: dict[str, RetrievalDefinition] = {
     "APPOINTMENT": {
         "name": "APPOINTMENT",
         "retriever": retrieve_appointment_wrapper,
+        "requires_patient": False,
+        "requires_doctor": False
+    },
+    "DOCTOR_AVAILABILITY": {
+        "name": "DOCTOR_AVAILABILITY",
+        "retriever": retrieve_doctor_availability_wrapper,
         "requires_patient": False,
         "requires_doctor": False
     }

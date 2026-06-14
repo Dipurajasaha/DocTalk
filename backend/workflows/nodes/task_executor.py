@@ -19,6 +19,7 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     asset_selection_context = {}
     rag_scope = {}
     patient_history_context = []
+    doctor_availability_context = []
     pending_tasks = []
     
     for task_info in execution_plan:
@@ -52,6 +53,8 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                         rag_scope.update(result["rag_scope"])
                     if "patient_history_context" in result:
                         patient_history_context.extend(result["patient_history_context"])
+                    if "doctor_availability_context" in result:
+                        doctor_availability_context.extend(result["doctor_availability_context"])
                     if "evidence" in result:
                         collector.extend(result["evidence"])
                     if "pending_tasks" in result:
@@ -90,5 +93,6 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
         "asset_selection_context": asset_selection_context,
         "rag_scope": rag_scope,
         "patient_history_context": patient_history_context,
+        "doctor_availability_context": doctor_availability_context,
         "pending_tasks": pending_tasks,
     }

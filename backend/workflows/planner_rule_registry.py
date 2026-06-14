@@ -31,7 +31,7 @@ class AppointmentRule(PlannerRule):
                 metadata["detected_actions"].append("book")
             return [
                 TaskTemplate("APPOINTMENT"),
-                TaskTemplate("DOCTOR_SEARCH")
+                TaskTemplate("DOCTOR_AVAILABILITY")
             ]
             
         action_handler = "APPOINTMENT"

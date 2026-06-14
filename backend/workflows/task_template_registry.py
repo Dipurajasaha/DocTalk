@@ -28,8 +28,8 @@ def build_appointment_cancel(template: TaskTemplate) -> list[PlannerTask]:
 def build_appointment_reschedule(template: TaskTemplate) -> list[PlannerTask]:
     return [PlannerTask.create_action("APPOINTMENT_RESCHEDULE", template.parameters)]
 
-def build_doctor_search(template: TaskTemplate) -> list[PlannerTask]:
-    return [PlannerTask.create_action("DOCTOR_SEARCH", template.parameters)]
+def build_doctor_availability(template: TaskTemplate) -> list[PlannerTask]:
+    return [PlannerTask.create_retrieve("DOCTOR_AVAILABILITY", parameters=template.parameters)]
 
 TASK_TEMPLATE_REGISTRY: dict[str, Callable[[TaskTemplate], list[PlannerTask]]] = {
     "PATIENT_HISTORY": build_patient_history,
@@ -40,7 +40,7 @@ TASK_TEMPLATE_REGISTRY: dict[str, Callable[[TaskTemplate], list[PlannerTask]]] =
     "APPOINTMENT_BOOK": build_appointment_book,
     "APPOINTMENT_CANCEL": build_appointment_cancel,
     "APPOINTMENT_RESCHEDULE": build_appointment_reschedule,
-    "DOCTOR_SEARCH": build_doctor_search
+    "DOCTOR_AVAILABILITY": build_doctor_availability
 }
 
 def build_task_from_template(template: TaskTemplate) -> list[PlannerTask]:
