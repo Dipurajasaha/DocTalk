@@ -53,7 +53,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r backend/requirements.txt
 python -m prisma generate --schema=backend/prisma/schema.prisma
-python -m prisma db push --schema=backend/prisma/schema.prisma
+cd ..
 python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
