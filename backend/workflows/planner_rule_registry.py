@@ -106,11 +106,3 @@ class MemoryRule(PlannerRule):
         
     def build_tasks(self, parsed_intent: ParsedIntent, metadata: dict[str, Any], strategy: str | None = None) -> list[TaskTemplate]:
         return [TaskTemplate("MEMORY", {"retrieval_strategy": strategy})]
-
-PLANNER_RULES = [
-    PatientHistoryRule(),
-    DocumentRule(),
-    AppointmentRule(),
-    ConsultationRule(),
-    MemoryRule()
-]

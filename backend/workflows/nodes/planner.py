@@ -5,7 +5,7 @@ from typing import Any
 from ..common import get_workflow_model, latest_message_text, message_content_text
 from ..state import UnifiedChatState
 from .retrieval_strategy import retrieval_strategy_node
-from ..planner_rule_registry import PLANNER_RULES
+from ..planner_rule_loader import load_planner_rules
 from ..parsers.intent_parser import parse_intent
 from ..models.planner_task import PlannerTask
 from ..task_template_registry import build_task_from_template
@@ -26,7 +26,7 @@ async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
     parsed_intent = parse_intent(text)
     
     templates = []
-    for rule in PLANNER_RULES:
+    for rule in load_planner_rules():
         if rule.matches(parsed_intent, strategy):
             templates.extend(rule.build_tasks(parsed_intent, planner_metadata, strategy))
             
