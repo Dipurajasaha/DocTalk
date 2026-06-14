@@ -35,13 +35,6 @@ async def retrieve_consultation_wrapper(state: UnifiedChatState, task_info: dict
         return {"consultation_context": consultation_context}
     return {}
 
-async def retrieve_appointment_wrapper(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
-    action = task_info.get("action", "search")
-    res = {"appointment_context": {"action": action}}
-    if action == "search":
-        res["pending_tasks"] = [{"task": "retrieve", "retriever": "APPOINTMENT", "action": "search_slots", "parameters": {}}]
-    return res
-
 async def retrieve_patient_history_wrapper(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
     p_metadata = state.get("planner_metadata", {})
     history_type = p_metadata.get("history_type")
@@ -118,9 +111,6 @@ async def retrieve_asset_index_wrapper(state: UnifiedChatState, task_info: dict[
                 })
     return res
 
-async def retrieve_doctor_search_wrapper(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
-    return {}
-
 REGISTRY: dict[str, RetrievalDefinition] = {
     "MEMORY": {
         "name": "MEMORY",
@@ -134,12 +124,6 @@ REGISTRY: dict[str, RetrievalDefinition] = {
         "requires_patient": False,
         "requires_doctor": False
     },
-    "APPOINTMENT": {
-        "name": "APPOINTMENT",
-        "retriever": retrieve_appointment_wrapper,
-        "requires_patient": False,
-        "requires_doctor": False
-    },
     "PATIENT_HISTORY": {
         "name": "PATIENT_HISTORY",
         "retriever": retrieve_patient_history_wrapper,
@@ -150,12 +134,6 @@ REGISTRY: dict[str, RetrievalDefinition] = {
         "name": "ASSET_INDEX",
         "retriever": retrieve_asset_index_wrapper,
         "requires_patient": True,
-        "requires_doctor": False
-    },
-    "DOCTOR_SEARCH": {
-        "name": "DOCTOR_SEARCH",
-        "retriever": retrieve_doctor_search_wrapper,
-        "requires_patient": False,
         "requires_doctor": False
     }
 }

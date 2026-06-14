@@ -5,13 +5,7 @@ from typing import Any
 from ..common import get_workflow_model, latest_message_text, message_content_text
 from ..state import UnifiedChatState
 from .retrieval_strategy import retrieval_strategy_node
-from .planner_builders import (
-    build_patient_history_tasks,
-    build_document_tasks,
-    build_appointment_tasks,
-    build_consultation_tasks,
-    build_memory_tasks
-)
+from ..planner_rule_registry import PLANNER_RULES
 
 async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
     text = latest_message_text(state.get("messages") or []).lower()
@@ -26,20 +20,10 @@ async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
         "detected_actions": []
     }
     
-    # 1. Exact Match & Dynamic Semantic Rules
-    execution_plan.extend(build_appointment_tasks(text, planner_metadata, strategy))
-    
-    if not execution_plan:
-        execution_plan.extend(build_consultation_tasks(text, planner_metadata, strategy))
-        
-    if not execution_plan:
-        execution_plan.extend(build_patient_history_tasks(text, planner_metadata))
-        execution_plan.extend(build_document_tasks(text, planner_metadata))
-        
-    # 2. Fallback Rules
-    if not execution_plan:
-        execution_plan.extend(build_memory_tasks(text, planner_metadata, strategy))
-
+    for rule in PLANNER_RULES:
+        if rule.matches(text, strategy):
+            execution_plan.extend(rule.build_tasks(text, planner_metadata, strategy))
+            
     if not execution_plan:
         execution_plan.append({"task": "general_response", "action": None, "parameters": {"retrieval_strategy": strategy}})
         
@@ -47,7 +31,7 @@ async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
     final_plan = []
     seen = set()
     for task in execution_plan:
-        task_id = f"{task['task']}_{task.get('action')}"
+        task_id = f"{task.get('task')}_{task.get('action')}_{task.get('action_handler')}_{task.get('retriever')}"
         if task_id not in seen:
             seen.add(task_id)
             final_plan.append(task)

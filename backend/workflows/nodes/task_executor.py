@@ -4,6 +4,7 @@ from typing import Any
 
 from ..retrieval_strategy import RetrievalStrategy
 from ..retrieval_registry import get_retriever
+from ..action_registry import get_action_handler
 from ..state import UnifiedChatState
 
 
@@ -52,6 +53,29 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                         patient_history_context.extend(result["patient_history_context"])
                     if "evidence" in result:
                         evidence.extend(result["evidence"])
+                    if "pending_tasks" in result:
+                        pending_tasks.extend(result["pending_tasks"])
+                        
+        elif task_name == "action":
+            handler_name = task_info.get("action_handler")
+            if handler_name:
+                handler_def = get_action_handler(handler_name)
+                if handler_def:
+                    role = str(state.get("role") or "")
+                    has_patient = bool(state.get("user_id") if role == "patient" else state.get("target_patient_id"))
+                    has_doctor = role == "doctor"
+                    
+                    if handler_def.get("requires_patient") and not has_patient:
+                        continue
+                    if handler_def.get("requires_doctor") and not has_doctor:
+                        continue
+                        
+                    result = await handler_def["handler"](state, task_info)
+                    
+                    for r in result.get("action_results", []):
+                        if r.get("type") == "appointment_context":
+                            appointment_context["action"] = r.get("action")
+                            
                     if "pending_tasks" in result:
                         pending_tasks.extend(result["pending_tasks"])
 
