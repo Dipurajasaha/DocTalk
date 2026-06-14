@@ -21,10 +21,10 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     pending_tasks = []
     
     for task_info in execution_plan:
-        task_name = task_info.get("task")
+        task_name = task_info.task_type
         
         if task_name == "retrieve":
-            retriever_name = task_info.get("retriever")
+            retriever_name = task_info.retriever
             if retriever_name:
                 retriever_def = get_retriever(retriever_name)
                 if retriever_def:
@@ -37,7 +37,7 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                     if retriever_def.get("requires_doctor") and not has_doctor:
                         continue
                         
-                    result = await retriever_def["retriever"](state, task_info)
+                    result = await retriever_def["retriever"](state, task_info.to_dict())
                 
                     if "memory_context" in result:
                         memory_context.extend(result["memory_context"])
@@ -57,7 +57,7 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                         pending_tasks.extend(result["pending_tasks"])
                         
         elif task_name == "action":
-            handler_name = task_info.get("action_handler")
+            handler_name = task_info.action_handler
             if handler_name:
                 handler_def = get_action_handler(handler_name)
                 if handler_def:
@@ -70,7 +70,7 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                     if handler_def.get("requires_doctor") and not has_doctor:
                         continue
                         
-                    result = await handler_def["handler"](state, task_info)
+                    result = await handler_def["handler"](state, task_info.to_dict())
                     
                     for r in result.get("action_results", []):
                         if r.get("type") == "appointment_context":

@@ -1,101 +1,90 @@
 from typing import Any
 from abc import ABC, abstractmethod
 from .parsers.document_query_parser import parse_document_query
+from .parsers.intent_parser import ParsedIntent
 from .retrieval_strategy import RetrievalStrategy
+from .models.planner_task import PlannerTask
 
 class PlannerRule(ABC):
     @abstractmethod
-    def matches(self, text: str, strategy: str | None = None) -> bool:
+    def matches(self, parsed_intent: ParsedIntent, strategy: str | None = None) -> bool:
         pass
         
     @abstractmethod
-    def build_tasks(self, text: str, metadata: dict[str, Any], strategy: str | None = None) -> list[dict[str, Any]]:
+    def build_tasks(self, parsed_intent: ParsedIntent, metadata: dict[str, Any], strategy: str | None = None) -> list[PlannerTask]:
         pass
 
 class AppointmentRule(PlannerRule):
-    def matches(self, text: str, strategy: str | None = None) -> bool:
-        if "cardiologist" in text and "book" in text:
+    def matches(self, parsed_intent: ParsedIntent, strategy: str | None = None) -> bool:
+        if parsed_intent.is_appointment:
             return True
         return strategy == RetrievalStrategy.APPOINTMENT_QUERY.value
         
-    def build_tasks(self, text: str, metadata: dict[str, Any], strategy: str | None = None) -> list[dict[str, Any]]:
-        if "cardiologist" in text and "book" in text:
+    def build_tasks(self, parsed_intent: ParsedIntent, metadata: dict[str, Any], strategy: str | None = None) -> list[PlannerTask]:
+        if parsed_intent.is_appointment:
             metadata["query_type"] = "appointment"
-            metadata["detected_entities"].append("cardiologist")
-            metadata["detected_actions"].append("book")
+            if "cardiologist" in parsed_intent.entities:
+                metadata["detected_entities"].append("cardiologist")
+            if "book" in parsed_intent.actions:
+                metadata["detected_actions"].append("book")
             return [
-                {"task": "action", "action_handler": "APPOINTMENT_SEARCH", "parameters": {}}, 
-                {"task": "action", "action_handler": "DOCTOR_SEARCH", "parameters": {}}
+                PlannerTask.create_action("APPOINTMENT_SEARCH"),
+                PlannerTask.create_action("DOCTOR_SEARCH")
             ]
             
         action_handler = "APPOINTMENT_SEARCH"
-        if "cancel" in text:
+        if "cancel" in parsed_intent.actions:
             action_handler = "APPOINTMENT_CANCEL"
-        elif "reschedule" in text:
+        elif "reschedule" in parsed_intent.actions:
             action_handler = "APPOINTMENT_RESCHEDULE"
-        elif "book" in text or "schedule" in text:
+        elif "book" in parsed_intent.actions:
             action_handler = "APPOINTMENT_BOOK"
-        elif "upcoming" in text or "show" in text or "list" in text:
+        elif "list" in parsed_intent.actions:
             action_handler = "APPOINTMENT_LIST"
             
-        return [{"task": "action", "action_handler": action_handler, "parameters": {"retrieval_strategy": strategy}}]
+        return [PlannerTask.create_action(action_handler, {"retrieval_strategy": strategy})]
 
 class ConsultationRule(PlannerRule):
-    def matches(self, text: str, strategy: str | None = None) -> bool:
-        if "chest pain" in text or "recommend" in text:
+    def matches(self, parsed_intent: ParsedIntent, strategy: str | None = None) -> bool:
+        if parsed_intent.is_consultation:
             return True
         return strategy == RetrievalStrategy.CONSULTATION_QUERY.value
         
-    def build_tasks(self, text: str, metadata: dict[str, Any], strategy: str | None = None) -> list[dict[str, Any]]:
-        if "chest pain" in text:
+    def build_tasks(self, parsed_intent: ParsedIntent, metadata: dict[str, Any], strategy: str | None = None) -> list[PlannerTask]:
+        if parsed_intent.intent_type == "symptom":
             metadata["query_type"] = "symptom"
-            metadata["detected_entities"].append("chest pain")
-            return [{"task": "retrieve", "retriever": "MEMORY", "action": None, "parameters": {}}, {"task": "retrieve", "retriever": "CONSULTATION", "action": None, "parameters": {}}]
+            if "chest pain" in parsed_intent.entities:
+                metadata["detected_entities"].append("chest pain")
+            return [PlannerTask.create_retrieve("MEMORY"), PlannerTask.create_retrieve("CONSULTATION")]
             
-        elif "recommend" in text:
+        elif parsed_intent.intent_type == "consultation":
             metadata["query_type"] = "consultation"
-            if "last time" in text:
-                return [{"task": "retrieve", "retriever": "MEMORY", "action": None, "parameters": {}}, {"task": "retrieve", "retriever": "CONSULTATION", "action": None, "parameters": {}}]
-            return [{"task": "retrieve", "retriever": "CONSULTATION", "action": None, "parameters": {}}]
+            if "last_time" in parsed_intent.actions:
+                return [PlannerTask.create_retrieve("MEMORY"), PlannerTask.create_retrieve("CONSULTATION")]
+            return [PlannerTask.create_retrieve("CONSULTATION")]
                 
         action = "retrieve"
-        if "previous" in text or "history" in text or "last" in text:
+        if "history" in parsed_intent.actions:
             action = "history"
-        return [{"task": "retrieve", "retriever": "CONSULTATION", "action": action, "parameters": {"retrieval_strategy": strategy}}]
+        return [PlannerTask.create_retrieve("CONSULTATION", action, {"retrieval_strategy": strategy})]
 
 class PatientHistoryRule(PlannerRule):
-    def __init__(self):
-        self.history_keywords = [
-            "do i have", "medical history", "history", "medications", "medication", 
-            "surgery", "surgeries", "allergy", "allergies", "diagnosed with", "conditions"
-        ]
-
-    def matches(self, text: str, strategy: str | None = None) -> bool:
-        return any(kw in text for kw in self.history_keywords)
+    def matches(self, parsed_intent: ParsedIntent, strategy: str | None = None) -> bool:
+        return parsed_intent.is_history
         
-    def build_tasks(self, text: str, metadata: dict[str, Any], strategy: str | None = None) -> list[dict[str, Any]]:
+    def build_tasks(self, parsed_intent: ParsedIntent, metadata: dict[str, Any], strategy: str | None = None) -> list[PlannerTask]:
         metadata["query_type"] = "patient_history"
-        history_type = None
-        if "medication" in text or "medications" in text:
-            history_type = "medication"
-        elif "surgery" in text or "surgeries" in text:
-            history_type = "surgery"
-        elif "allergy" in text or "allergies" in text:
-            history_type = "allergy"
-        elif "condition" in text or "conditions" in text or "diagnosed with" in text:
-            history_type = "condition"
+        if parsed_intent.history_type:
+            metadata["history_type"] = parsed_intent.history_type
             
-        if history_type:
-            metadata["history_type"] = history_type
-            
-        return [{"task": "retrieve", "retriever": "PATIENT_HISTORY", "action": None, "parameters": {}}]
+        return [PlannerTask.create_retrieve("PATIENT_HISTORY")]
 
 class DocumentRule(PlannerRule):
-    def matches(self, text: str, strategy: str | None = None) -> bool:
-        return parse_document_query(text) is not None
+    def matches(self, parsed_intent: ParsedIntent, strategy: str | None = None) -> bool:
+        return parse_document_query(parsed_intent.original_text) is not None
         
-    def build_tasks(self, text: str, metadata: dict[str, Any], strategy: str | None = None) -> list[dict[str, Any]]:
-        doc_intent = parse_document_query(text)
+    def build_tasks(self, parsed_intent: ParsedIntent, metadata: dict[str, Any], strategy: str | None = None) -> list[PlannerTask]:
+        doc_intent = parse_document_query(parsed_intent.original_text)
         if doc_intent:
             if metadata.get("query_type") == "general":
                 metadata["query_type"] = "document"
@@ -105,15 +94,15 @@ class DocumentRule(PlannerRule):
             if doc_intent.detected_entities:
                 metadata["detected_entities"].extend(doc_intent.detected_entities)
                 
-            return [{"task": "retrieve", "retriever": "ASSET_INDEX", "action": doc_intent.action, "parameters": {}}]
+            return [PlannerTask.create_retrieve("ASSET_INDEX", doc_intent.action)]
         return []
 
 class MemoryRule(PlannerRule):
-    def matches(self, text: str, strategy: str | None = None) -> bool:
+    def matches(self, parsed_intent: ParsedIntent, strategy: str | None = None) -> bool:
         return strategy == RetrievalStrategy.MEMORY_QUERY.value
         
-    def build_tasks(self, text: str, metadata: dict[str, Any], strategy: str | None = None) -> list[dict[str, Any]]:
-        return [{"task": "retrieve", "retriever": "MEMORY", "action": None, "parameters": {"retrieval_strategy": strategy}}]
+    def build_tasks(self, parsed_intent: ParsedIntent, metadata: dict[str, Any], strategy: str | None = None) -> list[PlannerTask]:
+        return [PlannerTask.create_retrieve("MEMORY", None, {"retrieval_strategy": strategy})]
 
 PLANNER_RULES = [
     PatientHistoryRule(),
