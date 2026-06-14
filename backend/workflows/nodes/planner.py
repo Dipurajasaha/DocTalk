@@ -19,6 +19,10 @@ async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
     
     execution_plan = ExecutionPlan()
     
+    print("[DEBUG][PLANNER] text =", text)
+    print("[DEBUG][PLANNER] strategy =", strategy)
+
+    
     planner_metadata = {
         "query_type": "general",
         "detected_entities": [],
@@ -39,6 +43,8 @@ async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
             
     if not execution_plan.tasks:
         execution_plan.add_tasks([PlannerTask(task_type="general_response", parameters={"retrieval_strategy": strategy})])
+            
+    print("[DEBUG][PLANNER] execution_plan =", execution_plan.to_list())
             
     return {
         "execution_plan": execution_plan.to_list(),

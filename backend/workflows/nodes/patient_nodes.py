@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from fastapi.encoders import jsonable_encoder
 
 from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, Field, model_validator
@@ -97,17 +98,51 @@ async def triage_evaluator(state: UnifiedChatState) -> dict[str, Any]:
 
 
 async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
-    """Patient-facing AI without RAG — for general / non-clinical queries."""
+    print("[DEBUG][LLM_STATE_KEYS]", state.keys())
+    print("[DEBUG][LLM_STATE_RAW]", {
+        "patient_history_context": state.get("patient_history_context"),
+        "consultation_context": state.get("consultation_context"),
+        "memory_context": state.get("memory_context")
+    })
+    
+    patient_history_context = state.get("patient_history_context") or []
+    consultation_context = state.get("consultation_context") or []
+    memory_context = state.get("memory_context") or []
+    evidence = state.get("evidence") or []
+    
+    context_str = ""
+    if patient_history_context:
+        context_str += f"Patient History:\n{json.dumps(jsonable_encoder(patient_history_context))}\n\n"
+    if consultation_context:
+        context_str += f"Consultations:\n{json.dumps(jsonable_encoder(consultation_context))}\n\n"
+    if memory_context:
+        context_str += f"Memory:\n{json.dumps(jsonable_encoder(memory_context))}\n\n"
+    if evidence:
+        context_str += f"Evidence:\n{json.dumps(jsonable_encoder(evidence))}\n\n"
+        
+    sys_content = (
+        "You are a helpful, empathetic medical assistant. "
+        "Answer the user's question in plain, patient-friendly language. "
+        "Do not attempt to diagnose or provide definitive medical advice."
+    )
+    if context_str:
+        sys_content += f"\n\nYou have access to the following retrieved context. Summarize and use it to answer the user's query:\n{context_str}"
+        
     messages = [
-        SystemMessage(
-            content=(
-                "You are a helpful, empathetic medical assistant. "
-                "Answer the user's question in plain, patient-friendly language. "
-                "Do not attempt to diagnose or provide definitive medical advice."
-            )
-        ),
+        SystemMessage(content=sys_content),
         *list(state.get("messages") or []),
     ]
+    
+    print("[DEBUG][STATE_BEFORE_LLM]", {
+        "patient_history_context": len(patient_history_context),
+        "consultation_context": len(consultation_context),
+        "memory_context": len(memory_context),
+        "evidence": len(evidence),
+    })
+    print("[DEBUG][LLM_PROMPT_CONTEXT_INJECTED]", bool(context_str))
+    print("[DEBUG][PATIENT_HISTORY_LEN]", len(patient_history_context))
+    print("[DEBUG][LLM] prompt =", messages)
+    
     response = await llm.ainvoke(messages)
     response_text = message_content_text(response) or "I am here to help with your health question."
 
@@ -127,14 +162,22 @@ async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
     last_message = messages_list[-1] if messages_list else None
     query = message_content_text(last_message) if last_message else latest_message_text(messages_list)
     context = await patient_rag_tool.ainvoke({"query": query, "state": state})
-    context_str = json.dumps(context, default=str)
+    context_str = json.dumps(jsonable_encoder(context), default=str)
     sys_msg = SystemMessage(
         content=(
             "You are a medical AI. Answer the user's query using ONLY this retrieved data: "
             f"{context_str}. If empty, say no records exist."
         )
     )
-    response = await llm.ainvoke([sys_msg] + messages_list)
+    
+    messages = [sys_msg] + messages_list
+    print("[DEBUG][LLM] patient_history_context =", state.get("patient_history_context"))
+    print("[DEBUG][LLM] consultation_context =", state.get("consultation_context"))
+    print("[DEBUG][LLM] memory_context =", state.get("memory_context"))
+    print("[DEBUG][LLM] evidence =", state.get("evidence"))
+    print("[DEBUG][LLM] prompt =", messages)
+    
+    response = await llm.ainvoke(messages)
     response_text = message_content_text(response) or "I am here to help with your health question."
 
     return {

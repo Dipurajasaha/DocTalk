@@ -27,7 +27,6 @@ async def handle_appointment_search_slots(state: UnifiedChatState, task_info: di
 
 
 ACTION_REGISTRY: dict[str, ActionDefinition] = {
-
     "APPOINTMENT_BOOK": {
         "name": "APPOINTMENT_BOOK",
         "handler": handle_appointment_book,
@@ -46,7 +45,6 @@ ACTION_REGISTRY: dict[str, ActionDefinition] = {
         "requires_patient": False,
         "requires_doctor": False
     },
-
     "APPOINTMENT_SEARCH_SLOTS": {
         "name": "APPOINTMENT_SEARCH_SLOTS",
         "handler": handle_appointment_search_slots,

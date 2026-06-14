@@ -24,11 +24,13 @@ logger = logging.getLogger(__name__)
 async def run_shadow_pipeline(state: WorkflowState) -> dict[str, Any]:
     st = dict(state)
     
+    print("[DEBUG][GRAPH] entering planner")
     p_out = await planner_node(st)
     if isinstance(p_out, dict):
         st.update(p_out)
         
     while True:
+        print("[DEBUG][GRAPH] entering executor")
         t_out = await task_executor_node(st)
         if isinstance(t_out, dict):
             st.update(t_out)
@@ -47,19 +49,27 @@ async def run_shadow_pipeline(state: WorkflowState) -> dict[str, Any]:
         # execution_iteration += 1 then task_executor again
         st["execution_iteration"] = st.get("execution_iteration", 0) + 1
         
+    print("[DEBUG][GRAPH] entering composer")
     r_out = await response_composer_node(st)
     if isinstance(r_out, dict):
         st.update(r_out)
         
-    return {
+    result = {
         "execution_plan": st.get("execution_plan", []),
         "evidence": st.get("evidence", []),
         "planner_metadata": st.get("planner_metadata", {}),
         "asset_selection_context": st.get("asset_selection_context", {}),
         "rag_scope": st.get("rag_scope", {}),
-        "shadow_response": st.get("shadow_response", ""),
+        "shadow_response": st.get("shadow_response") or "",
         "shadow_execution_completed": st.get("shadow_execution_completed", True),
+        "patient_history_context": st.get("patient_history_context") or [],
+        "consultation_context": st.get("consultation_context") or [],
+        "memory_context": st.get("memory_context") or [],
+        "appointment_context": st.get("appointment_context") or {},
+        "doctor_availability_context": st.get("doctor_availability_context") or [],
     }
+    print("[DEBUG][PATIENT_HISTORY_LEN]", len(result.get("patient_history_context") or []))
+    return result
 
 async def log_entry_context(state: WorkflowState) -> dict[str, Any]:
     logger.info(
@@ -108,7 +118,7 @@ def build_unified_chat_graph() -> Any:
     graph.add_edge(START, "log_entry_context")
     graph.add_edge("log_entry_context", "shadow_pipeline")
     graph.add_conditional_edges(
-        "log_entry_context",
+        "shadow_pipeline",
         route_by_role,
         {
             "triage_evaluator": "triage_evaluator",

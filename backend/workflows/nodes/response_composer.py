@@ -16,4 +16,7 @@ async def response_composer_node(state: UnifiedChatState) -> dict[str, Any]:
         evidence=state.get("evidence", [])
     )
     
+    print("[DEBUG][COMPOSER] state keys =", list(state.keys()))
+    print("[DEBUG][COMPOSER] sections =", response.to_dict().get("response_sections"))
+    
     return response.to_dict()

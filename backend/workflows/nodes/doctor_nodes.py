@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from fastapi.encoders import jsonable_encoder
 
 from langchain_core.messages import SystemMessage
 
@@ -28,6 +29,13 @@ async def doctor_general_llm(state: UnifiedChatState) -> dict[str, Any]:
         SystemMessage(content=DOCTOR_SYSTEM_PROMPT),
         *list(state.get("messages") or []),
     ]
+    
+    print("[DEBUG][LLM] patient_history_context =", state.get("patient_history_context"))
+    print("[DEBUG][LLM] consultation_context =", state.get("consultation_context"))
+    print("[DEBUG][LLM] memory_context =", state.get("memory_context"))
+    print("[DEBUG][LLM] evidence =", state.get("evidence"))
+    print("[DEBUG][LLM] prompt =", messages)
+    
     response = await llm.ainvoke(messages)
     response_text = message_content_text(response) or "Clinical reasoning guidance is unavailable at the moment."
 
@@ -53,14 +61,22 @@ async def doctor_scoped_llm(state: UnifiedChatState) -> dict[str, Any]:
     last_message = messages_list[-1] if messages_list else None
     query = message_content_text(last_message) if last_message else latest_message_text(messages_list)
     context = await doctor_rag_tool.ainvoke({"query": query, "state": state})
-    context_str = json.dumps(context, default=str)
+    context_str = json.dumps(jsonable_encoder(context), default=str)
     sys_msg = SystemMessage(
         content=(
             "You are a medical AI. Answer the user's query using ONLY this retrieved data: "
             f"{context_str}. If empty, say no records exist."
         )
     )
-    response = await llm.ainvoke([sys_msg] + messages_list)
+    
+    messages = [sys_msg] + messages_list
+    print("[DEBUG][LLM] patient_history_context =", state.get("patient_history_context"))
+    print("[DEBUG][LLM] consultation_context =", state.get("consultation_context"))
+    print("[DEBUG][LLM] memory_context =", state.get("memory_context"))
+    print("[DEBUG][LLM] evidence =", state.get("evidence"))
+    print("[DEBUG][LLM] prompt =", messages)
+    
+    response = await llm.ainvoke(messages)
     response_text = message_content_text(response) or "Clinical reasoning guidance is unavailable at the moment."
 
     return {

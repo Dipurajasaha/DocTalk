@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, TypedDict
 
+import operator
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+from .models.planner_task import PlannerTask
 
 
 ChatRole = Literal["patient", "doctor"]
@@ -22,7 +24,7 @@ class WorkflowState(TypedDict):
     context_payload: dict[str, Any]
     final_response: str
     workflow_version: str
-    execution_plan: list[dict[str, Any]]
+    execution_plan: list[PlannerTask]
     evidence: list[dict[str, Any]]
     action_results: list[dict[str, Any]]
     retrieval_strategy: str | None
@@ -32,12 +34,13 @@ class WorkflowState(TypedDict):
     asset_selection_context: dict[str, Any]
     rag_scope: dict[str, Any]
     patient_history_context: list[dict[str, Any]]
+    doctor_availability_context: list[dict[str, Any]]
     planner_metadata: dict[str, Any]
     shadow_execution_completed: bool
     shadow_response: str
     need_more_actions: bool
     execution_iteration: int
-    pending_tasks: list[dict[str, Any]]
+    pending_tasks: list[PlannerTask]
     response_sections: list[dict[str, Any]]
 
 

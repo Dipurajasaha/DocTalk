@@ -214,6 +214,7 @@ class ChatService:
                     workflow_state,
                     config={"configurable": {"thread_id": f"{user_id}:{ai_session_id}"}},
                 )
+                print("[DEBUG][ROUTER] graph result =", result)
                 ai_text = str(result.get("final_response") or "").strip()
             except Exception as exc:
                 ai_text = (
