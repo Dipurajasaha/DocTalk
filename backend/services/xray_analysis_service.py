@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ..ai.core_services.gemini import gemini_complete_image_json
+from ..ai.core_services.llm_client import complete_image_json
 from ..ai.core_services.ocr import ocr_service
 from ..ai.prompts.templates import medical_prompt_service
 
@@ -41,7 +41,7 @@ class XRayAnalysisService:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         try:
-            parsed = await gemini_complete_image_json(
+            parsed = await complete_image_json(
                 prompt=prompt,
                 image_path=image_path,
                 model=self.model_name,

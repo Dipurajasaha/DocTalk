@@ -579,6 +579,7 @@ async def _run_ai_websocket(
 
                     if event_name == "on_chain_end" and node_name in {
                         "patient_assistant_llm",
+                        "patient_general_llm",
                         "doctor_general_llm",
                         "doctor_scoped_llm",
                     }:
@@ -610,7 +611,8 @@ async def _run_ai_websocket(
                                 streamed_token = True
 
                 if not final_response:
-                    final_response = str(workflow_state.get("final_response") or "").strip()
+                    final_state = unified_chat_graph.get_state(ai_config).values
+                    final_response = str(final_state.get("final_response") or "").strip()
                 if not final_response:
                     final_response = _role_scaffold_message(current_user.role)
 

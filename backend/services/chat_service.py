@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import HTTPException, status
 from langchain_core.messages import AIMessage, HumanMessage
-from backend.ai.core_services.gemini import gemini_reasoning_complete, gemini_complete_text
+from backend.ai.core_services.llm_client import reasoning_complete, complete_text
 from backend.core.config import settings
 
 from ..core.database import prisma
@@ -165,7 +165,7 @@ class ChatService:
             # Use the dedicated reasoning model (e.g. o1-mini, o3-mini)
             langchain_messages = [HumanMessage(content=str(message or "").strip())]
             try:
-                ai_text = await gemini_reasoning_complete(
+                ai_text = await reasoning_complete(
                     langchain_messages,
                     model=model,
                     max_output_tokens=4096,
@@ -180,7 +180,7 @@ class ChatService:
             # Use an explicit model override with the standard completion path
             langchain_messages = [HumanMessage(content=str(message or "").strip())]
             try:
-                ai_text = await gemini_complete_text(
+                ai_text = await complete_text(
                     langchain_messages,
                     model=model,
                     temperature=0.2,

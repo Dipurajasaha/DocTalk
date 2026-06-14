@@ -1,4 +1,4 @@
-"""Image analysis endpoint with Gemini vision primary + Imagga fallback.
+"""Image analysis endpoint with vision provider selection.
 
 Usage:
     POST /api/images/analyze
@@ -9,9 +9,9 @@ Usage:
     Body: { "image_base64": "<base64 string>", "prompt": "optional prompt" }
     Headers: Authorization: Bearer <token>
 
-The endpoint first tries the active AI provider (Gemini via OpenAI-compatible API
-with vision support). If that fails with a rate-limit or API error, it falls back
-to the Imagga API (tagging / categorization).
+Vision provider is controlled by VISION_ENDPOINT:
+    gemini  → Gemini via OpenAI-compatible vision API
+    imagga  → Imagga REST API (tagging / categorization)
 """
 
 from __future__ import annotations
@@ -19,22 +19,16 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from openai import APIError, RateLimitError
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..core.config import settings
 from ..core.security import CurrentUser, get_current_user
-from ..ai.core_services.gemini import (
-    _message_to_payload,
+from ..ai.core_services.llm_client import (
     _normalize_text,
-    _resolve_provider_creds,
-    get_provider_client,
+    get_llm_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,7 +51,7 @@ class ImageAnalysisRequest(BaseModel):
     )
     model: str | None = Field(
         default=None,
-        description="Override the vision model to use (e.g. 'gemini-2.0-flash').",
+        description="Override the vision model to use.",
     )
 
 
@@ -153,165 +147,141 @@ def _build_vision_messages(
 
 
 # ---------------------------------------------------------------------------
-# Provider: Gemini / any OpenAI-compatible vision model
+# Vision provider: Gemini (OpenAI-compatible vision API)
 # ---------------------------------------------------------------------------
 
-async def _analyze_with_vision_provider(
+async def _analyze_with_gemini_vision(
     image_bytes: bytes,
     mime_type: str,
     prompt: str | None = None,
     model: str | None = None,
 ) -> ImageAnalysisResponse:
-    """Attempt analysis using the primary AI provider (OpenAI-compatible)."""
-    primary = str(getattr(settings, "ai_provider", "gemini") or "gemini").strip().lower()
-    fallback_enabled = bool(getattr(settings, "ai_fallback_enabled", True))
-    fallback_chain_raw = str(getattr(settings, "ai_fallback_chain", "") or "gemini,openai,nvidia,longchat").strip()
-    fallback_chain = [p.strip().lower() for p in fallback_chain_raw.split(",") if p.strip()]
+    """Analyze image using Gemini via its OpenAI-compatible vision API."""
+    from openai import AsyncOpenAI
 
-    ordered_providers = [primary]
-    if fallback_enabled:
-        for p in fallback_chain:
-            if p not in ordered_providers:
-                ordered_providers.append(p)
+    gemini_api_key = str(settings.gemini_api_key or "").strip()
+    gemini_base_url = str(settings.gemini_base_url or "").strip() or None
+    effective_model = model or str(settings.gemini_model or "").strip() or "gemini-2.0-flash"
 
+    if not gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set — required for vision (VISION_ENDPOINT=gemini)")
+
+    client = AsyncOpenAI(api_key=gemini_api_key, base_url=gemini_base_url)
     messages = _build_vision_messages(image_bytes, mime_type, prompt)
 
-    last_error: Exception | None = None
-    for provider in ordered_providers:
-        try:
-            api_key, resolved_model, base_url = _resolve_provider_creds(provider)
-            client = get_provider_client(provider)
-            effective_model = model or resolved_model or "gemini-2.0-flash"
+    response = await client.chat.completions.create(
+        model=effective_model,
+        messages=messages,
+        temperature=0.2,
+        max_tokens=2048,
+        response_format={"type": "json_object"},
+    )
+    choice = response.choices[0] if response.choices else None
+    content = getattr(getattr(choice, "message", None), "content", "") if choice else ""
+    if isinstance(content, list):
+        content = "".join(
+            str(item.get("text") or item.get("content") or "")
+            for item in content if isinstance(item, dict)
+        )
+    raw_text = _normalize_text(str(content or ""))
 
-            response = await client.chat.completions.create(
-                model=effective_model,
-                messages=messages,
-                temperature=0.2,
-                max_tokens=2048,
-                response_format={"type": "json_object"},
+    # Try to parse JSON
+    try:
+        parsed = json.loads(raw_text)
+        if isinstance(parsed, dict):
+            return ImageAnalysisResponse(
+                provider="gemini",
+                model_used=effective_model,
+                analysis=parsed,
+                raw_text=raw_text,
             )
-            choice = response.choices[0] if response.choices else None
-            content = getattr(getattr(choice, "message", None), "content", "") if choice else ""
-            if isinstance(content, list):
-                content = "".join(
-                    str(item.get("text") or item.get("content") or "")
-                    for item in content if isinstance(item, dict)
-                )
-            raw_text = _normalize_text(str(content or ""))
+    except (json.JSONDecodeError, ValueError):
+        pass
 
-            # Try to parse JSON
-            try:
-                parsed = json.loads(raw_text)
-                if isinstance(parsed, dict):
-                    return ImageAnalysisResponse(
-                        provider=provider,
-                        model_used=effective_model,
-                        analysis=parsed,
-                        raw_text=raw_text,
-                    )
-            except (json.JSONDecodeError, ValueError):
-                pass
+    # If we got text but it wasn't valid JSON, return it anyway
+    if raw_text:
+        return ImageAnalysisResponse(
+            provider="gemini",
+            model_used=effective_model,
+            analysis={"raw_response": raw_text},
+            raw_text=raw_text,
+        )
 
-            # If we got text but it wasn't valid JSON, return it anyway
-            if raw_text:
-                return ImageAnalysisResponse(
-                    provider=provider,
-                    model_used=effective_model,
-                    analysis={"raw_response": raw_text},
-                    raw_text=raw_text,
-                )
-
-        except (RateLimitError, APIError) as exc:
-            logger.warning("Vision provider %s failed (rate/api): %s", provider, exc)
-            last_error = exc
-            continue
-        except Exception as exc:
-            logger.warning("Vision provider %s failed: %s", provider, exc)
-            last_error = exc
-            continue
-
-    # All vision providers exhausted – raise so caller can try Imagga
-    raise RuntimeError(
-        f"All vision providers exhausted. Last error: {last_error}"
-    ) from last_error
+    raise RuntimeError("Gemini vision returned empty response")
 
 
 # ---------------------------------------------------------------------------
-# Provider: Imagga (REST API fallback for image analysis)
+# Vision provider: Imagga (REST API)
 # ---------------------------------------------------------------------------
 
 async def _analyze_with_imagga(image_bytes: bytes) -> ImageAnalysisResponse:
-    """Fallback image analysis using Imagga REST API."""
-    api_key = str(getattr(settings, "imgaga_api_key", "") or "").strip()
-    api_url = str(getattr(settings, "imgaga_api_url", "") or "https://api.imagga.com/v2").strip().rstrip("/")
+    """Image analysis using Imagga REST API."""
+    import httpx
+
+    api_key = str(settings.imgaga_api_key or "").strip()
+    api_url = str(settings.imgaga_api_url or "https://api.imagga.com/v2").strip().rstrip("/")
 
     if not api_key:
-        raise RuntimeError("IMGAGA_API_KEY is not configured. Cannot use Imagga fallback.")
+        raise RuntimeError("IMGAGA_API_KEY is not configured. Cannot use Imagga (VISION_ENDPOINT=imagga).")
 
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Upload image
-            files = {"image": ("image.jpg", image_bytes, "image/jpeg")}
-            upload_resp = await client.post(
-                f"{api_url}/uploads",
-                auth=(api_key, api_key),
-                files=files,
-            )
-            upload_resp.raise_for_status()
-            upload_data = upload_resp.json()
-            upload_id = (upload_data.get("result", {}) or {}).get("upload_id")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Upload image
+        files = {"image": ("image.jpg", image_bytes, "image/jpeg")}
+        upload_resp = await client.post(
+            f"{api_url}/uploads",
+            auth=(api_key, api_key),
+            files=files,
+        )
+        upload_resp.raise_for_status()
+        upload_data = upload_resp.json()
+        upload_id = (upload_data.get("result", {}) or {}).get("upload_id")
 
-            # Tagging
-            if not upload_id:
-                raise RuntimeError("Imagga upload did not return an upload_id")
+        # Tagging
+        if not upload_id:
+            raise RuntimeError("Imagga upload did not return an upload_id")
 
-            tags_resp = await client.get(
-                f"{api_url}/tags",
-                auth=(api_key, api_key),
-                params={"image_upload_id": upload_id, "limit": 20},
-            )
-            tags_resp.raise_for_status()
-            tags_data = tags_resp.json()
-            tags_result = tags_data.get("result", {})
-            tags = tags_result.get("tags", [])
+        tags_resp = await client.get(
+            f"{api_url}/tags",
+            auth=(api_key, api_key),
+            params={"image_upload_id": upload_id, "limit": 20},
+        )
+        tags_resp.raise_for_status()
+        tags_data = tags_resp.json()
+        tags_result = tags_data.get("result", {})
+        tags = tags_result.get("tags", [])
 
-            # Categories
-            categories_resp = await client.get(
-                f"{api_url}/categories",
-                auth=(api_key, api_key),
-                params={"image_upload_id": upload_id},
-            )
-            categories_resp.raise_for_status()
-            categories_data = categories_resp.json()
-            categories_result = categories_data.get("result", {})
-            categories = categories_result.get("categories", [])
+        # Categories
+        categories_resp = await client.get(
+            f"{api_url}/categories",
+            auth=(api_key, api_key),
+            params={"image_upload_id": upload_id},
+        )
+        categories_resp.raise_for_status()
+        categories_data = categories_resp.json()
+        categories_result = categories_data.get("result", {})
+        categories = categories_result.get("categories", [])
 
-            analysis: dict[str, Any] = {
-                "tags": [
-                    {"tag": t.get("tag", {}).get("en", ""), "confidence": t.get("confidence", 0.0)}
-                    for t in tags if t.get("tag", {}).get("en")
-                ],
-                "categories": [
-                    {"name": c.get("name", {}).get("en", ""), "confidence": c.get("confidence", 0.0)}
-                    for c in categories if c.get("name", {}).get("en")
-                ],
-            }
+        analysis: dict[str, Any] = {
+            "tags": [
+                {"tag": t.get("tag", {}).get("en", ""), "confidence": t.get("confidence", 0.0)}
+                for t in tags if t.get("tag", {}).get("en")
+            ],
+            "categories": [
+                {"name": c.get("name", {}).get("en", ""), "confidence": c.get("confidence", 0.0)}
+                for c in categories if c.get("name", {}).get("en")
+            ],
+        }
 
-            return ImageAnalysisResponse(
-                provider="imagga",
-                model_used="imagga-v2",
-                analysis=analysis,
-                raw_text=json.dumps(analysis),
-            )
-
-    except httpx.HTTPStatusError as exc:
-        raise RuntimeError(f"Imagga API error: {exc.response.status_code} {exc.response.text}") from exc
-    except httpx.RequestError as exc:
-        raise RuntimeError(f"Imagga request failed: {exc}") from exc
+        return ImageAnalysisResponse(
+            provider="imagga",
+            model_used="imagga-v2",
+            analysis=analysis,
+            raw_text=json.dumps(analysis),
+        )
 
 
 # ---------------------------------------------------------------------------
-# Main analysis orchestrator
+# Main analysis orchestrator — uses VISION_ENDPOINT switch
 # ---------------------------------------------------------------------------
 
 async def _analyze_image(
@@ -320,25 +290,33 @@ async def _analyze_image(
     prompt: str | None = None,
     model: str | None = None,
 ) -> ImageAnalysisResponse:
-    """Try vision provider(s) first, then fall back to Imagga."""
+    """Analyze image using the configured vision endpoint."""
+    endpoint = str(settings.vision_endpoint or "gemini").strip().lower()
+
+    if endpoint == "imagga":
+        try:
+            return await _analyze_with_imagga(image_bytes)
+        except Exception as exc:
+            return ImageAnalysisResponse(
+                success=False,
+                provider="imagga",
+                error=f"Imagga analysis failed: {exc}",
+            )
+
+    # Default: gemini
     try:
-        return await _analyze_with_vision_provider(
+        return await _analyze_with_gemini_vision(
             image_bytes,
             mime_type,
             prompt=prompt,
             model=model,
         )
-    except Exception:
-        logger.info("Vision providers failed; trying Imagga fallback...")
-
-    # Fall back to Imagga
-    try:
-        return await _analyze_with_imagga(image_bytes)
     except Exception as exc:
+        logger.warning("Gemini vision failed: %s", exc)
         return ImageAnalysisResponse(
             success=False,
             provider="none",
-            error=f"All analysis methods failed: {exc}",
+            error=f"Vision analysis failed: {exc}",
         )
 
 
@@ -355,8 +333,7 @@ async def analyze_image_upload(
 ) -> ImageAnalysisResponse:
     """Upload an image file for AI-powered analysis.
 
-    Uses the configured vision provider (Gemini by default) with automatic
-    fallback to Imagga if the vision provider is rate-limited or unavailable.
+    Uses the configured vision endpoint (controlled by VISION_ENDPOINT).
     """
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(
@@ -416,12 +393,13 @@ async def list_image_providers(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """List available image analysis providers and their status."""
-    primary = str(getattr(settings, "ai_provider", "gemini") or "gemini").strip().lower()
-    imagga_key = str(getattr(settings, "imgaga_api_key", "") or "").strip()
+    endpoint = str(settings.vision_endpoint or "gemini").strip().lower()
+    imagga_key = str(settings.imgaga_api_key or "").strip()
+    gemini_key = str(settings.gemini_api_key or "").strip()
 
     return {
-        "primary_vision_provider": primary,
+        "vision_endpoint": endpoint,
+        "gemini_configured": bool(gemini_key),
         "imagga_configured": bool(imagga_key),
-        "fallback_enabled": bool(getattr(settings, "ai_fallback_enabled", True)),
-        "available_providers": ["gemini", "openai", "nvidia", "longchat"],
+        "available_endpoints": ["gemini", "imagga"],
     }

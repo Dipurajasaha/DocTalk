@@ -185,6 +185,7 @@ class PgVectorService:
             )
             return PgVectorSearchResult(items=items, top_k=top_k, similarity_threshold=similarity_threshold, fallback_used=False).to_dict()
         except Exception as exc:
+            logger.exception("Full stacktrace for vector search failure:")
             logger.warning("Vector retrieval failed, falling back to lexical search", extra={"component": "rag", "error": str(exc)})
             items = await self._lexical_fallback(
                 patient_id=patient_id,
@@ -294,9 +295,9 @@ class PgVectorService:
                 1 - (embedding <=> $1::vector) AS similarity
             FROM rag_documents
             WHERE patient_id = $2
-              AND ($3::text IS NULL OR consultation_id = $3)
-              AND ($4::text IS NULL OR source_type = $4)
-              AND ($5::timestamptz IS NULL OR created_at >= $5)
+              AND ($3::text IS NULL OR consultation_id = $3::text)
+              AND ($4::text IS NULL OR source_type = $4::text)
+              AND ($5::timestamptz IS NULL OR created_at >= $5::timestamptz)
               AND ($7::jsonb IS NULL OR metadata->>'asset_id' IN (SELECT jsonb_array_elements_text($7::jsonb)))
             ORDER BY embedding <=> $1::vector
             LIMIT $6

@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain_core.messages import SystemMessage
 
-from ..common import get_gemini_workflow_model, latest_message_text, message_content_text
+from ..common import get_workflow_model, latest_message_text, message_content_text
 from ..state import UnifiedChatState
 from .tools import doctor_rag_tool
 
@@ -15,7 +15,7 @@ DOCTOR_SYSTEM_PROMPT = (
     "focus on differential considerations, red-flag assessment, and next-step clinical thinking. Be concise but detailed."
 )
 
-llm = get_gemini_workflow_model(temperature=0.1)
+llm = get_workflow_model(temperature=0.1)
 
 
 async def doctor_general_llm(state: UnifiedChatState) -> dict[str, Any]:

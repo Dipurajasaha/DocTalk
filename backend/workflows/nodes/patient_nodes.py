@@ -4,16 +4,54 @@ import json
 from typing import Any
 
 from langchain_core.messages import SystemMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from ..common import get_gemini_workflow_model, latest_message_text, message_content_text
+from ..common import get_workflow_model, latest_message_text, message_content_text
 from ..state import UnifiedChatState
 from .tools import patient_rag_tool
 
 
 class TriageEvaluation(BaseModel):
-    is_emergency: bool = Field(description="True when the last message contains severe emergency symptoms.")
+    is_emergency: bool = Field(
+        default=False,
+        description="True when the last message contains severe emergency symptoms.",
+    )
     rationale: str = Field(default="", description="Short explanation of the triage decision.")
+
+    @model_validator(mode='before')
+    @classmethod
+    def parse_flexible_fields(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        
+        data = dict(values)
+        if "is_emergency" not in data:
+            is_emer = False
+            for k, v in data.items():
+                k_lower = k.lower()
+                if "emergency" in k_lower or "severity" in k_lower or "triage" in k_lower:
+                    if isinstance(v, bool):
+                        is_emer = v
+                        break
+                    elif isinstance(v, str):
+                        v_lower = v.lower()
+                        if "non" in v_lower or "false" in v_lower or "no" in v_lower or "low" in v_lower:
+                            is_emer = False
+                            break
+                        elif "emergency" in v_lower or "true" in v_lower or "yes" in v_lower or "high" in v_lower:
+                            is_emer = True
+                            break
+            data["is_emergency"] = is_emer
+            
+        if "rationale" not in data:
+            rat = ""
+            for k, v in data.items():
+                if "rationale" in k.lower() or "reason" in k.lower() or "explain" in k.lower():
+                    rat = str(v)
+                    break
+            data["rationale"] = rat
+            
+        return data
 
 
 TRIAGE_SYSTEM_PROMPT = (
@@ -22,7 +60,7 @@ TRIAGE_SYSTEM_PROMPT = (
     "unconsciousness, blue lips, or other immediately life-threatening signs. Reply with a strict structured decision."
 )
 
-llm = get_gemini_workflow_model(temperature=0.1)
+llm = get_workflow_model(temperature=0.1)
 
 
 async def triage_evaluator(state: UnifiedChatState) -> dict[str, Any]:
@@ -30,7 +68,7 @@ async def triage_evaluator(state: UnifiedChatState) -> dict[str, Any]:
     if not latest_message:
         return {}
 
-    model = get_gemini_workflow_model()
+    model = get_workflow_model()
     evaluator = model.with_structured_output(TriageEvaluation)
     evaluation = await evaluator.ainvoke(
         [

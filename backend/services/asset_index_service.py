@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from backend.core.database import prisma
@@ -10,6 +11,10 @@ class AssetIndexService:
         self.client = client
 
     async def create_index(self, data: dict[str, Any]) -> Any:
+        # Prisma JSON serialization patch
+        if "keywords" in data and isinstance(data["keywords"], list):
+            data["keywords"] = json.dumps(data["keywords"])
+            
         return await self.client.assetindex.create(data=data)
 
     async def update_index(self, asset_id: str, data: dict[str, Any]) -> Any:

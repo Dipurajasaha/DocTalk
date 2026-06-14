@@ -14,7 +14,7 @@ from fastapi import HTTPException, UploadFile, status
 from PIL import Image as PILImage
 from prisma import Prisma
 
-from ..ai.core_services.gemini import gemini_complete_json
+from ..ai.core_services.llm_client import complete_json
 from ..ai.core_services.ocr import ocr_service
 from ..ai.vectorstore.pgvector_service import pgvector_service
 from ..core.config import DATA_ROOT, settings
@@ -484,7 +484,7 @@ async def _classify_pdf_text(extracted_text: str) -> AssetCategory:
         "Choose PRESCRIPTION for medication orders, pharmacy slips, dosage instructions, and doctor prescriptions."
     )
     sample_text = (extracted_text or "").strip()[:1000]
-    response = await _call_gemini_json(prompt, sample_text or "No readable text was extracted from the PDF.")
+    response = await _call_llm_json(prompt, sample_text or "No readable text was extracted from the PDF.")
     return _normalize_category(response.get("category") or response.get("assetCategory") or response.get("label") or sample_text)
 
 
@@ -545,22 +545,22 @@ def _normalize_category(value: Any) -> AssetCategory:
     raise ValueError(f"Unable to classify asset category from response: {value!r}")
 
 
-async def _call_gemini_json(prompt: str, payload: str) -> dict[str, Any]:
-    return await gemini_complete_json(
-        _build_gemini_messages(prompt, payload),
+async def _call_llm_json(prompt: str, payload: str) -> dict[str, Any]:
+    return await complete_json(
+        _build_llm_messages(prompt, payload),
         temperature=0.1,
         max_output_tokens=256,
     )
 
 
-def _build_gemini_messages(prompt: str, payload: str) -> list[dict[str, Any]]:
+def _build_llm_messages(prompt: str, payload: str) -> list[dict[str, Any]]:
     return [
         {"role": "system", "content": prompt},
         {"role": "user", "content": str(payload)},
     ]
 
 
-def _parse_gemini_response(payload: Any) -> dict[str, Any]:
+def _parse_llm_response(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
 

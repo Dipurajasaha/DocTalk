@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..common import get_gemini_workflow_model, latest_message_text, message_content_text
+from ..common import get_workflow_model, latest_message_text, message_content_text
 from ..parsers.document_query_parser import parse_document_query
 from ..retrieval_strategy import RetrievalStrategy
 from ..state import UnifiedChatState

@@ -73,14 +73,30 @@ async def get_latest_report_by_type(patient_id: str, report_type: str) -> dict[s
 
 
 async def get_documents_by_keyword(patient_id: str, keyword: str, limit: int = 5) -> list[dict[str, Any]]:
+    import json
+    kw_json = json.dumps([keyword])
+    
+    rows = await prisma.query_raw(
+        '''
+        SELECT id FROM asset_indexes 
+        WHERE "patientId" = $1 
+        AND keywords @> $2::jsonb
+        ORDER BY "documentDate" DESC 
+        LIMIT $3
+        ''',
+        patient_id,
+        kw_json,
+        limit
+    )
+    
+    if not rows:
+        return []
+        
+    ids = [r["id"] for r in rows]
     docs = await prisma.assetindex.find_many(
         where={
-            "patientId": patient_id,
-            "keywords": {
-                "array_contains": keyword
-            }
+            "id": {"in": ids}
         },
-        order={"documentDate": "desc"},
-        take=limit
+        order={"documentDate": "desc"}
     )
     return [dict(d) for d in docs]
