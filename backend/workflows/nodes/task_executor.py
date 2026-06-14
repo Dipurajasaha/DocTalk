@@ -6,6 +6,7 @@ from ..retrieval_strategy import RetrievalStrategy
 from ..retrievers import retrieve_conversation_memory, retrieve_consultations
 from ..retrievers.asset_index_retriever import get_latest_document, get_latest_report_by_type, get_reports_by_report_type
 from ..retrievers.asset_scoped_rag import retrieve_asset_scoped_context
+from ..retrievers.patient_history_retriever import get_patient_history, get_history_by_type
 from ..state import UnifiedChatState
 
 
@@ -18,6 +19,7 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     consultation_context = []
     asset_selection_context = {}
     rag_scope = {}
+    patient_history_context = []
     evidence = []
     pending_tasks = []
     
@@ -58,6 +60,35 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                     "task": "appointment",
                     "action": "search_slots"
                 })
+                
+        elif task_name == "patient_history":
+            p_metadata = state.get("planner_metadata", {})
+            history_type = p_metadata.get("history_type")
+            
+            user_id = str(state.get("user_id") or "")
+            role = str(state.get("role") or "")
+            target_patient_id = state.get("target_patient_id")
+            
+            p_id = None
+            if role == "patient":
+                p_id = user_id
+            elif role == "doctor" and target_patient_id:
+                p_id = str(target_patient_id)
+                
+            if p_id:
+                if history_type:
+                    history_entries = await get_history_by_type(p_id, history_type)
+                else:
+                    history_entries = await get_patient_history(p_id)
+                    
+                patient_history_context.extend(history_entries)
+                for entry in history_entries:
+                    evidence.append({
+                        "type": "patient_history",
+                        "history_type": entry.get("historyType"),
+                        "title": entry.get("title"),
+                        "value": entry.get("value")
+                    })
             
         elif task_name == "asset_index":
             action = task_info.get("action", "latest")
@@ -128,5 +159,6 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
         "consultation_context": consultation_context,
         "asset_selection_context": asset_selection_context,
         "rag_scope": rag_scope,
+        "patient_history_context": patient_history_context,
         "pending_tasks": pending_tasks,
     }
