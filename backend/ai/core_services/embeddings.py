@@ -7,7 +7,7 @@ import re
 import logging
 import time
 from ...core.config import settings
-from .gemini import gemini_embed_text
+from .llm_client import embed_text
 
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ class EmbeddingService:
                 "component": "rag",
                 "model": self.model_name,
                 "dimension": self.dimension,
-                "provider": "gemini",
+                "provider": "gemini_embeddings",
             },
         )
 
@@ -77,18 +77,18 @@ class EmbeddingService:
         if self._provider_checked:
             return self._provider_available
 
-        api_key = str(getattr(settings, "gemini_api_key", "") or "").strip()
+        api_key = str(settings.gemini_api_key or "").strip()
         if not api_key:
             self._provider_available = False
             self._provider_checked = True
             logger.warning(
-                "Gemini API key missing for embeddings, using fallback",
+                "Embedding provider API key missing, using fallback",
                 extra={"component": "rag", "model": self.model_name},
             )
             return False
 
         try:
-            await gemini_embed_text("health check", model=self.model_name, dimensions=self.dimension)
+            await embed_text("health check", model=self.model_name, dimensions=self.dimension)
             self._provider_available = True
             self._provider_checked = True
             return True
@@ -96,13 +96,13 @@ class EmbeddingService:
             self._provider_available = False
             self._provider_checked = True
             logger.warning(
-                "Gemini embedding provider unavailable, using fallback",
+                "Embedding provider unavailable, using fallback",
                 extra={"component": "rag", "error": str(exc), "model": self.model_name},
             )
             return False
 
     async def _embed_with_provider(self, text: str) -> list[float]:
-        return await gemini_embed_text(text, model=self.model_name, dimensions=self.dimension)
+        return await embed_text(text, model=self.model_name, dimensions=self.dimension)
 
     def _fallback_embedding(self, text: str) -> list[float]:
         tokens = re.findall(r"[A-Za-z0-9]+", text.lower())

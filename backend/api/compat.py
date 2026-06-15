@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..ai.core_services.gemini import gemini_complete_json
+from ..ai.core_services.llm_client import complete_json
 from ..ai.core_services.ocr import ocr_service
 from ..ai.prompts.templates import medical_prompt_service
 from ..core.security import CurrentUser, get_current_user
@@ -44,7 +44,7 @@ def _listify_text(value: Any) -> list[str]:
 
 async def _analyze_text_document(text: str, *, language: str, title: str) -> dict[str, Any]:
     prompt = medical_prompt_service.build_consultation_prompt(language=language, context_text=text)
-    parsed = await gemini_complete_json(
+    parsed = await complete_json(
         [
             SystemMessage(content=prompt),
             HumanMessage(content=text),

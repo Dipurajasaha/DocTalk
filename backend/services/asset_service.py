@@ -14,7 +14,7 @@ from fastapi import HTTPException, UploadFile, status
 from PIL import Image as PILImage
 from prisma import Prisma
 
-from ..ai.core_services.gemini import gemini_complete_json
+from ..ai.core_services.llm_client import complete_json
 from ..ai.core_services.ocr import ocr_service
 from ..ai.vectorstore.pgvector_service import pgvector_service
 from ..core.config import DATA_ROOT, settings
@@ -109,6 +109,20 @@ class AssetService:
         record = await self._load_record(asset_id)
         self._assert_access(record, user_id)
         file_path = self._resolve_record_path(record)
+
+        # Remove AssetIndex entry
+        from .asset_index_service import AssetIndexService
+        try:
+            await AssetIndexService(self.client).delete_by_asset_id(asset_id)
+        except Exception as exc:
+            logger.warning("AssetIndex deletion failed", extra={"asset_id": asset_id, "error": str(exc)})
+
+        # Remove PatientMedicalHistory entries
+        from .patient_history_service import patient_history_service
+        try:
+            await patient_history_service.delete_by_source_id(source="asset", source_id=asset_id)
+        except Exception as exc:
+            logger.warning("PatientMedicalHistory deletion failed", extra={"asset_id": asset_id, "error": str(exc)})
 
         # Delete associated RAG embeddings first so no orphaned vectors remain.
         try:
@@ -367,6 +381,8 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
 
         if mime_type == "application/pdf":
             extracted_text = await _extract_asset_text(source_path, mime_type)
+            print("[DEBUG][OCR_TEXT_LENGTH]", len(extracted_text))
+            print("[DEBUG][OCR_TEXT_SAMPLE]", repr(extracted_text[:100]))
             category = await _classify_pdf_text(extracted_text)
         elif mime_type.startswith("image/"):
             category = "XRAY"
@@ -400,6 +416,56 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
 
         if not asset:
             raise ValueError(f"Asset {asset_id} not found")
+        
+        from .document_analyzer import document_analyzer
+        from .asset_index_service import AssetIndexService
+        
+        index_data = await document_analyzer.analyze_document(
+            asset_id=asset_id,
+            patient_id=str(asset.userId),
+            file_name=str(asset.fileName),
+            category=str(category),
+            extracted_text=extracted_text,
+            created_at=asset.createdAt
+        )
+        try:
+            await AssetIndexService(db).create_index(index_data)
+        except Exception as exc:
+            logger.exception("AssetIndex creation failed", extra={"asset_id": asset_id, "error": str(exc)})
+            
+        from .patient_history_extractor import patient_history_extractor
+        from .patient_history_service import patient_history_service
+        from .lab_result_extractor import lab_result_extractor
+        
+        doc_type = index_data.get("documentType") if isinstance(index_data, dict) else getattr(index_data, "documentType", "")
+        print("[DEBUG][DOCUMENT_CLASSIFICATION]", {"document_type": doc_type})
+        
+        try:
+            if doc_type == "lab_report":
+                print("[DEBUG][SELECTED_EXTRACTOR]", "LabResultExtractor")
+                history_entries = await lab_result_extractor.extract_lab_results(
+                    asset_id=asset_id,
+                    patient_id=str(asset.userId),
+                    file_name=str(asset.fileName),
+                    extracted_text=extracted_text,
+                    created_at=asset.createdAt
+                )
+            else:
+                print("[DEBUG][SELECTED_EXTRACTOR]", "PatientHistoryExtractor")
+                history_entries = patient_history_extractor.extract_history_entries(
+                    asset_id=asset_id,
+                    patient_id=str(asset.userId),
+                    file_name=str(asset.fileName),
+                    document_type=doc_type,
+                    report_type=index_data.get("reportType") if isinstance(index_data, dict) else getattr(index_data, "reportType", ""),
+                    extracted_text=extracted_text,
+                    created_at=asset.createdAt
+                )
+            
+            for entry in history_entries:
+                await patient_history_service.create_entry(entry)
+        except Exception as exc:
+            logger.exception("PatientMedicalHistory extraction failed", extra={"asset_id": asset_id, "error": str(exc)})
         
         await pgvector_service.ingest_document(
             patient_id=str(asset.userId),
@@ -436,7 +502,7 @@ async def _classify_pdf_text(extracted_text: str) -> AssetCategory:
         "Choose PRESCRIPTION for medication orders, pharmacy slips, dosage instructions, and doctor prescriptions."
     )
     sample_text = (extracted_text or "").strip()[:1000]
-    response = await _call_gemini_json(prompt, sample_text or "No readable text was extracted from the PDF.")
+    response = await _call_llm_json(prompt, sample_text or "No readable text was extracted from the PDF.")
     return _normalize_category(response.get("category") or response.get("assetCategory") or response.get("label") or sample_text)
 
 
@@ -497,22 +563,22 @@ def _normalize_category(value: Any) -> AssetCategory:
     raise ValueError(f"Unable to classify asset category from response: {value!r}")
 
 
-async def _call_gemini_json(prompt: str, payload: str) -> dict[str, Any]:
-    return await gemini_complete_json(
-        _build_gemini_messages(prompt, payload),
+async def _call_llm_json(prompt: str, payload: str) -> dict[str, Any]:
+    return await complete_json(
+        _build_llm_messages(prompt, payload),
         temperature=0.1,
         max_output_tokens=256,
     )
 
 
-def _build_gemini_messages(prompt: str, payload: str) -> list[dict[str, Any]]:
+def _build_llm_messages(prompt: str, payload: str) -> list[dict[str, Any]]:
     return [
         {"role": "system", "content": prompt},
         {"role": "user", "content": str(payload)},
     ]
 
 
-def _parse_gemini_response(payload: Any) -> dict[str, Any]:
+def _parse_llm_response(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
 

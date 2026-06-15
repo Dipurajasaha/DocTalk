@@ -142,6 +142,7 @@ class PgVectorService:
         top_k: int = 5,
         similarity_threshold: float = 0.75,
         source_type: str | None = None,
+        asset_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         await self.ensure_schema()
         top_k = max(1, min(int(top_k), 20))
@@ -155,6 +156,7 @@ class PgVectorService:
                 consultation_id=consultation_id,
                 source_type=source_type,
                 top_k=top_k,
+                asset_ids=asset_ids,
             )
             result = PgVectorSearchResult(items=items, top_k=top_k, similarity_threshold=similarity_threshold, fallback_used=True)
             return result.to_dict()
@@ -169,6 +171,7 @@ class PgVectorService:
                 query=normalized_query,
                 top_k=top_k,
                 similarity_threshold=similarity_threshold,
+                asset_ids=asset_ids,
             )
             items = self._postprocess_items(items)
             logger.info(
@@ -182,6 +185,7 @@ class PgVectorService:
             )
             return PgVectorSearchResult(items=items, top_k=top_k, similarity_threshold=similarity_threshold, fallback_used=False).to_dict()
         except Exception as exc:
+            logger.exception("Full stacktrace for vector search failure:")
             logger.warning("Vector retrieval failed, falling back to lexical search", extra={"component": "rag", "error": str(exc)})
             items = await self._lexical_fallback(
                 patient_id=patient_id,
@@ -191,9 +195,29 @@ class PgVectorService:
                 query=normalized_query,
                 top_k=top_k,
                 similarity_threshold=similarity_threshold,
+                asset_ids=asset_ids,
             )
             items = self._postprocess_items(items)
             return PgVectorSearchResult(items=items, top_k=top_k, similarity_threshold=similarity_threshold, fallback_used=True).to_dict()
+
+    async def search_documents_by_assets(
+        self,
+        *,
+        patient_id: str,
+        query: str,
+        asset_ids: list[str],
+        metadata_user_id: str | None = None,
+        top_k: int = 5,
+        similarity_threshold: float = 0.75,
+    ) -> dict[str, Any]:
+        return await self.search_documents(
+            patient_id=patient_id,
+            query=query,
+            asset_ids=asset_ids,
+            metadata_user_id=metadata_user_id,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold,
+        )
 
     async def fetch_recent_documents(
         self,
@@ -203,6 +227,7 @@ class PgVectorService:
         consultation_id: str | None = None,
         source_type: str | None = None,
         top_k: int = 5,
+        asset_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         await self.ensure_schema()
         top_k = max(1, min(int(top_k), 20))
@@ -215,6 +240,10 @@ class PgVectorService:
         filtered = []
         for row in rows:
             meta = row.metadata or {}
+            
+            if asset_ids and meta.get("asset_id") not in asset_ids:
+                continue
+                
             if metadata_user_id is not None and meta.get("user_id") != metadata_user_id:
                 continue
             if consultation_id is not None and row.consultationId != consultation_id:
@@ -244,10 +273,13 @@ class PgVectorService:
         query: str,
         top_k: int,
         similarity_threshold: float,
+        asset_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         query_vector = await embedding_service.embed_text(query)
         vector_literal = self._vector_to_sql(query_vector)
         memory_cutoff = self._memory_cutoff()
+        
+        asset_ids_json = json.dumps(asset_ids) if asset_ids else None
 
         rows = await prisma.query_raw(
             """
@@ -263,9 +295,10 @@ class PgVectorService:
                 1 - (embedding <=> $1::vector) AS similarity
             FROM rag_documents
             WHERE patient_id = $2
-              AND ($3::text IS NULL OR consultation_id = $3)
-              AND ($4::text IS NULL OR source_type = $4)
-              AND ($5::timestamptz IS NULL OR created_at >= $5)
+              AND ($3::text IS NULL OR consultation_id = $3::text)
+              AND ($4::text IS NULL OR source_type = $4::text)
+              AND ($5::timestamptz IS NULL OR created_at >= $5::timestamptz)
+              AND ($7::jsonb IS NULL OR metadata->>'asset_id' IN (SELECT jsonb_array_elements_text($7::jsonb)))
             ORDER BY embedding <=> $1::vector
             LIMIT $6
             """,
@@ -275,6 +308,7 @@ class PgVectorService:
             source_type,
             memory_cutoff,
             top_k * 5,
+            asset_ids_json,
         )
 
         results: list[dict[str, Any]] = []
@@ -321,6 +355,7 @@ class PgVectorService:
         query: str,
         top_k: int,
         similarity_threshold: float,
+        asset_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         rows = await self.fetch_recent_documents(
             patient_id=patient_id,
@@ -328,6 +363,7 @@ class PgVectorService:
             consultation_id=consultation_id,
             source_type=source_type,
             top_k=max(top_k * 5, 20),
+            asset_ids=asset_ids,
         )
         scored: list[tuple[float, dict[str, Any]]] = []
         query_tokens = self._tokenize(query)

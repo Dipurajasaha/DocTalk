@@ -5,22 +5,22 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage
 
-from backend.ai.core_services.gemini import GeminiChatModel, get_gemini_chat_model
+from backend.ai.core_services.llm_client import LLMChatModel, get_chat_model
 from backend.core.config import settings
 
-llm = get_gemini_chat_model()
+llm = get_chat_model()
 
 
 @lru_cache(maxsize=1)
-def get_gemini_workflow_model(temperature: float = 0.2) -> GeminiChatModel:
+def get_workflow_model(temperature: float = 0.2) -> LLMChatModel:
     if temperature == 0.2:
         return llm
-    return get_gemini_chat_model(temperature=temperature)
+    return get_chat_model(temperature=temperature)
 
 
-def get_ollama_chat_model(temperature: float = 0.2) -> GeminiChatModel:
-    """Backward-compatible alias; all chat flows use Gemini."""
-    return get_gemini_workflow_model(temperature=temperature)
+def get_ollama_chat_model(temperature: float = 0.2) -> LLMChatModel:
+    """Backward-compatible alias; all chat flows use the generic LLM client."""
+    return get_workflow_model(temperature=temperature)
 
 
 def latest_message_text(messages: list[BaseMessage] | list[Any] | None) -> str:

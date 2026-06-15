@@ -103,7 +103,7 @@ model DoctorSlot {
   appointment Appointment?
 
   @@index([doctorId])
-  @@index([doctorId, startTime])
+  @@unique([doctorId, startTime])
   @@map("doctor_slots")
 }
 
@@ -333,4 +333,49 @@ model AiChatMessage {
 
   @@index([sessionId])
   @@map("ai_chat_messages")
+}
+
+model AssetIndex {
+  id            String   @id @default(cuid())
+  assetId       String   @unique
+  patientId     String
+  
+  fileName      String?
+  fileCategory  String?
+  sourceType    String?
+  
+  documentType  String?
+  reportType    String?
+  
+  documentDate  DateTime?
+  title         String?
+  summary       String?
+  
+  keywords      Json?    @db.JsonB
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([patientId, documentType])
+  @@index([patientId, reportType])
+  @@index([patientId, documentDate])
+  @@map("asset_indexes")
+}
+
+model PatientMedicalHistory {
+  id          String    @id @default(cuid())
+  patientId   String
+  historyType String
+  title       String
+  value       String    @db.Text
+  source      String?
+  sourceId    String?
+  recordDate  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([patientId])
+  @@index([patientId, historyType])
+  @@index([recordDate])
+  @@map("patient_medical_histories")
 }

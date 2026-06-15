@@ -31,16 +31,32 @@ async def patient_rag_tool(
             "fallback_used": False,
         }
 
-    result = await pgvector_service.search_documents(
-        patient_id=user_id,
-        metadata_user_id=user_id,
-        query=query,
-        top_k=top_k,
-        similarity_threshold=similarity_threshold,
-    )
+    rag_scope = (state or {}).get("rag_scope") or {}
+    print("[DEBUG][RAG_INPUT]", {"query": query, "rag_scope": rag_scope})
+    asset_ids = rag_scope.get("asset_ids")
+    
+    if asset_ids:
+        result = await pgvector_service.search_documents_by_assets(
+            patient_id=user_id,
+            metadata_user_id=user_id,
+            query=query,
+            asset_ids=asset_ids,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold,
+        )
+    else:
+        result = await pgvector_service.search_documents(
+            patient_id=user_id,
+            metadata_user_id=user_id,
+            query=query,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold,
+        )
+        
     return {
         "scope": "patient",
         "user_id": user_id,
+        "asset_scoped": bool(asset_ids),
         **result,
     }
 
@@ -65,15 +81,31 @@ async def doctor_rag_tool(
             "skipped": True,
         }
 
-    result = await pgvector_service.search_documents(
-        patient_id=target_patient_id,
-        metadata_user_id=target_patient_id,
-        query=query,
-        top_k=top_k,
-        similarity_threshold=similarity_threshold,
-    )
+    rag_scope = (state or {}).get("rag_scope") or {}
+    print("[DEBUG][RAG_INPUT]", {"query": query, "rag_scope": rag_scope})
+    asset_ids = rag_scope.get("asset_ids")
+
+    if asset_ids:
+        result = await pgvector_service.search_documents_by_assets(
+            patient_id=target_patient_id,
+            metadata_user_id=target_patient_id,
+            query=query,
+            asset_ids=asset_ids,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold,
+        )
+    else:
+        result = await pgvector_service.search_documents(
+            patient_id=target_patient_id,
+            metadata_user_id=target_patient_id,
+            query=query,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold,
+        )
+        
     return {
         "scope": "doctor",
         "target_patient_id": target_patient_id,
+        "asset_scoped": bool(asset_ids),
         **result,
     }

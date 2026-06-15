@@ -29,6 +29,7 @@ async def upload_asset(
     service: AssetService = Depends(get_asset_service),
 ) -> AssetUploadResponse:
     result = await service.upload_asset(current_user.user_id, file)
+    print("[DEBUG][UPLOAD]", {"user_id": current_user.user_id, "filename": file.filename, "content_type": file.content_type})
     background_tasks.add_task(
         process_asset_background,
         result.get("id"),

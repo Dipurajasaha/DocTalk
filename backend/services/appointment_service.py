@@ -35,6 +35,12 @@ class AppointmentService:
                 "isActive": True,
             }
 
+        # Check for internal overlaps in desired_slots
+        sorted_desired = sorted(desired_slots.keys(), key=lambda x: x[0])
+        for i in range(len(sorted_desired) - 1):
+            if sorted_desired[i][1] > sorted_desired[i+1][0]:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Provided slots overlap with each other")
+
         existing_slots = await self.client.doctorslot.find_many(where={"doctorId": doctor_id}, order={"startTime": "asc"})
         existing_map = {
             (self._ensure_datetime(slot.startTime, "startTime"), self._ensure_datetime(slot.endTime, "endTime")): slot
@@ -48,6 +54,18 @@ class AppointmentService:
             if slot_key not in desired_slots:
                 await self.client.doctorslot.update(where={"id": slot.id}, data={"isActive": False})
 
+        # Check for overlaps with booked slots or active slots that are not in desired_slots
+        for start_time, end_time in desired_slots.keys():
+            for existing in existing_slots:
+                # If exact match, we just reactivate it, no conflict
+                if (existing.startTime, existing.endTime) == (start_time, end_time):
+                    continue
+                # If it overlaps
+                if start_time < existing.endTime and end_time > existing.startTime:
+                    if getattr(existing, "isBooked", False):
+                        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Slot overlaps with an already booked appointment")
+                    # If it's an unbooked slot but we aren't deactivating it for some reason, it might conflict, but we deactivate all unbooked non-matching slots above.
+
         updated_slots: list[dict[str, Any]] = []
         for slot_key, slot_data in desired_slots.items():
             existing = existing_map.get(slot_key)
@@ -56,14 +74,18 @@ class AppointmentService:
                 updated_slots.append(self._serialize_slot(existing))
                 continue
 
-            created = await self.client.doctorslot.create(
-                data={
-                    "id": str(uuid4()),
-                    **slot_data,
-                    "isBooked": False,
-                }
-            )
-            updated_slots.append(self._serialize_slot(created))
+            try:
+                created = await self.client.doctorslot.create(
+                    data={
+                        "id": str(uuid4()),
+                        **slot_data,
+                        "isBooked": False,
+                    }
+                )
+                updated_slots.append(self._serialize_slot(created))
+            except Exception as e:
+                # Catch Prisma UniqueViolationError just in case
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Slot overlaps with an existing slot (Unique constraint violation)")
 
         refreshed = await self.client.doctorslot.find_many(where={"doctorId": doctor_id}, order={"startTime": "asc"})
         return [self._serialize_slot(slot) for slot in refreshed]

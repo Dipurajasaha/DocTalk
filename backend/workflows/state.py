@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, TypedDict
 
+import operator
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+from .models.planner_task import PlannerTask
 
 
 ChatRole = Literal["patient", "doctor"]
@@ -21,6 +23,26 @@ class WorkflowState(TypedDict):
     triage_level: str
     context_payload: dict[str, Any]
     final_response: str
+    workflow_version: str
+    execution_plan: list[PlannerTask]
+    evidence: list[dict[str, Any]]
+    action_results: list[dict[str, Any]]
+    retrieval_strategy: str | None
+    memory_context: list[dict[str, Any]]
+    appointment_context: dict[str, Any]
+    consultation_context: list[dict[str, Any]]
+    asset_selection_context: dict[str, Any]
+    rag_scope: dict[str, Any]
+    patient_history_context: list[dict[str, Any]]
+    doctor_availability_context: list[dict[str, Any]]
+    planner_metadata: dict[str, Any]
+    shadow_execution_completed: bool
+    shadow_response: str
+    need_more_actions: bool
+    execution_iteration: int
+    pending_tasks: list[PlannerTask]
+    response_sections: list[dict[str, Any]]
+
 
 
 UnifiedChatState = WorkflowState
@@ -51,6 +73,24 @@ def create_workflow_state(
         triage_level=triage_level,
         context_payload=dict(context_payload or {}),
         final_response=final_response,
+        workflow_version="v1",
+        execution_plan=[],
+        evidence=[],
+        action_results=[],
+        retrieval_strategy=None,
+        memory_context=[],
+        appointment_context={},
+        consultation_context=[],
+        asset_selection_context={},
+        rag_scope={},
+        patient_history_context=[],
+        planner_metadata={},
+        shadow_execution_completed=False,
+        shadow_response="",
+        need_more_actions=False,
+        execution_iteration=0,
+        pending_tasks=[],
+        response_sections=[],
     )
 
 

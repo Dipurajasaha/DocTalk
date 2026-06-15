@@ -411,7 +411,7 @@ async def chat(
     current_user: CurrentUser = Depends(get_current_user),
     chat_service: ChatService = Depends(get_chat_service),
 ) -> dict[str, object]:
-    return await chat_service.process_chat_message(
+    response = await chat_service.process_chat_message(
         current_user.user_id,
         current_user.role,
         payload.consultation_id,
@@ -419,6 +419,8 @@ async def chat(
         use_reasoning=payload.use_reasoning,
         model=payload.model,
     )
+    print("[DEBUG][API] final response =", response)
+    return response
 
 
 @router.websocket("/ws")
@@ -500,6 +502,10 @@ async def _run_ai_websocket(
     if current_user is None:
         return
 
+    # ISOLATION FIX: Scope generic ai_session_id by user_id
+    if ai_session_id in {"patient_ai", "doctor_ai"}:
+        ai_session_id = f"{ai_session_id}_{current_user.user_id}"
+
     chat_service = get_chat_service()
     normalized_target_patient_id = str(target_patient_id or "").strip() or None
     namespace = _build_ai_checkpoint_namespace(
@@ -579,6 +585,7 @@ async def _run_ai_websocket(
 
                     if event_name == "on_chain_end" and node_name in {
                         "patient_assistant_llm",
+                        "patient_general_llm",
                         "doctor_general_llm",
                         "doctor_scoped_llm",
                     }:
@@ -609,8 +616,11 @@ async def _run_ai_websocket(
                                     raise
                                 streamed_token = True
 
+                final_state = unified_chat_graph.get_state(ai_config).values
+                print("[DEBUG][FINAL_RESPONSE]", bool(final_response))
                 if not final_response:
-                    final_response = str(workflow_state.get("final_response") or "").strip()
+                    print("[DEBUG][ROUTER] graph result =", final_state)
+                    final_response = str(final_state.get("final_response") or "").strip()
                 if not final_response:
                     final_response = _role_scaffold_message(current_user.role)
 
@@ -629,15 +639,16 @@ async def _run_ai_websocket(
                 )
 
                 try:
-                    await websocket.send_json(
-                        {
-                            "type": "final",
-                            "ai_session_id": ai_session_id,
-                            "user_id": current_user.user_id,
-                            "target_patient_id": normalized_target_patient_id,
-                            "content": final_response,
-                        }
-                    )
+                    payload = {
+                        "type": "final",
+                        "ai_session_id": ai_session_id,
+                        "user_id": current_user.user_id,
+                        "target_patient_id": normalized_target_patient_id,
+                        "content": final_response,
+                    }
+                    print("[DEBUG][ROUTER] outgoing message =", payload)
+                    print("[DEBUG][PATIENT_HISTORY_LEN]", len(final_state.get("patient_history_context") or []))
+                    await websocket.send_json(payload)
                 except Exception:
                     raise
             except WebSocketDisconnect:
@@ -672,6 +683,11 @@ async def fetch_ai_chat_history(
     chat_service: ChatService = Depends(get_chat_service),
 ) -> dict[str, Any]:
     session_id = str(ai_session_id or "").strip() or ("doctor_ai" if current_user.role == "doctor" else "patient_ai")
+    
+    # ISOLATION FIX: Scope generic ai_session_id by user_id
+    if session_id in {"patient_ai", "doctor_ai"}:
+        session_id = f"{session_id}_{current_user.user_id}"
+        
     messages = await chat_service.get_ai_chat_history(session_id)
     return {
         "messages": _format_db_messages_for_ws(messages, role=current_user.role),
