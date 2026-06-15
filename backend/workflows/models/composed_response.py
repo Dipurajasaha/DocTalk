@@ -8,8 +8,8 @@ class ComposedResponse:
     patient_history_context: list[Any] | None = None
     doctor_availability_context: list[Any] | None = None
     appointment_context: dict[str, Any] | None = None
-    asset_selection_context: dict[str, Any] | None = None
-    rag_scope: dict[str, Any] | None = None
+    asset_selection_context: dict[str, Any] = field(default_factory=dict)
+    rag_scope: dict[str, Any] = field(default_factory=dict)
     evidence: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -39,7 +39,12 @@ class ComposedResponse:
         # Appointment Context
         if self.appointment_context:
             action = self.appointment_context.get("action", "processing") if self.appointment_context else "processing"
-            msg = f"Appointment status: {action}."
+            if self.appointment_context.get("message"):
+                msg = self.appointment_context.get("message")
+                if action == "confirmed":
+                    print("[DEBUG][BOOKING_CONFIRMATION_RENDERED] True")
+            else:
+                msg = f"Appointment status: {action}."
             response_sections.append({"type": "appointment", "content": msg})
             text_parts.append(msg)
             

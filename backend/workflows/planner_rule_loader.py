@@ -2,6 +2,7 @@ from .planner_rule_registry import (
     PatientHistoryRule,
     DocumentRule,
     AppointmentRule,
+    DoctorAvailabilityRule,
     ConsultationRule,
     MemoryRule,
     PlannerRule
@@ -12,6 +13,7 @@ RULE_REGISTRY: dict[str, type[PlannerRule]] = {
     "PATIENT_HISTORY": PatientHistoryRule,
     "DOCUMENT": DocumentRule,
     "APPOINTMENT": AppointmentRule,
+    "DOCTOR_AVAILABILITY": DoctorAvailabilityRule,
     "CONSULTATION": ConsultationRule,
     "MEMORY": MemoryRule
 }

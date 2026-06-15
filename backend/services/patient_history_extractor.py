@@ -41,9 +41,16 @@ class PatientHistoryExtractor:
         for h_type, keywords in self.rules.items():
             for kw in keywords:
                 # Use word boundaries to avoid partial substring matches
-                if re.search(rf"\b{re.escape(kw)}\b", text_lower):
+                match = re.search(rf"\b{re.escape(kw)}\b", text_lower)
+                if match:
                     if self._is_negated(text_lower, kw):
                         continue
+                    
+                    # Extract surrounding context (up to 60 characters before and after)
+                    start = max(0, match.start() - 60)
+                    end = min(len(extracted_text), match.end() + 60)
+                    context_value = extracted_text[start:end].strip()
+                    context_value = " ".join(context_value.split()) # clean up newlines
                     
                     title = kw.capitalize()
                     key = f"{h_type}:{title}"
@@ -54,12 +61,13 @@ class PatientHistoryExtractor:
                                 patientId=patient_id,
                                 historyType=h_type,
                                 title=title,
-                                value="Detected in uploaded report",
+                                value=f"Detected: \"{context_value}\"",
                                 source="asset",
                                 sourceId=asset_id,
                                 recordDate=created_at
                             )
                         )
+        print("[DEBUG][EXTRACTED_ENTITIES]", entries)
         return entries
 
 patient_history_extractor = PatientHistoryExtractor()

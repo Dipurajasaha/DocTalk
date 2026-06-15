@@ -15,6 +15,7 @@ async def run_test():
         "user_id": "test_patient",
         "target_patient_id": "test_patient",
         "ai_session_id": "test_session",
+        "triage_level": "routine",
         "role": "patient",
         "mode": "general",
         "context_payload": {},

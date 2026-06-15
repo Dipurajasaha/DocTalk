@@ -23,6 +23,9 @@ def parse_document_query(text: str) -> DocumentQueryIntent | None:
         intent.action = "latest"
         intent.latest_requested = True
         matched = True
+    elif any(k in text for k in ["analyze", "summarize", "review", "what does my"]):
+        intent.action = "analyze"
+        matched = True
         
     if not matched:
         return None

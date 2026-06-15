@@ -4,7 +4,7 @@ from .parsers.document_query_parser import parse_document_query
 from .parsers.intent_parser import ParsedIntent
 from .retrieval_strategy import RetrievalStrategy
 from .models.task_template import TaskTemplate
-from .planner_rule_config import APPOINTMENT_RULE_CONFIG, CONSULTATION_RULE_CONFIG, PATIENT_HISTORY_RULE_CONFIG
+from .planner_rule_config import APPOINTMENT_RULE_CONFIG, CONSULTATION_RULE_CONFIG, PATIENT_HISTORY_RULE_CONFIG, DOCTOR_AVAILABILITY_RULE_CONFIG
 
 class PlannerRule(ABC):
     @abstractmethod
@@ -22,29 +22,53 @@ class AppointmentRule(PlannerRule):
         return strategy == RetrievalStrategy.APPOINTMENT_QUERY.value
         
     def build_tasks(self, parsed_intent: ParsedIntent, metadata: dict[str, Any], strategy: str | None = None) -> list[TaskTemplate]:
+        action_handler = "APPOINTMENT"
+        action = "all"
+        
         if parsed_intent.is_appointment:
             metadata["query_type"] = "appointment"
             for entity in APPOINTMENT_RULE_CONFIG["entities"]:
                 if entity in parsed_intent.entities:
                     metadata["detected_entities"].append(entity)
-            if "book" in parsed_intent.actions:
-                metadata["detected_actions"].append("book")
-            return [
-                TaskTemplate("APPOINTMENT"),
-                TaskTemplate("DOCTOR_AVAILABILITY")
-            ]
-            
-        action_handler = "APPOINTMENT"
+                    
         if "cancel" in parsed_intent.actions:
             action_handler = "APPOINTMENT_CANCEL"
+            metadata["detected_actions"].append("cancel")
         elif "reschedule" in parsed_intent.actions:
             action_handler = "APPOINTMENT_RESCHEDULE"
+            metadata["detected_actions"].append("reschedule")
         elif "book" in parsed_intent.actions:
             action_handler = "APPOINTMENT_BOOK"
+            metadata["detected_actions"].append("book")
+        elif "upcoming" in parsed_intent.actions:
+            action = "upcoming"
+            metadata["detected_actions"].append("upcoming")
         elif "list" in parsed_intent.actions:
-            action_handler = "APPOINTMENT"
+            action = "all"
+            metadata["detected_actions"].append("list")
             
-        return [TaskTemplate(action_handler, {"retrieval_strategy": strategy})]
+        params = {"retrieval_strategy": strategy, "action": action}
+        if action_handler == "APPOINTMENT_BOOK":
+            if parsed_intent.booking_datetime:
+                params["booking_datetime"] = parsed_intent.booking_datetime
+            if parsed_intent.booking_ordinal:
+                params["booking_ordinal"] = parsed_intent.booking_ordinal
+                
+        return [TaskTemplate(action_handler, params)]
+
+class DoctorAvailabilityRule(PlannerRule):
+    def matches(self, parsed_intent: ParsedIntent, strategy: str | None = None) -> bool:
+        return strategy == RetrievalStrategy.DOCTOR_AVAILABILITY_QUERY.value
+        
+    def build_tasks(self, parsed_intent: ParsedIntent, metadata: dict[str, Any], strategy: str | None = None) -> list[TaskTemplate]:
+        metadata["query_type"] = "doctor_availability"
+        
+        params = {"retrieval_strategy": strategy}
+        if parsed_intent.doctor_name:
+            metadata["doctor_name"] = parsed_intent.doctor_name
+            params["doctor_name"] = parsed_intent.doctor_name
+            
+        return [TaskTemplate("DOCTOR_AVAILABILITY", params)]
 
 class ConsultationRule(PlannerRule):
     def matches(self, parsed_intent: ParsedIntent, strategy: str | None = None) -> bool:

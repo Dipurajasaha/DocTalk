@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from ..planner_rule_config import APPOINTMENT_RULE_CONFIG, CONSULTATION_RULE_CONFIG, PATIENT_HISTORY_RULE_CONFIG
 
@@ -14,6 +15,9 @@ class ParsedIntent:
     is_appointment: bool = False
     is_consultation: bool = False
     is_history: bool = False
+    doctor_name: str | None = None
+    booking_datetime: str | None = None
+    booking_ordinal: str | None = None
 
 def parse_intent(text: str) -> ParsedIntent:
     intent = ParsedIntent(original_text=text)
@@ -56,5 +60,27 @@ def parse_intent(text: str) -> ParsedIntent:
             if htype in text or htype + "s" in text or (htype == "condition" and "diagnosed" in text):
                 intent.history_type = htype
                 break
+
+    # Extract doctor name using regex
+    doc_match = re.search(r"(?:doctor|dr\.?)\s+([a-z]+(?:\s+[a-z]+)*?)(?:\s+(?:have|has|is|are|slot|available|open|any))", text.lower())
+    if doc_match:
+        intent.doctor_name = doc_match.group(1).strip()
+        print(f"[DEBUG][DOCTOR_NAME_EXTRACTED] {intent.doctor_name}")
+
+    # Extract booking slots if booking intent is detected
+    if "book" in intent.actions:
+        print("[DEBUG][BOOKING_INTENT_DETECTED] True")
+        ordinal_match = re.search(r"(first|second|third|fourth|fifth|last)\s+(?:slot|appointment|one)", text.lower())
+        if ordinal_match:
+            intent.booking_ordinal = ordinal_match.group(1)
+            print(f"[DEBUG][BOOKING_ORDINAL] {intent.booking_ordinal}")
+        else:
+            # Extract whatever comes after 'slot ' or 'appointment ' if any
+            slot_match = re.search(r"(?:slot|appointment)\s+(?:on\s+|for\s+)?([a-z0-9\s,:]+?)(?:$|please|thanks)", text.lower())
+            if slot_match:
+                extracted = slot_match.group(1).strip()
+                if extracted and extracted not in ["this", "that"]:
+                    intent.booking_datetime = extracted
+                    print(f"[DEBUG][BOOKING_DATETIME] {intent.booking_datetime}")
 
     return intent

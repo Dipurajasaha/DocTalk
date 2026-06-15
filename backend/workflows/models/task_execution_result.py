@@ -10,8 +10,9 @@ class TaskExecutionResult:
     patient_history_context: list | None = None
     appointment_context: dict | None = None
     doctor_availability_context: list | None = None
-    asset_selection_context: dict | None = None
-    rag_scope: dict | None = None
+    asset_selection_context: dict = field(default_factory=dict)
+    rag_scope: dict = field(default_factory=dict)
+    clear_doctor_availability: bool = False
 
     def merge(self, result: dict) -> None:
         if "memory_context" in result:
@@ -30,13 +31,13 @@ class TaskExecutionResult:
             if self.doctor_availability_context is None: self.doctor_availability_context = []
             self.doctor_availability_context.extend(result["doctor_availability_context"])
         if "asset_selection_context" in result:
-            if self.asset_selection_context is None: self.asset_selection_context = {}
             self.asset_selection_context.update(result["asset_selection_context"])
         if "rag_scope" in result:
-            if self.rag_scope is None: self.rag_scope = {}
             self.rag_scope.update(result["rag_scope"])
         if "evidence" in result:
             self.evidence.extend(result["evidence"])
+        if result.get("clear_doctor_availability"):
+            self.clear_doctor_availability = True
 
     def add_pending_tasks(self, tasks: list[dict]) -> None:
         for t in tasks:

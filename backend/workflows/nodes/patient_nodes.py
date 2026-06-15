@@ -108,6 +108,7 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
     patient_history_context = state.get("patient_history_context") or []
     consultation_context = state.get("consultation_context") or []
     memory_context = state.get("memory_context") or []
+    appointment_context = state.get("appointment_context") or {}
     evidence = state.get("evidence") or []
     
     context_str = ""
@@ -117,21 +118,36 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
         context_str += f"Consultations:\n{json.dumps(jsonable_encoder(consultation_context))}\n\n"
     if memory_context:
         context_str += f"Memory:\n{json.dumps(jsonable_encoder(memory_context))}\n\n"
+    if appointment_context:
+        context_str += f"Appointments:\n{json.dumps(jsonable_encoder(appointment_context))}\n\n"
     if evidence:
         context_str += f"Evidence:\n{json.dumps(jsonable_encoder(evidence))}\n\n"
         
     sys_content = (
         "You are a helpful, empathetic medical assistant. "
         "Answer the user's question in plain, patient-friendly language. "
-        "Do not attempt to diagnose or provide definitive medical advice."
+        "Do not attempt to diagnose or provide definitive medical advice. "
+        "Use ONLY retrieved context data. If a field is missing, explicitly state that it is unavailable. "
+        "Never infer doctor names, dates, locations, clinics, or appointment details."
     )
     if context_str:
         sys_content += f"\n\nYou have access to the following retrieved context. Summarize and use it to answer the user's query:\n{context_str}"
         
+    all_messages = list(state.get("messages") or [])
+    ai_message_count = sum(1 for m in all_messages if getattr(m, "type", "") == "ai")
+    
+    if context_str and all_messages:
+        chat_messages = [all_messages[-1]]
+    else:
+        chat_messages = all_messages
+        
     messages = [
         SystemMessage(content=sys_content),
-        *list(state.get("messages") or []),
+        *chat_messages,
     ]
+    
+    print("[DEBUG][MESSAGE_COUNT]", len(messages))
+    print("[DEBUG][PREVIOUS_AI_MESSAGES]", ai_message_count)
     
     print("[DEBUG][STATE_BEFORE_LLM]", {
         "patient_history_context": len(patient_history_context),
@@ -141,6 +157,8 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
     })
     print("[DEBUG][LLM_PROMPT_CONTEXT_INJECTED]", bool(context_str))
     print("[DEBUG][PATIENT_HISTORY_LEN]", len(patient_history_context))
+    print("[DEBUG][APPOINTMENT_LEN]", len(appointment_context.get("appointments", [])) if isinstance(appointment_context, dict) else 0)
+    print("[DEBUG][APPOINTMENT_PROMPT]", sys_content)
     print("[DEBUG][LLM] prompt =", messages)
     
     response = await llm.ainvoke(messages)
@@ -170,7 +188,16 @@ async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
         )
     )
     
-    messages = [sys_msg] + messages_list
+    ai_message_count = sum(1 for m in messages_list if getattr(m, "type", "") == "ai")
+    if context_str and context_str != '""' and context_str != "{}" and context_str != "[]" and context_str != "null" and messages_list:
+        chat_messages = [messages_list[-1]]
+    else:
+        chat_messages = messages_list
+        
+    messages = [sys_msg] + chat_messages
+    
+    print("[DEBUG][MESSAGE_COUNT]", len(messages))
+    print("[DEBUG][PREVIOUS_AI_MESSAGES]", ai_message_count)
     print("[DEBUG][LLM] patient_history_context =", state.get("patient_history_context"))
     print("[DEBUG][LLM] consultation_context =", state.get("consultation_context"))
     print("[DEBUG][LLM] memory_context =", state.get("memory_context"))

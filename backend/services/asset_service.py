@@ -381,6 +381,8 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
 
         if mime_type == "application/pdf":
             extracted_text = await _extract_asset_text(source_path, mime_type)
+            print("[DEBUG][OCR_TEXT_LENGTH]", len(extracted_text))
+            print("[DEBUG][OCR_TEXT_SAMPLE]", repr(extracted_text[:100]))
             category = await _classify_pdf_text(extracted_text)
         elif mime_type.startswith("image/"):
             category = "XRAY"
@@ -433,17 +435,33 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
             
         from .patient_history_extractor import patient_history_extractor
         from .patient_history_service import patient_history_service
+        from .lab_result_extractor import lab_result_extractor
+        
+        doc_type = index_data.get("documentType") if isinstance(index_data, dict) else getattr(index_data, "documentType", "")
+        print("[DEBUG][DOCUMENT_CLASSIFICATION]", {"document_type": doc_type})
         
         try:
-            history_entries = patient_history_extractor.extract_history_entries(
-                asset_id=asset_id,
-                patient_id=str(asset.userId),
-                file_name=str(asset.fileName),
-                document_type=index_data.get("documentType") if isinstance(index_data, dict) else getattr(index_data, "documentType", ""),
-                report_type=index_data.get("reportType") if isinstance(index_data, dict) else getattr(index_data, "reportType", ""),
-                extracted_text=extracted_text,
-                created_at=asset.createdAt
-            )
+            if doc_type == "lab_report":
+                print("[DEBUG][SELECTED_EXTRACTOR]", "LabResultExtractor")
+                history_entries = await lab_result_extractor.extract_lab_results(
+                    asset_id=asset_id,
+                    patient_id=str(asset.userId),
+                    file_name=str(asset.fileName),
+                    extracted_text=extracted_text,
+                    created_at=asset.createdAt
+                )
+            else:
+                print("[DEBUG][SELECTED_EXTRACTOR]", "PatientHistoryExtractor")
+                history_entries = patient_history_extractor.extract_history_entries(
+                    asset_id=asset_id,
+                    patient_id=str(asset.userId),
+                    file_name=str(asset.fileName),
+                    document_type=doc_type,
+                    report_type=index_data.get("reportType") if isinstance(index_data, dict) else getattr(index_data, "reportType", ""),
+                    extracted_text=extracted_text,
+                    created_at=asset.createdAt
+                )
+            
             for entry in history_entries:
                 await patient_history_service.create_entry(entry)
         except Exception as exc:

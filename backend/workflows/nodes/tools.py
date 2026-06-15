@@ -32,6 +32,7 @@ async def patient_rag_tool(
         }
 
     rag_scope = (state or {}).get("rag_scope") or {}
+    print("[DEBUG][RAG_INPUT]", {"query": query, "rag_scope": rag_scope})
     asset_ids = rag_scope.get("asset_ids")
     
     if asset_ids:
@@ -81,6 +82,7 @@ async def doctor_rag_tool(
         }
 
     rag_scope = (state or {}).get("rag_scope") or {}
+    print("[DEBUG][RAG_INPUT]", {"query": query, "rag_scope": rag_scope})
     asset_ids = rag_scope.get("asset_ids")
 
     if asset_ids:

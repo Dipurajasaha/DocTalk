@@ -29,9 +29,11 @@ async def retrieve_appointment_wrapper(state: UnifiedChatState, task_info: dict[
     c_doctor_id = user_id if role == "doctor" else None
             
     if c_patient_id or c_doctor_id:
+        action = task_info.get("parameters", {}).get("action", "all")
         appointments = await retrieve_appointments(
             patient_id=c_patient_id, 
-            doctor_id=c_doctor_id
+            doctor_id=c_doctor_id,
+            upcoming_only=(action == "upcoming")
         )
         evidence = []
         for appt in appointments:
@@ -41,7 +43,9 @@ async def retrieve_appointment_wrapper(state: UnifiedChatState, task_info: dict[
     return {}
 
 async def retrieve_doctor_availability_wrapper(state: UnifiedChatState, task_info: dict[str, Any]) -> dict[str, Any]:
-    docs = await retrieve_doctor_availability()
+    doctor_name = task_info.get("parameters", {}).get("doctor_name")
+    print(f"[DEBUG][TASK_DOCTOR_NAME] {doctor_name}")
+    docs = await retrieve_doctor_availability(doctor_name=doctor_name)
     evidence = []
     for d in docs:
         d_copy = dict(d)

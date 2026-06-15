@@ -10,9 +10,11 @@ from ..state import UnifiedChatState
 async def retrieval_strategy_node(state: UnifiedChatState) -> dict[str, Any]:
     text = latest_message_text(state.get("messages") or []).lower()
     
-    if any(k in text for k in ["latest report", "last report", "compare reports", "blood report"]):
+    if any(k in text for k in ["latest report", "last report", "compare reports", "blood report", "analyze my report", "analyze my blood", "summarize my report", "review my report", "what does my report"]):
         strategy = RetrievalStrategy.DOCUMENT_QUERY.value
-    elif any(k in text for k in ["appointment", "reschedule", "cancel", "upcoming", "schedule", "doctor available", "available doctor", "doctor slot", "cardiologist"]):
+    elif any(k in text for k in ["doctor available", "available doctor", "doctor slot", "open slots", "open appointments", "slots open"]):
+        strategy = RetrievalStrategy.DOCTOR_AVAILABILITY_QUERY.value
+    elif any(k in text for k in ["appointment", "reschedule", "cancel", "upcoming", "schedule", "cardiologist", "book this", "reserve this", "book slot", "confirm this", "book", "reserve"]):
         strategy = RetrievalStrategy.APPOINTMENT_QUERY.value
     elif any(k in text for k in ["previous consultation", "doctor recommend", "last consultation", "what did doctor say", "last visit", "follow up", "recommend"]):
         strategy = RetrievalStrategy.CONSULTATION_QUERY.value

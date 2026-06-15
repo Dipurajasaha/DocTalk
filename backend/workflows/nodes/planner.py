@@ -45,7 +45,13 @@ async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
         execution_plan.add_tasks([PlannerTask(task_type="general_response", parameters={"retrieval_strategy": strategy})])
             
     print("[DEBUG][PLANNER] execution_plan =", execution_plan.to_list())
-            
+    print("[DEBUG][PLANNER_CLASSIFICATION]", planner_metadata)
+    print(f"[DEBUG][PLANNER_DOCTOR_NAME] {planner_metadata.get('doctor_name')}")
+    
+    print(f"[DEBUG][INTENT_TYPE] {parsed_intent.intent_type or 'general'}")
+    print(f"[DEBUG][ENTITY_TYPE] {parsed_intent.entities}")
+    print(f"[DEBUG][RETRIEVER_SELECTED] {strategy}")
+    
     return {
         "execution_plan": execution_plan.to_list(),
         "retrieval_strategy": strategy,

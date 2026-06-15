@@ -502,6 +502,10 @@ async def _run_ai_websocket(
     if current_user is None:
         return
 
+    # ISOLATION FIX: Scope generic ai_session_id by user_id
+    if ai_session_id in {"patient_ai", "doctor_ai"}:
+        ai_session_id = f"{ai_session_id}_{current_user.user_id}"
+
     chat_service = get_chat_service()
     normalized_target_patient_id = str(target_patient_id or "").strip() or None
     namespace = _build_ai_checkpoint_namespace(
@@ -679,6 +683,11 @@ async def fetch_ai_chat_history(
     chat_service: ChatService = Depends(get_chat_service),
 ) -> dict[str, Any]:
     session_id = str(ai_session_id or "").strip() or ("doctor_ai" if current_user.role == "doctor" else "patient_ai")
+    
+    # ISOLATION FIX: Scope generic ai_session_id by user_id
+    if session_id in {"patient_ai", "doctor_ai"}:
+        session_id = f"{session_id}_{current_user.user_id}"
+        
     messages = await chat_service.get_ai_chat_history(session_id)
     return {
         "messages": _format_db_messages_for_ws(messages, role=current_user.role),

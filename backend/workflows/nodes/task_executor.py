@@ -46,8 +46,18 @@ async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask) -
                     for r in action_result.get("action_results", []):
                         if r.get("type") == "appointment_context":
                             appointment_context["action"] = r.get("action")
+                            if r.get("message"):
+                                appointment_context["message"] = r.get("message")
+                            if r.get("clear_doctor_availability"):
+                                result["clear_doctor_availability"] = True
                         elif r.get("type") == "evidence":
                             evidence.append(r["payload"])
+                        elif r.get("type") == "message":
+                            appointment_context["action"] = "confirmed"
+                            appointment_context["message"] = r.get("message")
+                            if r.get("clear_doctor_availability"):
+                                result["clear_doctor_availability"] = True
+                            print("[DEBUG][BOOKING_MESSAGE_CAPTURED] True")
                     
                     if appointment_context:
                         result["appointment_context"] = appointment_context
@@ -55,6 +65,12 @@ async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask) -
                         result["evidence"] = evidence
                     if "pending_tasks" in action_result:
                         result["pending_tasks"] = action_result["pending_tasks"]
+                        
+    if "appointment_context" in result:
+        print("[DEBUG][APPOINTMENT_CONTEXT]", result["appointment_context"])
+    if "evidence" in result:
+        print("[DEBUG][APPOINTMENT_EVIDENCE]", result["evidence"])
+    print("[DEBUG][APPOINTMENT_RAW_RESULT]", result)
                         
     return result
 
@@ -100,15 +116,24 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
         "evidence": len(aggregate.evidence or []),
     })
 
+    if aggregate.clear_doctor_availability:
+        before_avail = []
+        after_avail = []
+    else:
+        before_avail = state.get("doctor_availability_context")
+        after_avail = aggregate.doctor_availability_context or before_avail
+        
+    print(f"[DEBUG][CONTEXT_PRESERVED] before={before_avail} after={after_avail} clear={aggregate.clear_doctor_availability}")
+
     result = {
         "evidence": collector.build(),
-        "memory_context": aggregate.memory_context,
-        "appointment_context": aggregate.appointment_context,
-        "consultation_context": aggregate.consultation_context,
-        "asset_selection_context": aggregate.asset_selection_context,
-        "rag_scope": aggregate.rag_scope,
-        "patient_history_context": aggregate.patient_history_context,
-        "doctor_availability_context": aggregate.doctor_availability_context,
+        "memory_context": aggregate.memory_context or state.get("memory_context"),
+        "appointment_context": aggregate.appointment_context or state.get("appointment_context"),
+        "consultation_context": aggregate.consultation_context or state.get("consultation_context"),
+        "asset_selection_context": aggregate.asset_selection_context or state.get("asset_selection_context"),
+        "rag_scope": aggregate.rag_scope or state.get("rag_scope"),
+        "patient_history_context": aggregate.patient_history_context or state.get("patient_history_context"),
+        "doctor_availability_context": after_avail,
         "pending_tasks": [],
     }
     

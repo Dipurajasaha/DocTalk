@@ -1,10 +1,18 @@
 APPOINTMENT_RULE_CONFIG = {
-    "entities": ["cardiologist"],
+    "entities": ["cardiologist", "slot", "appointment"],
     "appointment_actions": {
-        "book": ["book", "schedule"],
+        "book": ["book", "schedule", "reserve", "confirm"],
         "cancel": ["cancel"],
         "reschedule": ["reschedule"],
-        "list": ["upcoming", "show", "list"]
+        "list": ["show", "list", "all"],
+        "upcoming": ["upcoming", "next"]
+    }
+}
+
+DOCTOR_AVAILABILITY_RULE_CONFIG = {
+    "entities": ["cardiologist"],
+    "actions": {
+        "check": ["open slots", "available", "slot"]
     }
 }
 
