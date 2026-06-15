@@ -60,6 +60,7 @@ const Home = () => {
   const [news, setNews] = useState([]);
   const [newsLoading, setNewsLoading] = useState(true);
   const [statsRef, statsInView] = useInView(0.3);
+  const [stats, setStats] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -79,6 +80,17 @@ const Home = () => {
       finally { setNewsLoading(false); }
     };
     load();
+  }, []);
+
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const { apiClient } = await import('../lib/apiClient');
+        const data = await apiClient.get('/api/public/stats', { retries: 1 });
+        setStats(data);
+      } catch (_) { setStats(null); }
+    };
+    loadStats();
   }, []);
 
   const catConfig = {
@@ -197,13 +209,60 @@ const Home = () => {
           </div>
         </section>
 
+        {/* ══════════════════════════════════ NEWS ══════════════════════════════════ */}
+        <section id="news" className="news-section">
+          <div className="section-header-center">
+            <div className="section-eyebrow">Hospital Network</div>
+            <h2 className="section-title">Latest Health Updates</h2>
+            <p className="section-body" style={{ maxWidth: '520px', margin: '0 auto' }}>
+              Real-time announcements and health advisories from hospitals in our network.
+            </p>
+          </div>
+
+          {newsLoading ? (
+            <div className="news-skeleton-grid">
+              {[1, 2, 3].map(i => <div key={i} className="news-skeleton-card" />)}
+            </div>
+          ) : news.length === 0 ? (
+            <div className="news-empty">
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>📰</div>
+              <p>No updates yet. Hospitals post announcements after joining the network.</p>
+              <button onClick={() => navigate('/login')} className="btn-primary-hero" style={{ marginTop: '16px' }}>Join the Network</button>
+            </div>
+          ) : (
+            <div className="news-grid">
+              {news.map((item) => {
+                const cfg = catConfig[item.category] || catConfig.general;
+                return (
+                  <div key={item.id} className="news-card" style={{ borderTopColor: cfg.color }}>
+                    <div className="news-card-top">
+                      <span className="news-cat-badge" style={{ color: cfg.color, background: cfg.bg }}>
+                        {cfg.icon} {item.category}
+                      </span>
+                      {item.is_global && <span className="news-global-badge">🌍 Global</span>}
+                    </div>
+                    <h3 className="news-card-title">{item.title}</h3>
+                    <p className="news-card-body">
+                      {item.content?.length > 110 ? item.content.slice(0, 110) + '…' : item.content}
+                    </p>
+                    <div className="news-card-footer">
+                      <span>{item.hospital_name || 'Hospital Network'}</span>
+                      <span>{new Date(item.published_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
         {/* ══════════════════════════════════ STATS ══════════════════════════════════ */}
         <div className="stats-band" ref={statsRef}>
-          <StatItem value={15000} suffix="+" label="Patients Served" startCount={statsInView} />
+          <StatItem value={stats?.patients || 15000} suffix="+" label="Patients Served" startCount={statsInView} />
           <div className="stats-divider" />
-          <StatItem value={850} suffix="+" label="Doctors Registered" startCount={statsInView} />
+          <StatItem value={stats?.doctors || 850} suffix="+" label="Doctors Registered" startCount={statsInView} />
           <div className="stats-divider" />
-          <StatItem value={120} suffix="+" label="Hospitals Connected" startCount={statsInView} />
+          <StatItem value={stats?.hospitals || 120} suffix="+" label="Hospitals Connected" startCount={statsInView} />
           <div className="stats-divider" />
           <StatItem value={98} suffix="%" label="Satisfaction Rate" startCount={statsInView} />
         </div>
@@ -299,53 +358,6 @@ const Home = () => {
               </div>
             ))}
           </div>
-        </section>
-
-        {/* ══════════════════════════════════ NEWS ══════════════════════════════════ */}
-        <section id="news" className="news-section">
-          <div className="section-header-center">
-            <div className="section-eyebrow">Hospital Network</div>
-            <h2 className="section-title">Latest Health Updates</h2>
-            <p className="section-body" style={{ maxWidth: '520px', margin: '0 auto' }}>
-              Real-time announcements and health advisories from hospitals in our network.
-            </p>
-          </div>
-
-          {newsLoading ? (
-            <div className="news-skeleton-grid">
-              {[1, 2, 3].map(i => <div key={i} className="news-skeleton-card" />)}
-            </div>
-          ) : news.length === 0 ? (
-            <div className="news-empty">
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>📰</div>
-              <p>No updates yet. Hospitals post announcements after joining the network.</p>
-              <button onClick={() => navigate('/login')} className="btn-primary-hero" style={{ marginTop: '16px' }}>Join the Network</button>
-            </div>
-          ) : (
-            <div className="news-grid">
-              {news.map((item) => {
-                const cfg = catConfig[item.category] || catConfig.general;
-                return (
-                  <div key={item.id} className="news-card" style={{ borderTopColor: cfg.color }}>
-                    <div className="news-card-top">
-                      <span className="news-cat-badge" style={{ color: cfg.color, background: cfg.bg }}>
-                        {cfg.icon} {item.category}
-                      </span>
-                      {item.is_global && <span className="news-global-badge">🌍 Global</span>}
-                    </div>
-                    <h3 className="news-card-title">{item.title}</h3>
-                    <p className="news-card-body">
-                      {item.content?.length > 110 ? item.content.slice(0, 110) + '…' : item.content}
-                    </p>
-                    <div className="news-card-footer">
-                      <span>{item.hospital_name || 'Hospital Network'}</span>
-                      <span>{new Date(item.published_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </section>
 
         {/* ══════════════════════════════════ TEAM ══════════════════════════════════ */}

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 SymptomSeverityEnum = Literal["mild", "moderate", "severe", "critical"]
@@ -15,6 +16,13 @@ class HospitalLoginRequest(BaseModel):
     password: str = Field(min_length=1)
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("hospital_id")
+    @classmethod
+    def validate_hospital_id_format(cls, v: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9_]{4,20}$", v):
+            raise ValueError("Hospital ID must be 4-20 characters: letters, numbers, underscores only")
+        return v
 
 
 class HospitalRegisterRequest(BaseModel):
@@ -30,6 +38,31 @@ class HospitalRegisterRequest(BaseModel):
     website: str | None = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not re.search(r"[0-9]", v):
+            raise ValueError("Password must contain at least one digit")
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9\s.'&-]{2,200}$", v.strip()):
+            raise ValueError("Name must be 2-200 characters: letters, numbers, spaces, basic punctuation only")
+        return v.strip()
+
+    @field_validator("hospital_id")
+    @classmethod
+    def validate_hospital_id(cls, v: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9_]{4,20}$", v):
+            raise ValueError("Hospital ID must be 4-20 characters: letters, numbers, underscores only")
+        return v
 
 
 class HospitalTokenResponse(BaseModel):

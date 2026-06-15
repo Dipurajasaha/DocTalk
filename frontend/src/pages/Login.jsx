@@ -72,6 +72,28 @@ function PasswordStrength({ value }) {
   );
 }
 
+// Stable component defined outside Login to prevent unmount/remount on re-renders.
+// Pass fieldErrors and clearFE as props from the parent.
+function FormField({ label, name, type = 'text', placeholder = '', required = false, children, hint, fieldErrors = {}, clearFE }) {
+  return (
+    <div className="input-field">
+      <label>{label}{required && <span style={{ color: '#ef4444', marginLeft: '2px' }}>*</span>}</label>
+      {children || (
+        <input
+          type={type}
+          name={name}
+          placeholder={placeholder}
+          required={required}
+          onChange={() => clearFE && clearFE(name)}
+          style={fieldErrors[name] ? { borderColor: '#ef4444' } : {}}
+        />
+      )}
+      {hint && !fieldErrors[name] && <span style={{ fontSize: '11px', color: '#9ca3af', marginTop: '3px', display: 'block' }}>{hint}</span>}
+      <FieldError msg={fieldErrors[name]} />
+    </div>
+  );
+}
+
 export default function Login() {
   const [view, setView] = useState('login');       // 'login' | 'register' | 'forgot'
   const [category, setCategory] = useState('patient');
@@ -95,8 +117,16 @@ export default function Login() {
     const username = fd.get('username').trim();
     const password = fd.get('password');
     let errs = {};
-    if (!username) errs.lu = 'Username is required.';
-    if (!password) errs.lp = 'Password is required.';
+    if (!username) {
+      errs.lu = 'Username is required.';
+    } else if (!isValidUsername(username)) {
+      errs.lu = 'Username: 4\u201320 chars, letters/numbers/underscore only.';
+    }
+    if (!password) {
+      errs.lp = 'Password is required.';
+    } else if (!isValidPassword(password)) {
+      errs.lp = 'Password must be 8+ chars with at least 1 uppercase and 1 number.';
+    }
     if (Object.keys(errs).length) { setFieldErrors(errs); return; }
     setFieldErrors({});
     try {
@@ -135,7 +165,7 @@ export default function Login() {
     const dob      = fd.get('dob') || '';
 
     if (!isValidName(name))     errs.name = 'Enter a real full name (2+ characters, no special chars).';
-    if (!isValidUsername(username)) errs.username = 'Username: 4–20 chars, letters/numbers/underscore only.';
+    if (!isValidUsername(username)) errs.username = 'Username: 4\u201320 chars, letters/numbers/underscore only.';
     if (!isValidPassword(password)) errs.password = 'Password must be 8+ chars with at least 1 uppercase and 1 number.';
 
     if (cat === 'patient') {
@@ -151,7 +181,7 @@ export default function Login() {
     if (cat === 'doctor') {
       if (!isDoctorAge(dob)) errs.dob = 'Doctor must be between 22 and 80 years old.';
       const regNo = fd.get('registration_number')?.trim() || '';
-      if (!isValidRegNo(regNo)) errs.registration_number = 'Registration number: 3–20 alphanumeric chars.';
+      if (!isValidRegNo(regNo)) errs.registration_number = 'Registration number: 3\u201320 alphanumeric chars.';
       const spec = fd.get('specialization')?.trim() || '';
       if (!spec) errs.specialization = 'Specialization is required.';
       const mobile = fd.get('mobile')?.trim() || '';
@@ -162,7 +192,7 @@ export default function Login() {
 
     if (cat === 'hospital') {
       const regNo = fd.get('registration_number')?.trim() || '';
-      if (regNo && !isValidRegNo(regNo)) errs.registration_number = 'Registration number: 3–20 alphanumeric chars.';
+      if (regNo && !isValidRegNo(regNo)) errs.registration_number = 'Registration number: 3\u201320 alphanumeric chars.';
       const phone = fd.get('phone')?.trim() || '';
       if (phone && !isValidPhone(phone)) errs.phone = 'Enter a valid phone number.';
       const email = fd.get('email')?.trim() || '';
@@ -230,27 +260,12 @@ export default function Login() {
     }
   };
 
-  // ─── Input helpers ────────────────────────────────────────────────────────
-  const F = ({ label, name, type='text', placeholder='', required=false, children, hint }) => (
-    <div className="input-field">
-      <label>{label}{required && <span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span>}</label>
-      {children || (
-        <input
-          type={type}
-          name={name}
-          placeholder={placeholder}
-          required={required}
-          onChange={() => clearFE(name)}
-          style={fieldErrors[name] ? { borderColor:'#ef4444' } : {}}
-        />
-      )}
-      {hint && !fieldErrors[name] && <span style={{ fontSize:'11px', color:'#9ca3af', marginTop:'3px', display:'block' }}>{hint}</span>}
-      <FieldError msg={fieldErrors[name]} />
-    </div>
-  );
-
   return (
     <div className="login-page">
+      <button className="back-home-btn" onClick={() => navigate('/')}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Back to Home
+      </button>
       <div className={`container ${view === 'login' || view === 'forgot' ? 'login-view' : 'register-view'}`}>
         <div className="logo-container">
           <div className="text-logo">DocTalk<span className="logo-sup">AI</span></div>
@@ -373,9 +388,9 @@ export default function Login() {
               {view === 'register' && category === 'patient' && (
                 <form onSubmit={handleRegisterSubmit}>
                   <div className="form-grid">
-                    <F label="Full Name" name="name" placeholder="e.g. Rahul Kumar" required
-                      hint="2+ characters, no special symbols" />
-                    <F label="Date of Birth" name="dob" type="date" required />
+                    <FormField label="Full Name" name="name" placeholder="e.g. Rahul Kumar" required
+                      hint="2+ characters, no special symbols" fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <FormField label="Date of Birth" name="dob" type="date" required fieldErrors={fieldErrors} clearFE={clearFE} />
                     <div className="input-field">
                       <label>Gender<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
                       <select name="gender" required>
@@ -401,7 +416,7 @@ export default function Login() {
                         style={fieldErrors.mobile ? { borderColor:'#ef4444' } : {}} />
                       <FieldError msg={fieldErrors.mobile} />
                     </div>
-                    <F label="Email Address" name="email" type="email" placeholder="you@example.com" hint="Optional" />
+                    <FormField label="Email Address" name="email" type="email" placeholder="you@example.com" hint="Optional" fieldErrors={fieldErrors} clearFE={clearFE} />
                     <div className="input-field full-width">
                       <label>Address<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
                       <input type="text" name="address" placeholder="House/Street, City, State" required
@@ -435,7 +450,7 @@ export default function Login() {
               {view === 'register' && category === 'doctor' && (
                 <form onSubmit={handleRegisterSubmit}>
                   <div className="form-grid">
-                    <F label="Full Name" name="name" placeholder="Dr. Priya Sharma" required hint="Must match official records" />
+                    <FormField label="Full Name" name="name" placeholder="Dr. Priya Sharma" required hint="Must match official records" fieldErrors={fieldErrors} clearFE={clearFE} />
                     <div className="input-field">
                       <label>Date of Birth<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
                       <input type="date" name="dob" required
@@ -468,9 +483,9 @@ export default function Login() {
                         style={fieldErrors.registration_number ? { borderColor:'#ef4444' } : {}} />
                       <FieldError msg={fieldErrors.registration_number} />
                     </div>
-                    <F label="Years of Experience" name="experience" type="number" placeholder="e.g. 5" />
-                    <F label="Hospital / Clinic Name" name="hospital_name" placeholder="City Medical Centre" required />
-                    <F label="Hospital Location" name="hospital_location" placeholder="City, State" required />
+                    <FormField label="Years of Experience" name="experience" type="number" placeholder="e.g. 5" fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <FormField label="Hospital / Clinic Name" name="hospital_name" placeholder="City Medical Centre" required fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <FormField label="Hospital Location" name="hospital_location" placeholder="City, State" required fieldErrors={fieldErrors} clearFE={clearFE} />
                     <div className="input-field">
                       <label>Mobile Number<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
                       <input type="tel" name="mobile" placeholder="+91 98765 43210" required
@@ -537,8 +552,8 @@ export default function Login() {
                       <label>Address</label>
                       <input type="text" name="address" placeholder="Building, Street, Area" />
                     </div>
-                    <F label="City" name="city" placeholder="e.g. Kolkata" />
-                    <F label="State" name="state" placeholder="e.g. West Bengal" />
+                    <FormField label="City" name="city" placeholder="e.g. Kolkata" fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <FormField label="State" name="state" placeholder="e.g. West Bengal" fieldErrors={fieldErrors} clearFE={clearFE} />
                     <div className="input-field">
                       <label>Registration Number</label>
                       <input type="text" name="registration_number" placeholder="e.g. WBMC-2024-001"
@@ -560,7 +575,7 @@ export default function Login() {
                         style={fieldErrors.email ? { borderColor:'#ef4444' } : {}} />
                       <FieldError msg={fieldErrors.email} />
                     </div>
-                    <F label="Website" name="website" type="url" placeholder="https://hospital.com" />
+                    <FormField label="Website" name="website" type="url" placeholder="https://hospital.com" fieldErrors={fieldErrors} clearFE={clearFE} />
                     <div className="input-field full-width">
                       <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'10px' }}>Register as Hospital</button>
                     </div>

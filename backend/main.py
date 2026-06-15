@@ -14,6 +14,7 @@ from .api.medical_assets import router as assets_router
 from .api.hospital import router as hospital_router, public_router as hospital_public_router
 from .api.users import doctor_router as user_doctor_router, router as users_router
 from .api.image_analysis import router as image_analysis_router
+from .api.stats import router as stats_router
 from .core.database import connect_prisma, disconnect_prisma, ensure_connected, ping_database
 
 
@@ -74,6 +75,7 @@ app.include_router(assets_router, prefix="/api/assets", tags=["assets"])
 app.include_router(hospital_router, prefix="/api/hospital", tags=["hospital"])
 app.include_router(hospital_public_router, prefix="/api/hospital/public", tags=["hospital"])
 app.include_router(image_analysis_router, prefix="/api", tags=["images"])
+app.include_router(stats_router, prefix="/api/public", tags=["public"])
 
 
 @app.get("/health", tags=["system"])
