@@ -54,6 +54,16 @@ class UserRegistrationRequest(BaseModel):
     doctor_id: str | None = Field(default=None, min_length=1)
     name: str = Field(min_length=1)
     password: str = Field(min_length=8)
+    specialization: str | None = None
+    registration_number: str | None = None
+    hospital_name: str | None = None
+    hospital_location: str | None = None
+    mobile: str | None = None
+    email: str | None = None
+    gender: str | None = None
+    address: str | None = None
+    bio: str | None = None
+    experience: str | None = None
 
     class Config:
         extra = "forbid"
@@ -115,6 +125,7 @@ class CurrentUserProfileResponse(BaseModel):
     hospital_location: str | None = None
     specialization: str | None = None
     bio: str | None = None
+    experience: str | None = None
 
 
 class UserProfileUpdateRequest(BaseModel):
@@ -137,4 +148,5 @@ class UserProfileUpdateRequest(BaseModel):
     hospital_location: str | None = None
     specialization: str | None = None
     bio: str | None = None
+    experience: str | None = None
 

@@ -79,10 +79,12 @@ class SymptomReportCreate(BaseModel):
     patient_name: str | None = None
     patient_age: int | None = Field(default=None, ge=0, le=150)
     patient_gender: str | None = None
+    patient_username: str | None = None
     disease_name: str = Field(min_length=1)
     symptoms: list[str] = Field(min_length=1)
     new_symptoms: list[str] | None = None
     severity: SymptomSeverityEnum = "moderate"
+    status: str = "admitted"
     onset_date: datetime | None = None
     additional_notes: str | None = None
     is_anonymous: bool = False
@@ -101,10 +103,43 @@ class SymptomReportResponse(BaseModel):
     symptoms: list[Any]
     new_symptoms: list[Any] | None = None
     severity: str
+    status: str = "admitted"
     onset_date: datetime | None = None
     reported_date: datetime
     additional_notes: str | None = None
     is_anonymous: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SymptomReportStatusUpdate(BaseModel):
+    status: Literal["admitted", "discharged", "deceased"]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class HospitalPatientRegisterRequest(BaseModel):
+    username: str = Field(min_length=4)
+    name: str = Field(min_length=2)
+    password: str = Field(default="Password123", min_length=8)
+    email: str | None = None
+    mobile: str | None = None
+    gender: str | None = None
+    blood_group: str | None = None
+    address: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class HospitalPatientResponse(BaseModel):
+    username: str
+    name: str
+    email: str | None = None
+    mobile: str | None = None
+    gender: str | None = None
+    blood_group: str | None = None
+    address: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -152,3 +187,7 @@ class HospitalDashboardResponse(BaseModel):
     recent_reports: list[SymptomReportResponse]
     disease_summary: list[dict[str, Any]]
     severity_breakdown: dict[str, int]
+    admitted_count: int = 0
+    discharged_count: int = 0
+    death_count: int = 0
+    patients: list[HospitalPatientResponse] = []

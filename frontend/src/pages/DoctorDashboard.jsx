@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSession } from '../contexts/SessionContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -1139,31 +1139,120 @@ export default function DoctorDashboard() {
         </div>
         </div>
       );
-      case 'settings': return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <h1 className="doc-h1">Settings</h1>
-          <div className="doc-section" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div style={{ paddingBottom: '20px', borderBottom: '1px solid #f0f0f0', fontWeight: '700', color: '#8B7EFF', fontSize: '18px', marginBottom: '20px' }}>Profile Settings</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '600px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Full Name</label>
-              <input type="text" defaultValue={user.display_name} style={{ padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px' }} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Specialization</label>
-              <input type="text" defaultValue={user.specialization || ''} style={{ padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px' }} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Hospital Location</label>
-              <input type="text" defaultValue={user.hospital_location || ''} style={{ padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px' }} />
-            </div>
-            <div style={{ marginTop: '10px' }}>
-              <button className="doc-btn doc-btn-primary" style={{ padding: '12px 24px', borderRadius: '50px', background: '#8B7EFF', color: '#fff', border: 'none', fontWeight: '600', cursor: 'pointer' }}>Save Changes</button>
+      case 'settings': {
+        const specs = ['General Medicine','Cardiology','Neurology','Orthopedics','Dermatology','Pediatrics','Gynecology','Oncology','Ophthalmology','ENT','Psychiatry','Radiology','Anesthesiology','Urology','Endocrinology','Nephrology','Gastroenterology','Pulmonology','Rheumatology','Other'];
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <h1 className="doc-h1">Settings</h1>
+            <div className="doc-section" style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ paddingBottom: '20px', borderBottom: '1px solid #f0f0f0', fontWeight: '700', color: '#8B7EFF', fontSize: '18px', marginBottom: '20px' }}>Profile Settings</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '600px' }}>
+              
+              {/* ── Read-Only Fields ── */}
+              <div style={{ background: '#f8fafc', borderRadius: '12px', padding: '16px', border: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', marginBottom: '4px', display: 'block' }}>Doctor ID</label>
+                    <div style={{ fontSize: '14px', color: '#1e293b', fontWeight: '500' }}>{user.doctor_id || user.doctorId || user.user_id || '—'}</div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', marginBottom: '4px', display: 'block' }}>Full Name</label>
+                    <div style={{ fontSize: '14px', color: '#1e293b', fontWeight: '500' }}>{user.display_name || user.name || '—'}</div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', marginBottom: '4px', display: 'block' }}>Gender</label>
+                    <div style={{ fontSize: '14px', color: '#1e293b', fontWeight: '500' }}>{user.gender || '—'}</div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', marginBottom: '4px', display: 'block' }}>Registration No.</label>
+                    <div style={{ fontSize: '14px', color: '#1e293b', fontWeight: '500' }}>{user.registration_number || user.registrationNumber || '—'}</div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', marginBottom: '4px', display: 'block' }}>Hospital / Clinic Name</label>
+                    <div style={{ fontSize: '14px', color: '#1e293b', fontWeight: '500' }}>{user.hospital_name || user.hospitalName || '—'}</div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', marginBottom: '4px', display: 'block' }}>Address</label>
+                    <div style={{ fontSize: '14px', color: '#1e293b', fontWeight: '500' }}>{user.address || '—'}</div>
+                  </div>
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', marginBottom: '4px', display: 'block' }}>Bio / About</label>
+                    <div style={{ fontSize: '14px', color: '#1e293b', fontWeight: '500', whiteSpace: 'pre-wrap' }}>{user.bio || '—'}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ fontSize: '14px', fontWeight: '700', color: '#2D3748', marginTop: '8px' }}>Editable Fields</div>
+
+              {/* ── Editable Fields ── */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div>
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Email Address</label>
+                  <input id="doc-setting-email" type="email" defaultValue={user.email || ''} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px', marginTop: '6px', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Specialization</label>
+                  <select id="doc-setting-specialization" defaultValue={user.specialization || ''} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px', marginTop: '6px', boxSizing: 'border-box', background: '#fff' }}>
+                    <option value="">— Select specialization —</option>
+                    {specs.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Years of Experience</label>
+                  <input id="doc-setting-experience" type="text" defaultValue={user.experience || ''} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px', marginTop: '6px', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Hospital Location</label>
+                  <input id="doc-setting-location" type="text" defaultValue={user.location || user.hospital_location || user.hospitalLocation || ''} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px', marginTop: '6px', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Mobile Number</label>
+                  <input id="doc-setting-mobile" type="text" defaultValue={user.mobile || ''} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px', marginTop: '6px', boxSizing: 'border-box' }} />
+                </div>
+              </div>
+
+              <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <button 
+                  onClick={async () => {
+                    const payload = {
+                      email: document.getElementById('doc-setting-email').value || undefined,
+                      specialization: document.getElementById('doc-setting-specialization').value || undefined,
+                      experience: document.getElementById('doc-setting-experience').value || undefined,
+                      location: document.getElementById('doc-setting-location').value || undefined,
+                      hospital_location: document.getElementById('doc-setting-location').value || undefined,
+                      mobile: document.getElementById('doc-setting-mobile').value || undefined,
+                    };
+                    // Remove undefined/empty keys
+                    Object.keys(payload).forEach(k => { if (payload[k] === undefined) delete payload[k]; });
+                    try {
+                      const token = localStorage.getItem('doctalk_token');
+                      const res = await fetch('/api/users/me', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                        body: JSON.stringify(payload),
+                      });
+                      const data = await res.json();
+                      if (res.ok) {
+                        addNotification && addNotification({ type: 'success', message: 'Profile updated successfully' });
+                        setUser(prev => ({ ...prev, ...data }));
+                      } else {
+                        addNotification && addNotification({ type: 'error', message: data?.detail || 'Failed to update profile' });
+                      }
+                    } catch (err) {
+                      addNotification && addNotification({ type: 'error', message: 'Network error' });
+                    }
+                  }}
+                  className="doc-btn doc-btn-primary" 
+                  style={{ padding: '12px 24px', borderRadius: '50px', background: '#8B7EFF', color: '#fff', border: 'none', fontWeight: '600', cursor: 'pointer' }}
+                >
+                  Save Changes
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-        </div>
-      );
+          </div>
+        );
+      }
       default: return null;
     }
   };

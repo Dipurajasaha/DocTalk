@@ -13,6 +13,9 @@ from ..schemas.hospital_schemas import (
     SymptomReportCreate,
     SymptomReportListResponse,
     SymptomReportResponse,
+    HospitalPatientRegisterRequest,
+    HospitalPatientResponse,
+    SymptomReportStatusUpdate,
 )
 from ..services.hospital_service import HospitalService
 
@@ -93,6 +96,51 @@ async def get_report(
     return await service.get_report_by_id(report_id)
 
 
+@router.get("/reports/patient/{patient_username}")
+async def get_patient_reports(
+    patient_username: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: HospitalService = Depends(get_hospital_service),
+) -> dict:
+    """Get all symptom reports for a specific registered patient."""
+    if current_user.role != "hospital":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only hospitals can view patient reports")
+    return await service.get_hospital_reports(
+        current_user.user_id, patient_username=patient_username
+    )
+
+
+@router.get("/detailed-analysis")
+async def detailed_analysis(
+    current_user: CurrentUser = Depends(get_current_user),
+    service: HospitalService = Depends(get_hospital_service),
+) -> dict:
+    """Comprehensive disease analysis with mortality stats, trends, patient demographics."""
+    if current_user.role != "hospital":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only hospitals can access detailed analysis")
+    return await service.get_detailed_analysis(hospital_id=current_user.user_id)
+
+
+@public_router.get("/detailed-analysis/global")
+async def global_detailed_analysis(
+    service: HospitalService = Depends(get_hospital_service),
+) -> dict:
+    """Public endpoint for global detailed disease analysis."""
+    return await service.get_detailed_analysis(hospital_id=None)
+
+
+@router.get("/patients/{patient_username}/medical-history")
+async def patient_medical_history(
+    patient_username: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: HospitalService = Depends(get_hospital_service),
+) -> dict:
+    """Get full medical history for a registered patient."""
+    if current_user.role != "hospital":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only hospitals can view patient medical history")
+    return await service.get_patient_full_medical_history(current_user.user_id, patient_username)
+
+
 # ─────────────────────── HOSPITAL NEWS ───────────────────────
 
 
@@ -159,3 +207,36 @@ async def dashboard(
     if current_user.role != "hospital":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only hospitals can access dashboard")
     return await service.get_dashboard(current_user.user_id)
+
+
+@router.post("/register-patient", response_model=HospitalPatientResponse)
+async def register_patient(
+    payload: HospitalPatientRegisterRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: HospitalService = Depends(get_hospital_service),
+) -> dict:
+    if current_user.role != "hospital":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only hospitals can register patients")
+    return await service.register_patient(current_user.user_id, payload.model_dump())
+
+
+@router.get("/patients", response_model=list[HospitalPatientResponse])
+async def get_registered_patients(
+    current_user: CurrentUser = Depends(get_current_user),
+    service: HospitalService = Depends(get_hospital_service),
+) -> list[dict]:
+    if current_user.role != "hospital":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only hospitals can view their patients")
+    return await service.get_registered_patients(current_user.user_id)
+
+
+@router.put("/reports/{report_id}/status", response_model=SymptomReportResponse)
+async def update_report_status(
+    report_id: str,
+    payload: SymptomReportStatusUpdate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: HospitalService = Depends(get_hospital_service),
+) -> dict:
+    if current_user.role != "hospital":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only hospitals can update report status")
+    return await service.update_report_status(current_user.user_id, report_id, payload.status)

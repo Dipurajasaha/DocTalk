@@ -53,6 +53,8 @@ model Patient {
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
+  registeredByHospitalId String?
+  registeredByHospital   Hospital?      @relation("HospitalPatients", fields: [registeredByHospitalId], references: [hospitalId], onDelete: SetNull)
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
 
@@ -69,6 +71,9 @@ model Doctor {
   category            String?
   location            String?
   address             String?
+  email               String?
+  mobile              String?
+  experience          String?
   registrationNumber  String?
   hospitalName        String?
   hospitalLocation    String?
@@ -236,6 +241,7 @@ model Hospital {
 
   symptomReports SymptomReport[]
   hospitalNews   HospitalNews[]
+  registeredPatients Patient[]      @relation("HospitalPatients")
 
   @@map("hospitals")
 }
@@ -250,6 +256,7 @@ model SymptomReport {
   symptoms        Json            @db.JsonB
   newSymptoms     Json?           @db.JsonB
   severity        SymptomSeverity @default(moderate)
+  status          String          @default("admitted")
   onsetDate       DateTime?
   reportedDate    DateTime        @default(now())
   additionalNotes String?

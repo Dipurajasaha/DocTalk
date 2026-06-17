@@ -102,6 +102,12 @@ class UserService:
             "hospital_name": "hospitalName",
             "hospital_location": "hospitalLocation",
             "profile_pic": "profilePic",
+            "specialization": "specialization",
+            "bio": "bio",
+            "email": "email",
+            "mobile": "mobile",
+            "experience": "experience",
+            "location": "location",
         }
         updates: dict[str, Any] = {}
         for key, value in payload.items():
@@ -151,8 +157,8 @@ class UserService:
             "gender": data.get("gender"),
             "blood_group": None,
             "address": data.get("address"),
-            "mobile": None,
-            "email": None,
+            "mobile": data.get("mobile"),
+            "email": data.get("email"),
             "phone": None,
             "profile_pic": data.get("profilePic"),
             "category": data.get("category"),
@@ -162,4 +168,5 @@ class UserService:
             "hospital_location": data.get("hospitalLocation"),
             "specialization": data.get("specialization"),
             "bio": data.get("bio"),
+            "experience": data.get("experience"),
         }

@@ -69,7 +69,19 @@ async def doctor_login(payload: LoginRequest, auth_service: AuthService = Depend
 @router.post("/doctor/signup", response_model=TokenResponse)
 async def doctor_signup(payload: UserRegistrationRequest, auth_service: AuthService = Depends(get_auth_service)) -> TokenResponse:
     return _token_response(
-        await auth_service.register_doctor(_require_doctor_id(payload), payload.name, payload.password)
+        await auth_service.register_doctor(
+            _require_doctor_id(payload), payload.name, payload.password,
+            specialization=payload.specialization,
+            registration_number=payload.registration_number,
+            hospital_name=payload.hospital_name,
+            hospital_location=payload.hospital_location,
+            mobile=payload.mobile,
+            email=payload.email,
+            gender=payload.gender,
+            address=payload.address,
+            bio=payload.bio,
+            experience=payload.experience,
+        )
     )
 
 

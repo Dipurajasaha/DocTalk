@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import { hospitalApi } from '../lib/api';
@@ -101,16 +101,21 @@ export default function HospitalDashboard() {
   const [dashboard, setDashboard] = useState(null);
   const [reports, setReports] = useState([]);
   const [newsList, setNewsList] = useState([]);
+  const [patients, setPatients] = useState([]);
+  const [detailedAnalysis, setDetailedAnalysis] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
 
   // modals
   const [reportModal, setReportModal] = useState(false);
   const [newsModal, setNewsModal]     = useState(false);
+  const [patientModal, setPatientModal] = useState(false);
+  const [patientDetailModal, setPatientDetailModal] = useState(false);
 
   // report form
-  const blankReport = { patient_name:'', patient_age:'', patient_gender:'', disease_name:'', symptoms:'', new_symptoms:'', severity:'moderate', onset_date:'', additional_notes:'', is_anonymous:false };
+  const blankReport = { patient_name:'', patient_age:'', patient_gender:'', patient_username:'', disease_name:'', symptoms:'', new_symptoms:'', severity:'moderate', status:'admitted', onset_date:'', additional_notes:'', is_anonymous:false };
   const [rForm, setRForm] = useState(blankReport);
   const [rSubmitting, setRSubmitting] = useState(false);
 
@@ -118,6 +123,15 @@ export default function HospitalDashboard() {
   const blankNews = { title:'', content:'', category:'general', is_global:false, priority:0 };
   const [nForm, setNForm] = useState(blankNews);
   const [nSubmitting, setNSubmitting] = useState(false);
+
+  // patient form
+  const blankPatient = { username:'', name:'', password:'Password123', email:'', mobile:'', gender:'', blood_group:'', address:'' };
+  const [pForm, setPForm] = useState(blankPatient);
+  const [pSubmitting, setPSubmitting] = useState(false);
+
+  // patient detail
+  const [patientDetail, setPatientDetail] = useState(null);
+  const [patientDetailLoading, setPatientDetailLoading] = useState(false);
 
   // reports filter/search
   const [reportSearch, setReportSearch] = useState('');
@@ -140,12 +154,36 @@ export default function HospitalDashboard() {
       setDashboard(dash);
       setReports(rep.reports||[]);
       setNewsList(news||[]);
+      setPatients(dash.patients||[]);
+      if (dash.detailed_analysis) {
+        setDetailedAnalysis(dash.detailed_analysis);
+      }
     } catch(err) {
       setError(err?.message||'Failed to load dashboard');
     } finally { setLoading(false); }
   },[]);
 
   useEffect(()=>{ loadData(); },[loadData]);
+
+  // Load detailed analysis separately when analysis tab opens
+  const loadDetailedAnalysis = useCallback(async()=>{
+    setAnalysisLoading(true);
+    try {
+      const analysis = await hospitalApi.getDetailedAnalysis();
+      setDetailedAnalysis(analysis);
+    } catch(err) {
+      // Fallback to dashboard data
+      if (dashboard?.detailed_analysis) {
+        setDetailedAnalysis(dashboard.detailed_analysis);
+      }
+    } finally { setAnalysisLoading(false); }
+  },[dashboard]);
+
+  useEffect(()=>{
+    if (tab === 'analysis') {
+      loadDetailedAnalysis();
+    }
+  },[tab, loadDetailedAnalysis]);
 
   const handleReportSubmit = async(e)=>{
     e.preventDefault(); setRSubmitting(true);
@@ -155,8 +193,11 @@ export default function HospitalDashboard() {
         patient_age: rForm.patient_age ? parseInt(rForm.patient_age) : undefined,
         symptoms: rForm.symptoms.split(',').map(s=>s.trim()).filter(Boolean),
         new_symptoms: rForm.new_symptoms ? rForm.new_symptoms.split(',').map(s=>s.trim()).filter(Boolean) : undefined,
-        patient_name: rForm.patient_name||undefined, patient_gender: rForm.patient_gender||undefined,
-        onset_date: rForm.onset_date||undefined, additional_notes: rForm.additional_notes||undefined,
+        patient_username: rForm.patient_username || undefined,
+        patient_name: rForm.patient_username ? rForm.patient_username : (rForm.patient_name||undefined),
+        patient_gender: rForm.patient_gender||undefined,
+        onset_date: rForm.onset_date||undefined,
+        additional_notes: rForm.additional_notes||undefined,
       });
       showToast('Report submitted successfully!');
       setReportModal(false); setRForm(blankReport); loadData();
@@ -174,6 +215,34 @@ export default function HospitalDashboard() {
     finally { setNSubmitting(false); }
   };
 
+  const handlePatientSubmit = async(e)=>{
+    e.preventDefault(); setPSubmitting(true);
+    try {
+      const payload = { ...pForm };
+      Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
+      await hospitalApi.registerPatient(payload);
+      showToast('Patient registered successfully!');
+      setPatientModal(false); setPForm(blankPatient); loadData();
+    } catch(err) { showToast(err?.message||'Failed to register patient','error'); }
+    finally { setPSubmitting(false); }
+  };
+
+  const handleViewPatient = async (username) => {
+    setPatientDetailLoading(true);
+    setPatientDetailModal(true);
+    try {
+      const history = await hospitalApi.getPatientMedicalHistory(username);
+      const patientReports = await hospitalApi.getPatientReports(username);
+      setPatientDetail({
+        ...history,
+        reports: patientReports.reports || [],
+      });
+    } catch (err) {
+      showToast(err?.message || 'Failed to load patient details', 'error');
+      setPatientDetailModal(false);
+    } finally { setPatientDetailLoading(false); }
+  };
+
   const handleLogout = async()=>{
     try { await logout(); } catch(_) {
       try { localStorage.removeItem('doctalk_token'); localStorage.removeItem('doctalk_session'); } catch(_){}
@@ -181,13 +250,10 @@ export default function HospitalDashboard() {
     navigate('/login');
   };
 
-  // ── greeting ──────────────────────────────────────────────────────────────
+  // ── derived stats ─────────────────────────────────────────────────────────
   const hour = new Date().getHours();
-  const greeting = hour<12 ? 'Good morning' : hour<17 ? 'Good afternoon' : 'Good evening';
   const hospitalName = dashboard?.hospital_name || session?.user_id || 'Hospital';
   const initials = hospitalName.split(' ').slice(0,2).map(w=>w[0]?.toUpperCase()||'').join('');
-
-  // ── derived stats ─────────────────────────────────────────────────────────
   const sevBreakdown  = dashboard?.severity_breakdown || {};
   const diseaseSummary = dashboard?.disease_summary || [];
   const recentReports  = dashboard?.recent_reports   || [];
@@ -208,6 +274,7 @@ export default function HospitalDashboard() {
     { id:'overview',  icon:'🏠', label:'Overview'         },
     { id:'reports',   icon:'📋', label:'Symptom Reports'  },
     { id:'news',      icon:'📰', label:'News & Updates'   },
+    { id:'patients',  icon:'👤', label:'Patients'         },
     { id:'analysis',  icon:'📊', label:'Disease Analysis' },
   ];
 
@@ -254,9 +321,7 @@ export default function HospitalDashboard() {
           <div className="h-sidebar-avatar">{initials}</div>
           <div className="h-sidebar-name">{hospitalName}</div>
           <div className="h-sidebar-id">ID: {session?.user_id || '—'}</div>
-
           <div className="h-sidebar-divider"/>
-
           <nav className="h-sidenav">
             {navItems.map(n=>(
               <button key={n.id} className={`h-sidenav-btn ${tab===n.id?'active':''}`} onClick={()=>setTab(n.id)}>
@@ -265,10 +330,7 @@ export default function HospitalDashboard() {
               </button>
             ))}
           </nav>
-
           <div className="h-sidebar-divider"/>
-
-          {/* Quick stats in sidebar */}
           <div className="h-sidebar-stats">
             <div className="h-sidebar-stat">
               <span className="h-ss-val">{totalReports}</span>
@@ -283,15 +345,8 @@ export default function HospitalDashboard() {
               <span className="h-ss-lab">News</span>
             </div>
           </div>
-
           <div style={{flex:1}}/>
-
-          <button className="h-sidebar-logout" onClick={handleLogout}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-            </svg>
-            Sign out
-          </button>
+          <button className="h-sidebar-logout" onClick={handleLogout}>Sign out</button>
         </aside>
 
         {/* ── Main panel ── */}
@@ -308,13 +363,10 @@ export default function HospitalDashboard() {
           {/* ══════════════ OVERVIEW ══════════════ */}
           {tab==='overview' && (
             <div className="h-tab-content">
-
-              {/* Welcome banner */}
-              <div className="h-welcome-banner">
+              <div className="h-welcome-banner" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', background:'#fff', padding:'16px 20px', borderRadius:'12px', border:'1px solid #e2e8f0', marginBottom:'20px' }}>
                 <div>
-                  <div className="h-greeting">{greeting}, <strong>{hospitalName}</strong> 👋</div>
-                  <div className="h-greeting-sub">
-                    {new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}
+                  <div className="h-greeting-sub" style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                    📅 {new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}
                     {criticalCount>0 && <span className="h-alert-pill">🚨 {criticalCount} critical case{criticalCount!==1?'s':''} need attention</span>}
                   </div>
                 </div>
@@ -324,7 +376,6 @@ export default function HospitalDashboard() {
                 </div>
               </div>
 
-              {/* KPI row */}
               <div className="h-kpi-row">
                 {[
                   { icon:'📋', val: dashboard?.total_reports||0, label:'Total Reports',   color:'#6C5CE7', bg:'#EDE9FE' },
@@ -340,24 +391,19 @@ export default function HospitalDashboard() {
                 ))}
               </div>
 
-              {/* Charts + activity row */}
               <div className="h-overview-grid">
-
-                {/* Severity chart */}
                 <div className="h-card">
-                  <div className="h-card-header">
-                    <span className="h-card-title">Severity Breakdown</span>
-                  </div>
+                  <div className="h-card-header"><span className="h-card-title">Severity Breakdown</span></div>
                   {Object.keys(sevBreakdown).length===0
                     ? <EmptyState icon="📊" title="No data yet" sub="Submit a symptom report to see charts." />
                     : (
                       <div style={{display:'flex',alignItems:'center',gap:'20px',padding:'8px 0'}}>
                         <Donut size={110} data={Object.entries(sevBreakdown).map(([k,v])=>({label:k,v,color:sev[k]||'#94a3b8'}))} />
-                        <div style={{flex:1,display:'flex',flexDirection:'column',gap:'8px'}}>
+                        <div style={{flex:1}}>
                           {Object.entries(sevBreakdown).map(([k,v])=>{
                             const pct=Math.round(v/Math.max(totalReports,1)*100);
                             return (
-                              <div key={k}>
+                              <div key={k} style={{marginBottom:'6px'}}>
                                 <div style={{display:'flex',justifyContent:'space-between',marginBottom:'3px'}}>
                                   <span style={{fontSize:'12px',fontWeight:'600',color:sev[k],textTransform:'capitalize'}}>{k}</span>
                                   <span style={{fontSize:'12px',fontWeight:'700',color:'#1e293b'}}>{v} <span style={{color:'#94a3b8',fontWeight:'400'}}>({pct}%)</span></span>
@@ -374,33 +420,27 @@ export default function HospitalDashboard() {
                   }
                 </div>
 
-                {/* Top diseases */}
                 <div className="h-card">
                   <div className="h-card-header"><span className="h-card-title">Top Diseases</span></div>
                   {diseaseSummary.length===0
                     ? <EmptyState icon="🦠" title="No diseases recorded" sub="Reports will populate this chart." />
-                    : (
-                      <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
-                        {diseaseSummary.slice(0,6).map((d,i)=>{
-                          const colors=['#6C5CE7','#ef4444','#f97316','#22c55e','#3b82f6','#8b5cf6'];
-                          const pct=Math.round(d.count/Math.max(totalReports,1)*100);
-                          return (
-                            <div key={i} style={{display:'flex',alignItems:'center',gap:'8px'}}>
-                              <span style={{fontSize:'11px',fontWeight:'700',color:'#94a3b8',width:'18px',textAlign:'right'}}>#{i+1}</span>
-                              <span style={{fontSize:'12px',fontWeight:'600',color:'#1e293b',minWidth:'100px',maxWidth:'130px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.disease}</span>
-                              <div style={{flex:1,height:'8px',background:'#f1f5f9',borderRadius:'99px',overflow:'hidden'}}>
-                                <div style={{width:`${Math.max(3,pct)}%`,height:'100%',background:colors[i%6],borderRadius:'99px',transition:'width 0.7s ease'}}/>
-                              </div>
-                              <span style={{fontSize:'12px',fontWeight:'700',color:colors[i%6],width:'24px',textAlign:'right'}}>{d.count}</span>
+                    : diseaseSummary.slice(0,6).map((d,i)=>{
+                        const colors=['#6C5CE7','#ef4444','#f97316','#22c55e','#3b82f6','#8b5cf6'];
+                        const pct=Math.round(d.count/Math.max(totalReports,1)*100);
+                        return (
+                          <div key={i} style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'8px'}}>
+                            <span style={{fontSize:'11px',fontWeight:'700',color:'#94a3b8',width:'18px',textAlign:'right'}}>#{i+1}</span>
+                            <span style={{fontSize:'12px',fontWeight:'600',color:'#1e293b',minWidth:'100px',maxWidth:'130px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.disease}</span>
+                            <div style={{flex:1,height:'8px',background:'#f1f5f9',borderRadius:'99px',overflow:'hidden'}}>
+                              <div style={{width:`${Math.max(3,pct)}%`,height:'100%',background:colors[i%6],borderRadius:'99px',transition:'width 0.7s ease'}}/>
                             </div>
-                          );
-                        })}
-                      </div>
-                    )
+                            <span style={{fontSize:'12px',fontWeight:'700',color:colors[i%6],width:'24px',textAlign:'right'}}>{d.count}</span>
+                          </div>
+                        );
+                      })
                   }
                 </div>
 
-                {/* Activity feed */}
                 <div className="h-card h-card-wide">
                   <div className="h-card-header">
                     <span className="h-card-title">Recent Activity</span>
@@ -410,7 +450,7 @@ export default function HospitalDashboard() {
                     ? <EmptyState icon="🕐" title="No activity yet" sub="Your submitted reports will appear here." action="Submit First Report" onAction={()=>setReportModal(true)}/>
                     : (
                       <div className="h-activity-feed">
-                        {recentReports.map((r,i)=>(
+                        {recentReports.map(r=>(
                           <div key={r.id} className="h-activity-item">
                             <div className="h-activity-dot" style={{background:sev[r.severity]||'#6C5CE7'}}/>
                             <div className="h-activity-body">
@@ -438,7 +478,6 @@ export default function HospitalDashboard() {
                   }
                 </div>
 
-                {/* Latest news preview */}
                 <div className="h-card">
                   <div className="h-card-header">
                     <span className="h-card-title">Latest News</span>
@@ -447,18 +486,18 @@ export default function HospitalDashboard() {
                   {newsList.length===0
                     ? <EmptyState icon="📰" title="Nothing published yet" sub="Share updates with your network." action="Publish News" onAction={()=>setNewsModal(true)}/>
                     : newsList.slice(0,3).map(n=>{
-                      const cfg=catCfg[n.category]||catCfg.general;
-                      return (
-                        <div key={n.id} style={{padding:'10px 0',borderBottom:'1px solid #f1f5f9'}}>
-                          <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'4px'}}>
-                            <span style={{fontSize:'12px',fontWeight:'700',padding:'2px 8px',borderRadius:'50px',background:cfg.bg,color:cfg.color}}>{cfg.icon} {n.category}</span>
-                            {n.is_global&&<span style={{fontSize:'11px',color:'#f97316',background:'#fff7ed',padding:'2px 6px',borderRadius:'50px',fontWeight:'700'}}>🌍 Global</span>}
+                        const cfg=catCfg[n.category]||catCfg.general;
+                        return (
+                          <div key={n.id} style={{padding:'10px 0',borderBottom:'1px solid #f1f5f9'}}>
+                            <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'4px'}}>
+                              <span style={{fontSize:'12px',fontWeight:'700',padding:'2px 8px',borderRadius:'50px',background:cfg.bg,color:cfg.color}}>{cfg.icon} {n.category}</span>
+                              {n.is_global&&<span style={{fontSize:'11px',color:'#f97316',background:'#fff7ed',padding:'2px 6px',borderRadius:'50px',fontWeight:'700'}}>🌍 Global</span>}
+                            </div>
+                            <div style={{fontSize:'13px',fontWeight:'700',color:'#0f172a',marginBottom:'2px'}}>{n.title}</div>
+                            <div style={{fontSize:'12px',color:'#94a3b8'}}>{fmt(n.published_at)}</div>
                           </div>
-                          <div style={{fontSize:'13px',fontWeight:'700',color:'#0f172a',marginBottom:'2px'}}>{n.title}</div>
-                          <div style={{fontSize:'12px',color:'#94a3b8'}}>{fmt(n.published_at)}</div>
-                        </div>
-                      );
-                    })
+                        );
+                      })
                   }
                 </div>
               </div>
@@ -475,8 +514,6 @@ export default function HospitalDashboard() {
                 </div>
                 <button className="h-btn-primary" onClick={()=>setReportModal(true)}>+ New Report</button>
               </div>
-
-              {/* Filters */}
               <div className="h-filters-row">
                 <div className="h-search-wrap">
                   <svg className="h-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -492,8 +529,6 @@ export default function HospitalDashboard() {
                   ))}
                 </div>
               </div>
-
-              {/* Table */}
               {filteredReports.length===0
                 ? <EmptyState icon="📋" title="No reports found" sub={reportSearch||reportSevFilter!=='all'?"Try adjusting your filters.":"No symptom reports submitted yet."} action="Submit First Report" onAction={()=>setReportModal(true)}/>
                 : (
@@ -503,6 +538,7 @@ export default function HospitalDashboard() {
                         <tr>
                           <th>Disease</th>
                           <th>Severity</th>
+                          <th>Status</th>
                           <th>Symptoms</th>
                           <th>Patient</th>
                           <th>Date</th>
@@ -511,10 +547,25 @@ export default function HospitalDashboard() {
                       </thead>
                       <tbody>
                         {filteredReports.map(r=>(
-                          <>
-                            <tr key={r.id} className={expandedReport===r.id?'h-tr-expanded':''}>
+                          <React.Fragment key={r.id}>
+                            <tr className={expandedReport===r.id?'h-tr-expanded':''}>
                               <td><span className="h-td-primary">{r.disease_name}</span></td>
                               <td><SevBadge level={r.severity}/></td>
+                              <td>
+                                <select value={r.status || 'admitted'}
+                                  onChange={async (e) => {
+                                    try {
+                                      await hospitalApi.updateReportStatus(r.id, e.target.value);
+                                      showToast('Status updated successfully!');
+                                      loadData();
+                                    } catch (err) { showToast(err?.message||'Failed to update status','error'); }
+                                  }}
+                                  style={{ padding:'4px 8px', borderRadius:'6px', border:'1px solid #d1d5db', fontSize:'12px', background:'#fff', fontWeight:'600', color: r.status === 'deceased' ? '#ef4444' : r.status === 'discharged' ? '#22c55e' : '#3b82f6', cursor:'pointer' }}>
+                                  <option value="admitted">Admitted</option>
+                                  <option value="discharged">Discharged</option>
+                                  <option value="deceased">Deceased</option>
+                                </select>
+                              </td>
                               <td>
                                 <div style={{display:'flex',gap:'4px',flexWrap:'wrap'}}>
                                   {(r.symptoms||[]).slice(0,3).map((s,i)=>(
@@ -523,17 +574,15 @@ export default function HospitalDashboard() {
                                   {(r.symptoms||[]).length>3&&<span style={{fontSize:'11px',color:'#94a3b8'}}>+{r.symptoms.length-3}</span>}
                                 </div>
                               </td>
-                              <td style={{color:'#64748B',fontSize:'13px'}}>{r.is_anonymous?<span style={{color:'#94a3b8',fontStyle:'italic'}}>Anonymous</span>:(r.patient_name||<span style={{color:'#94a3b8'}}>—</span>)}</td>
-                              <td style={{color:'#94a3b8',fontSize:'12px',whiteSpace:'nowrap'}}>{fmt(r.created_at)}</td>
-                              <td>
-                                <button className="h-expand-btn" onClick={()=>setExpandedReport(expandedReport===r.id?null:r.id)}>
-                                  {expandedReport===r.id?'▲':'▼'}
-                                </button>
+                              <td style={{color:'#64748B',fontSize:'13px'}}>
+                                {r.is_anonymous?<span style={{color:'#94a3b8',fontStyle:'italic'}}>Anonymous</span>:(r.patient_name||<span style={{color:'#94a3b8'}}>—</span>)}
                               </td>
+                              <td style={{color:'#94a3b8',fontSize:'12px',whiteSpace:'nowrap'}}>{fmt(r.created_at)}</td>
+                              <td><button className="h-expand-btn" onClick={()=>setExpandedReport(expandedReport===r.id?null:r.id)}>{expandedReport===r.id?'▲':'▼'}</button></td>
                             </tr>
                             {expandedReport===r.id&&(
-                              <tr key={r.id+'-exp'} className="h-tr-detail">
-                                <td colSpan={6}>
+                              <tr className="h-tr-detail">
+                                <td colSpan={7}>
                                   <div className="h-report-detail">
                                     <div className="h-rd-col">
                                       <span className="h-rd-label">All Symptoms</span>
@@ -557,7 +606,7 @@ export default function HospitalDashboard() {
                                 </td>
                               </tr>
                             )}
-                          </>
+                          </React.Fragment>
                         ))}
                       </tbody>
                     </table>
@@ -571,15 +620,11 @@ export default function HospitalDashboard() {
           {tab==='news' && (
             <div className="h-tab-content">
               <div className="h-section-bar">
-                <div>
-                  <h2 className="h-section-title">News & Announcements</h2>
-                  <p className="h-section-sub">Broadcast health updates to your network</p>
-                </div>
+                <div><h2 className="h-section-title">News & Announcements</h2><p className="h-section-sub">Broadcast health updates to your network</p></div>
                 <button className="h-btn-primary" onClick={()=>setNewsModal(true)}>+ Publish Update</button>
               </div>
-
               {newsList.length===0
-                ? <EmptyState icon="📰" title="Nothing published yet" sub="Share outbreak alerts, research findings, or general announcements with the hospital network." action="Publish First Update" onAction={()=>setNewsModal(true)}/>
+                ? <EmptyState icon="📰" title="Nothing published yet" sub="Share outbreak alerts, research findings, or general announcements." action="Publish First Update" onAction={()=>setNewsModal(true)}/>
                 : (
                   <div className="h-news-grid">
                     {newsList.map(n=>{
@@ -593,9 +638,7 @@ export default function HospitalDashboard() {
                           </div>
                           <h3 className="h-news-title">{n.title}</h3>
                           <p className="h-news-body">{n.content}</p>
-                          <div className="h-news-footer">
-                            <span>{fmt(n.published_at)} · {fmtTime(n.published_at)}</span>
-                          </div>
+                          <div className="h-news-footer"><span>{fmt(n.published_at)} · {fmtTime(n.published_at)}</span></div>
                         </div>
                       );
                     })}
@@ -605,37 +648,108 @@ export default function HospitalDashboard() {
             </div>
           )}
 
+          {/* ══════════════ PATIENTS ══════════════ */}
+          {tab==='patients' && (
+            <div className="h-tab-content">
+              <div className="h-section-bar">
+                <div>
+                  <h2 className="h-section-title">Patient Directory</h2>
+                  <p className="h-section-sub">{patients.length} patient{patients.length!==1?'s':''} registered</p>
+                </div>
+                <button className="h-btn-primary" onClick={()=>setPatientModal(true)}>+ Register Patient</button>
+              </div>
+              <div className="excel-sheet-container" style={{ background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', overflow:'hidden', boxShadow:'0 1px 3px rgba(0,0,0,0.1)' }}>
+                <div style={{ background: '#f3f4f6', borderBottom: '1px solid #d1d5db', padding: '6px 12px', fontSize: '12px', fontWeight: '600', color: '#4b5563', display:'flex', gap:'10px' }}>
+                  <span>📁 Patient_Database</span>
+                </div>
+                <div className="h-table-wrap" style={{ margin:0, overflowX:'auto' }}>
+                  <table className="h-table excel-table" style={{ borderCollapse:'collapse', width:'100%', fontSize:'13px' }}>
+                    <thead>
+                      <tr style={{ background:'#f9fafb' }}>
+                        <th style={{ border:'1px solid #e5e7eb', padding:'8px 12px', textAlign:'left', background:'#f3f4f6', color:'#374151', width:'30px' }}>#</th>
+                        <th style={{ border:'1px solid #e5e7eb', padding:'8px 12px', textAlign:'left', color:'#374151', fontWeight:'600' }}>Patient ID</th>
+                        <th style={{ border:'1px solid #e5e7eb', padding:'8px 12px', textAlign:'left', color:'#374151', fontWeight:'600' }}>Name</th>
+                        <th style={{ border:'1px solid #e5e7eb', padding:'8px 12px', textAlign:'left', color:'#374151', fontWeight:'600' }}>Gender</th>
+                        <th style={{ border:'1px solid #e5e7eb', padding:'8px 12px', textAlign:'left', color:'#374151', fontWeight:'600' }}>Blood Group</th>
+                        <th style={{ border:'1px solid #e5e7eb', padding:'8px 12px', textAlign:'left', color:'#374151', fontWeight:'600' }}>Reports</th>
+                        <th style={{ border:'1px solid #e5e7eb', padding:'8px 12px', textAlign:'left', color:'#374151', fontWeight:'600' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {patients.length===0 ? (
+                        <tr><td colSpan={7} style={{ textAlign:'center', padding:'40px', color:'#9ca3af', fontStyle:'italic' }}>No patients registered yet. Click "+ Register Patient" to start.</td></tr>
+                      ) : (
+                        patients.map((p, idx)=>(
+                          <tr key={p.username} style={{ background: idx%2===0?'#ffffff':'#fcfdfe', borderBottom:'1px solid #e5e7eb' }}>
+                            <td style={{ border:'1px solid #e5e7eb', padding:'8px 12px', background:'#f3f4f6', color:'#9ca3af', fontWeight:'600', textAlign:'center' }}>{idx+1}</td>
+                            <td style={{ border:'1px solid #e5e7eb', padding:'8px 12px', fontWeight:'700', color:'#111827' }}>{p.username}</td>
+                            <td style={{ border:'1px solid #e5e7eb', padding:'8px 12px', color:'#374151' }}>{p.name}</td>
+                            <td style={{ border:'1px solid #e5e7eb', padding:'8px 12px', color:'#4b5563', textTransform:'capitalize' }}>{p.gender || '—'}</td>
+                            <td style={{ border:'1px solid #e5e7eb', padding:'8px 12px', color:'#4b5563', fontWeight:'600' }}>{p.blood_group || '—'}</td>
+                            <td style={{ border:'1px solid #e5e7eb', padding:'8px 12px', textAlign:'center' }}>
+                              <span style={{ fontWeight:'800', fontSize:'15px', color: p.report_count > 0 ? '#6C5CE7' : '#9ca3af' }}>{p.report_count || 0}</span>
+                            </td>
+                            <td style={{ border:'1px solid #e5e7eb', padding:'8px 12px' }}>
+                              <button className="h-btn-secondary" style={{ padding:'4px 10px', fontSize:'11px' }} onClick={() => handleViewPatient(p.username)}>
+                                📋 View History
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ══════════════ ANALYSIS ══════════════ */}
           {tab==='analysis' && (()=>{
-            const maxD = Math.max(...diseaseSummary.map(d=>d.count),1);
+            const da = detailedAnalysis;
             const barPalette = ['#6C5CE7','#ef4444','#f97316','#22c55e','#3b82f6','#8b5cf6','#ec4899','#06b6d4'];
+
+            if (analysisLoading && !da) return (
+              <div className="h-tab-content">
+                <div className="h-splash" style={{padding:'40px'}}>
+                  <div className="h-spinner"/><p>Loading disease analysis…</p>
+                </div>
+              </div>
+            );
+
             return (
               <div className="h-tab-content">
                 <div className="h-section-bar">
                   <div>
-                    <h2 className="h-section-title">Disease Analysis</h2>
+                    <h2 className="h-section-title">Disease Analysis & Insights</h2>
                     <p className="h-section-sub">Centralised epidemiological data — for research, outbreak detection & surveillance</p>
                   </div>
-                  <button className="h-btn-secondary" onClick={()=>{
-                    const hdr='Disease,Count,Percentage\n';
-                    const rows=diseaseSummary.map(d=>`${d.disease},${d.count},${Math.round(d.count/Math.max(totalReports,1)*100)}%`).join('\n');
-                    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([hdr+rows],{type:'text/csv'}));
-                    a.download='doctalk_dataset.csv'; a.click();
-                  }}>⬇ Export CSV</button>
+                  <div style={{display:'flex',gap:'8px'}}>
+                    <button className="h-btn-secondary" onClick={()=>{
+                      const hdr='Disease,Total,Admitted,Discharged,Deaths,Mortality_Rate,Recovery_Rate,Avg_Age,Avg_Severity\n';
+                      const rows=(da?.disease_breakdown||diseaseSummary).map(d=>
+                        `${d.disease},${d.total||d.count},${d.admitted||0},${d.discharged||0},${d.deaths||0},${d.mortality_rate||0}%,${d.recovery_rate||0}%,${d.avg_age||'N/A'},${d.avg_severity_score||'N/A'}`
+                      ).join('\n');
+                      const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([hdr+rows],{type:'text/csv'}));
+                      a.download='doctalk_dataset.csv'; a.click();
+                    }}>⬇ Export CSV</button>
+                  </div>
                 </div>
 
-                {/* KPI strip */}
-                <div className="h-kpi-row">
+                {/* Overall stats cards */}
+                <div className="h-kpi-row" style={{ display:'grid', gridTemplateColumns:'repeat(6, 1fr)', gap:'12px', marginBottom:'20px' }}>
                   {[
-                    { icon:'📋', val:totalReports,         label:'Total Reports',      color:'#6C5CE7' },
-                    { icon:'🦠', val:diseaseSummary.length, label:'Unique Diseases',    color:'#ef4444' },
-                    { icon:'🚨', val:(sevBreakdown.severe||0)+(sevBreakdown.critical||0), label:'Severe+Critical', color:'#f97316' },
-                    { icon:'✅', val:sevBreakdown.mild||0,  label:'Mild (Recovered)',   color:'#22c55e' },
+                    { icon:'📋', val: da?.total_reports || totalReports, label:'Total Cases', color:'#6C5CE7', bg:'#EDE9FE' },
+                    { icon:'🏥', val: da?.total_admitted || dashboard?.admitted_count || 0, label:'Admitted', color:'#3b82f6', bg:'#eff6ff' },
+                    { icon:'✅', val: da?.total_discharged || dashboard?.discharged_count || 0, label:'Recovered', color:'#22c55e', bg:'#f0fdf4' },
+                    { icon:'💀', val: da?.total_deaths || dashboard?.death_count || 0, label:'Deaths', color:'#ef4444', bg:'#fef2f2' },
+                    { icon:'📈', val: da ? da.overall_mortality_rate + '%' : '—', label:'Mortality Rate', color:'#f97316', bg:'#fff7ed' },
+                    { icon:'📈', val: da ? da.overall_recovery_rate + '%' : '—', label:'Recovery Rate', color:'#22c55e', bg:'#f0fdf4' },
                   ].map(k=>(
-                    <div key={k.label} className="h-kpi-card">
-                      <div className="h-kpi-icon" style={{background:'#f8fafc',color:k.color,fontSize:'20px'}}>{k.icon}</div>
-                      <div className="h-kpi-val" style={{color:k.color}}>{k.val}</div>
-                      <div className="h-kpi-label">{k.label}</div>
+                    <div key={k.label} className="h-kpi-card" style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'12px', background:'#fff', borderRadius:'12px', border:'1px solid #e2e8f0' }}>
+                      <div className="h-kpi-icon" style={{background:k.bg,color:k.color,fontSize:'20px',padding:'8px',borderRadius:'50%',marginBottom:'6px', width:'40px',height:'40px',display:'flex',alignItems:'center',justifyContent:'center'}}>{k.icon}</div>
+                      <div className="h-kpi-val" style={{color:k.color,fontSize:'20px',fontWeight:'800'}}>{k.val}</div>
+                      <div className="h-kpi-label" style={{fontSize:'10px',fontWeight:'600',color:'#64748B',marginTop:'2px',textAlign:'center'}}>{k.label}</div>
                     </div>
                   ))}
                 </div>
@@ -649,11 +763,11 @@ export default function HospitalDashboard() {
                       : (
                         <div style={{display:'flex',alignItems:'center',gap:'24px'}}>
                           <Donut size={120} data={Object.entries(sevBreakdown).map(([k,v])=>({label:k,v,color:sev[k]||'#94a3b8'}))} />
-                          <div style={{flex:1,display:'flex',flexDirection:'column',gap:'10px'}}>
+                          <div style={{flex:1}}>
                             {Object.entries(sevBreakdown).map(([k,v])=>{
                               const pct=Math.round(v/Math.max(totalReports,1)*100);
                               return (
-                                <div key={k}>
+                                <div key={k} style={{marginBottom:'8px'}}>
                                   <div style={{display:'flex',justifyContent:'space-between',marginBottom:'4px'}}>
                                     <span style={{fontSize:'12px',fontWeight:'600',color:sev[k],textTransform:'capitalize'}}>{k}</span>
                                     <span style={{fontSize:'12px',fontWeight:'700',color:'#1e293b'}}>{v} <span style={{color:'#94a3b8',fontWeight:'400'}}>({pct}%)</span></span>
@@ -670,23 +784,24 @@ export default function HospitalDashboard() {
                     }
                   </div>
 
-                  {/* Disease bar chart */}
+                  {/* Most deadly diseases */}
                   <div className="h-card">
-                    <div className="h-card-header"><span className="h-card-title">Top Diseases by Report Count</span></div>
-                    {diseaseSummary.length===0
-                      ? <EmptyState icon="🦠" title="No disease data" sub="Reports will appear here." />
+                    <div className="h-card-header"><span className="h-card-title" style={{color:'#ef4444'}}>☠️ Most Deadly Diseases</span></div>
+                    {!da?.most_deadly_diseases?.length
+                      ? <EmptyState icon="💀" title="No mortality data" sub="Diseases with recorded deaths will appear here." />
                       : (
                         <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
-                          {diseaseSummary.slice(0,8).map((d,i)=>{
-                            const pct=Math.round(d.count/maxD*100);
+                          {da.most_deadly_diseases.map((d,i)=>{
+                            const maxM = Math.max(...da.most_deadly_diseases.map(x=>x.mortality_rate),1);
+                            const pct = Math.round(d.mortality_rate/maxM*100);
                             return (
                               <div key={i} style={{display:'flex',alignItems:'center',gap:'8px'}}>
                                 <span style={{fontSize:'11px',fontWeight:'700',color:'#94a3b8',width:'20px',textAlign:'right'}}>#{i+1}</span>
-                                <span style={{fontSize:'12px',fontWeight:'600',color:'#1e293b',minWidth:'110px',maxWidth:'150px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.disease}</span>
-                                <div style={{flex:1,height:'10px',background:'#f1f5f9',borderRadius:'99px',overflow:'hidden'}}>
-                                  <div style={{width:`${Math.max(3,pct)}%`,height:'100%',background:barPalette[i%8],borderRadius:'99px',transition:'width 0.7s ease'}}/>
+                                <span style={{fontSize:'12px',fontWeight:'600',color:'#1e293b',minWidth:'100px',maxWidth:'140px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.disease}</span>
+                                <div style={{flex:1,height:'10px',background:'#fef2f2',borderRadius:'99px',overflow:'hidden'}}>
+                                  <div style={{width:`${Math.max(3,pct)}%`,height:'100%',background:'#ef4444',borderRadius:'99px'}}/>
                                 </div>
-                                <span style={{fontSize:'12px',fontWeight:'700',color:barPalette[i%8],width:'26px',textAlign:'right'}}>{d.count}</span>
+                                <span style={{fontSize:'12px',fontWeight:'700',color:'#ef4444',minWidth:'50px',textAlign:'right'}}>{d.mortality_rate}%</span>
                               </div>
                             );
                           })}
@@ -696,13 +811,13 @@ export default function HospitalDashboard() {
                   </div>
                 </div>
 
-                {/* Full dataset table */}
+                {/* Disease breakdown table */}
                 <div className="h-card">
                   <div className="h-card-header">
-                    <span className="h-card-title">Full Dataset</span>
-                    <span style={{fontSize:'12px',color:'#94a3b8'}}>{diseaseSummary.length} diseases · {totalReports} reports</span>
+                    <span className="h-card-title">Full Disease Dataset</span>
+                    <span style={{fontSize:'12px',color:'#94a3b8'}}>{da?.disease_count || diseaseSummary.length} diseases · {da?.total_reports || totalReports} reports</span>
                   </div>
-                  {diseaseSummary.length===0
+                  {(da?.disease_breakdown||[]).length===0 && diseaseSummary.length===0
                     ? <EmptyState icon="📄" title="No data available" sub="Submitted reports will populate this table." />
                     : (
                       <div className="h-table-wrap">
@@ -710,29 +825,45 @@ export default function HospitalDashboard() {
                           <thead>
                             <tr>
                               <th>#</th>
-                              <th>Disease / Condition</th>
-                              <th>Reports</th>
-                              <th>Share</th>
-                              <th>Frequency</th>
+                              <th>Disease</th>
+                              <th>Total</th>
+                              <th>Admitted</th>
+                              <th>Discharged</th>
+                              <th>Deaths</th>
+                              <th>Mortality %</th>
+                              <th>Recovery %</th>
+                              <th>Avg Age</th>
+                              <th>Severity Score</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {diseaseSummary.map((d,i)=>{
-                              const pct=Math.round(d.count/Math.max(totalReports,1)*100);
-                              return (
-                                <tr key={i}>
-                                  <td style={{color:'#94a3b8',fontWeight:'600'}}>{i+1}</td>
-                                  <td><span className="h-td-primary">{d.disease}</span></td>
-                                  <td><span style={{fontWeight:'800',color:barPalette[i%8],fontSize:'15px'}}>{d.count}</span></td>
-                                  <td style={{color:'#64748B'}}>{pct}%</td>
-                                  <td style={{minWidth:'100px'}}>
-                                    <div style={{height:'6px',background:'#f1f5f9',borderRadius:'99px',overflow:'hidden'}}>
-                                      <div style={{width:`${Math.max(2,pct)}%`,height:'100%',background:barPalette[i%8],borderRadius:'99px'}}/>
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
+                            {(da?.disease_breakdown||[]).length > 0
+                              ? da.disease_breakdown.map((d,i)=>(
+                                  <tr key={i}>
+                                    <td style={{color:'#94a3b8',fontWeight:'600'}}>{i+1}</td>
+                                    <td><span className="h-td-primary">{d.disease}</span></td>
+                                    <td><span style={{fontWeight:'800',color:barPalette[i%8]}}>{d.total}</span></td>
+                                    <td>{d.admitted}</td>
+                                    <td style={{color:'#22c55e',fontWeight:'600'}}>{d.discharged}</td>
+                                    <td style={{color:'#ef4444',fontWeight:'600'}}>{d.deaths}</td>
+                                    <td style={{fontWeight:'700',color:d.mortality_rate>20?'#ef4444':'#64748B'}}>{d.mortality_rate}%</td>
+                                    <td style={{color:'#22c55e',fontWeight:'600'}}>{d.recovery_rate}%</td>
+                                    <td>{d.avg_age || '—'}</td>
+                                    <td>{d.avg_severity_score || '—'}</td>
+                                  </tr>
+                                ))
+                              : diseaseSummary.map((d,i)=>{
+                                  const pct=Math.round(d.count/Math.max(totalReports,1)*100);
+                                  return (
+                                    <tr key={i}>
+                                      <td style={{color:'#94a3b8',fontWeight:'600'}}>{i+1}</td>
+                                      <td><span className="h-td-primary">{d.disease}</span></td>
+                                      <td><span style={{fontWeight:'800',color:barPalette[i%8]}}>{d.count}</span></td>
+                                      <td colSpan={7} style={{color:'#94a3b8',fontSize:'12px'}}>{pct}% of all reports</td>
+                                    </tr>
+                                  );
+                                })
+                            }
                           </tbody>
                         </table>
                       </div>
@@ -744,7 +875,7 @@ export default function HospitalDashboard() {
                   <div style={{fontSize:'24px',marginBottom:'8px'}}>📡</div>
                   <div style={{fontWeight:'700',color:'#6C5CE7',marginBottom:'4px'}}>Global Data Access</div>
                   <div style={{fontSize:'13px',color:'#5b21b6',lineHeight:'1.6'}}>
-                    All symptom reports submitted here contribute to the centralised research dataset accessible via the DocTalk API. This data supports outbreak detection, epidemiological modelling, and machine learning research.
+                    All symptom reports and patient data contribute to the centralised research dataset. This data supports outbreak detection, epidemiological modelling, and machine learning research. The analysis includes mortality rates, recovery rates, and demographic breakdowns for each disease.
                   </div>
                 </div>
               </div>
@@ -755,7 +886,7 @@ export default function HospitalDashboard() {
       </div>
 
       {/* ══════════════ REPORT MODAL ══════════════ */}
-      <Modal open={reportModal} onClose={()=>setReportModal(false)} title="Submit Symptom Report" width={620}>
+      <Modal open={reportModal} onClose={()=>setReportModal(false)} title="Submit Symptom Report" width={680}>
         <form onSubmit={handleReportSubmit} className="h-modal-form">
           <div className="h-form-grid-2">
             <FF label="Disease / Condition" required>
@@ -771,32 +902,48 @@ export default function HospitalDashboard() {
             </FF>
           </div>
 
+          {/* Link to registered patient (optional) */}
+          <FF label="Link to Registered Patient (optional)" hint="If this patient is already registered, select their username to link the report to their medical history">
+            <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
+              <select className="h-input" value={rForm.patient_username} onChange={e=>{
+                const sel = e.target.value;
+                setRForm(p=>({...p, patient_username: sel, patient_name: sel || p.patient_name}));
+              }} style={{flex:1}}>
+                <option value="">— Not a registered patient —</option>
+                {patients.map(p=>(
+                  <option key={p.username} value={p.username}>{p.username} - {p.name}</option>
+                ))}
+              </select>
+            </div>
+          </FF>
+
+          {/* Show manual patient fields only when NOT linking to registered patient */}
+          {!rForm.patient_username && (
+            <div className="h-form-grid-3">
+              <FF label="Patient Name">
+                <input className="h-input" placeholder="Optional" value={rForm.patient_name} onChange={e=>setRForm(p=>({...p,patient_name:e.target.value}))}/>
+              </FF>
+              <FF label="Age">
+                <input className="h-input" type="number" placeholder="yrs" min={0} max={150} value={rForm.patient_age} onChange={e=>setRForm(p=>({...p,patient_age:e.target.value}))}/>
+              </FF>
+              <FF label="Gender">
+                <select className="h-input" value={rForm.patient_gender} onChange={e=>setRForm(p=>({...p,patient_gender:e.target.value}))}>
+                  <option value="">—</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </FF>
+            </div>
+          )}
+
           <FF label="Symptoms" required hint="Separate with commas: fever, cough, fatigue">
             <textarea className="h-input" rows={2} placeholder="fever, headache, body ache…" value={rForm.symptoms} onChange={e=>setRForm(p=>({...p,symptoms:e.target.value}))} required/>
           </FF>
 
           <FF label="Novel / Unusual Symptoms" hint="New or emerging symptoms not typically seen — flagged for network-wide alert">
-            <div className="h-novel-wrap">
-              <textarea className="h-input" rows={2} placeholder="Leave blank if none (e.g. purple rash, loss of taste)" value={rForm.new_symptoms} onChange={e=>setRForm(p=>({...p,new_symptoms:e.target.value}))}/>
-            </div>
+            <textarea className="h-input" rows={2} placeholder="Leave blank if none (e.g. purple rash, loss of taste)" value={rForm.new_symptoms} onChange={e=>setRForm(p=>({...p,new_symptoms:e.target.value}))}/>
           </FF>
-
-          <div className="h-form-grid-3">
-            <FF label="Patient Name">
-              <input className="h-input" placeholder="Optional" value={rForm.patient_name} onChange={e=>setRForm(p=>({...p,patient_name:e.target.value}))}/>
-            </FF>
-            <FF label="Age">
-              <input className="h-input" type="number" placeholder="yrs" min={0} max={150} value={rForm.patient_age} onChange={e=>setRForm(p=>({...p,patient_age:e.target.value}))}/>
-            </FF>
-            <FF label="Gender">
-              <select className="h-input" value={rForm.patient_gender} onChange={e=>setRForm(p=>({...p,patient_gender:e.target.value}))}>
-                <option value="">—</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="other">Other</option>
-              </select>
-            </FF>
-          </div>
 
           <div className="h-form-grid-2">
             <FF label="Onset Date">
@@ -807,18 +954,129 @@ export default function HospitalDashboard() {
             </FF>
           </div>
 
-          <label className="h-checkbox-row">
-            <input type="checkbox" checked={rForm.is_anonymous} onChange={e=>setRForm(p=>({...p,is_anonymous:e.target.checked}))}/>
-            <span>Submit anonymously (hide patient identity)</span>
-          </label>
-
           <div className="h-modal-actions">
-            <button type="button" className="h-btn-ghost" onClick={()=>setReportModal(false)}>Cancel</button>
+            <button type="button" className="h-btn-ghost" onClick={()=>{setReportModal(false); setRForm(blankReport);}}>Cancel</button>
             <button type="submit" className="h-btn-primary" disabled={rSubmitting}>
               {rSubmitting ? 'Submitting…' : 'Submit Report'}
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* ══════════════ PATIENT REGISTRATION MODAL ══════════════ */}
+      <Modal open={patientModal} onClose={()=>setPatientModal(false)} title="Register New Patient" width={580}>
+        <form onSubmit={handlePatientSubmit} className="h-modal-form">
+          <FF label="Username" required hint="At least 4 characters — this will be the patient's login ID">
+            <input className="h-input" placeholder="Patient login ID" value={pForm.username} onChange={e=>setPForm(p=>({...p,username:e.target.value}))} required minLength={4}/>
+          </FF>
+          <FF label="Full Name" required hint="At least 2 characters">
+            <input className="h-input" placeholder="Patient's full name" value={pForm.name} onChange={e=>setPForm(p=>({...p,name:e.target.value}))} required minLength={2}/>
+          </FF>
+          <div className="h-form-grid-2">
+            <FF label="Email"><input className="h-input" type="email" placeholder="patient@example.com" value={pForm.email} onChange={e=>setPForm(p=>({...p,email:e.target.value}))}/></FF>
+            <FF label="Mobile"><input className="h-input" placeholder="+91 98765 43210" value={pForm.mobile} onChange={e=>setPForm(p=>({...p,mobile:e.target.value}))}/></FF>
+          </div>
+          <div className="h-form-grid-2">
+            <FF label="Gender">
+              <select className="h-input" value={pForm.gender} onChange={e=>setPForm(p=>({...p,gender:e.target.value}))}>
+                <option value="">—</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </FF>
+            <FF label="Blood Group">
+              <select className="h-input" value={pForm.blood_group} onChange={e=>setPForm(p=>({...p,blood_group:e.target.value}))}>
+                <option value="">—</option>
+                <option value="A+">A+</option>
+                <option value="A-">A-</option>
+                <option value="B+">B+</option>
+                <option value="B-">B-</option>
+                <option value="AB+">AB+</option>
+                <option value="AB-">AB-</option>
+                <option value="O+">O+</option>
+                <option value="O-">O-</option>
+              </select>
+            </FF>
+          </div>
+          <FF label="Address"><input className="h-input" placeholder="Patient's address" value={pForm.address} onChange={e=>setPForm(p=>({...p,address:e.target.value}))}/></FF>
+          <div className="h-modal-actions">
+            <button type="button" className="h-btn-ghost" onClick={()=>setPatientModal(false)}>Cancel</button>
+            <button type="submit" className="h-btn-primary" disabled={pSubmitting}>
+              {pSubmitting ? 'Registering…' : 'Register Patient'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ══════════════ PATIENT DETAIL MODAL ══════════════ */}
+      <Modal open={patientDetailModal} onClose={()=>{setPatientDetailModal(false); setPatientDetail(null);}} title="Patient Medical History" width={700}>
+        {patientDetailLoading ? (
+          <div style={{textAlign:'center',padding:'40px'}}>
+            <div className="h-spinner"/><p style={{marginTop:'12px',color:'#64748B'}}>Loading patient history…</p>
+          </div>
+        ) : patientDetail ? (
+          <div>
+            {/* Patient info */}
+            <div style={{display:'flex',alignItems:'center',gap:'12px',marginBottom:'16px',padding:'12px',background:'#f8fafc',borderRadius:'8px'}}>
+              <div style={{width:'48px',height:'48px',borderRadius:'50%',background:'#6C5CE7',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:'700',fontSize:'18px'}}>
+                {(patientDetail.patient?.name||'?')[0]?.toUpperCase()}
+              </div>
+              <div>
+                <div style={{fontWeight:'700',color:'#0f172a'}}>{patientDetail.patient?.name}</div>
+                <div style={{fontSize:'12px',color:'#64748B'}}>@{patientDetail.patient?.username} · {patientDetail.patient?.gender||'—'} · {patientDetail.patient?.blood_group||'—'}</div>
+              </div>
+              <div style={{marginLeft:'auto',textAlign:'right'}}>
+                <div style={{fontWeight:'700',fontSize:'18px',color:'#6C5CE7'}}>{patientDetail.total_reports}</div>
+                <div style={{fontSize:'11px',color:'#94a3b8'}}>Reports</div>
+              </div>
+            </div>
+
+            {/* Symptom reports linked to this patient */}
+            <h4 style={{color:'#0f172a',marginBottom:'8px',fontSize:'14px'}}>📋 Symptom Reports</h4>
+            {(patientDetail.reports||[]).length === 0 ? (
+              <div style={{textAlign:'center',padding:'20px',color:'#94a3b8',fontSize:'13px'}}>No symptom reports linked to this patient yet.</div>
+            ) : (
+              <div style={{maxHeight:'250px',overflowY:'auto',marginBottom:'12px'}}>
+                <table className="h-table" style={{fontSize:'12px'}}>
+                  <thead>
+                    <tr>
+                      <th>Disease</th>
+                      <th>Severity</th>
+                      <th>Status</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {patientDetail.reports.map((r,i)=>(
+                      <tr key={r.id||i}>
+                        <td><span style={{fontWeight:'600'}}>{r.disease_name}</span></td>
+                        <td><SevBadge level={r.severity}/></td>
+                        <td style={{color: r.status==='deceased'?'#ef4444':r.status==='discharged'?'#22c55e':'#3b82f6',fontWeight:'600'}}>{r.status}</td>
+                        <td style={{color:'#94a3b8'}}>{fmt(r.created_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Medical history records */}
+            <h4 style={{color:'#0f172a',marginBottom:'8px',fontSize:'14px'}}>📜 Medical History</h4>
+            {(patientDetail.medical_history||[]).length === 0 ? (
+              <div style={{textAlign:'center',padding:'20px',color:'#94a3b8',fontSize:'13px'}}>No additional medical history records.</div>
+            ) : (
+              <div style={{maxHeight:'200px',overflowY:'auto'}}>
+                {patientDetail.medical_history.map((h,i)=>(
+                  <div key={h.id||i} style={{padding:'8px 12px',borderLeft:'3px solid #6C5CE7',background:'#f8fafc',marginBottom:'6px',borderRadius:'0 6px 6px 0'}}>
+                    <div style={{fontWeight:'600',fontSize:'13px',color:'#0f172a'}}>{h.title}</div>
+                    <div style={{fontSize:'11px',color:'#64748B'}}>{h.history_type} · {h.record_date ? fmt(h.record_date) : '—'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
       </Modal>
 
       {/* ══════════════ NEWS MODAL ══════════════ */}

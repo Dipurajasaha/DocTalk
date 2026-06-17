@@ -6,7 +6,7 @@ export const authApi = {
   loginPatient: (username, password) => apiClient.post('/api/auth/patient/login', { username, password }, { retries: 0 }),
   loginDoctor: (doctorId, password) => apiClient.post('/api/auth/doctor/login', { doctor_id: doctorId, password }, { retries: 0 }),
   signupPatient: (username, name, password) => apiClient.post('/api/auth/patient/signup', { username, name, password }, { retries: 0 }),
-  signupDoctor: (doctorId, name, password) => apiClient.post('/api/auth/doctor/signup', { doctor_id: doctorId, name, password }, { retries: 0 }),
+  signupDoctor: (doctorId, name, password, extra = {}) => apiClient.post('/api/auth/doctor/signup', { doctor_id: doctorId, name, password, ...extra }, { retries: 0 }),
   me: (token) => apiClient.get('/api/me', { auth: true, token, retries: 0 }),
 };
 
@@ -75,6 +75,13 @@ export const hospitalApi = {
     return apiClient.get(`/api/hospital/public/reports/global?${params}`, { retries: 1 });
   },
   getDiseaseSummary: () => apiClient.get('/api/hospital/public/disease-summary', { retries: 1 }),
+  registerPatient: (data) => apiClient.post('/api/hospital/register-patient', data, { retries: 0, auth: true }),
+  listPatients: () => apiClient.get('/api/hospital/patients', { retries: 1, auth: true }),
+  updateReportStatus: (reportId, status) => apiClient.put(`/api/hospital/reports/${encodeURIComponent(reportId)}/status`, { status }, { retries: 0, auth: true }),
+  getDetailedAnalysis: () => apiClient.get('/api/hospital/detailed-analysis', { retries: 1, auth: true }),
+  getGlobalDetailedAnalysis: () => apiClient.get('/api/hospital/public/detailed-analysis/global', { retries: 1 }),
+  getPatientMedicalHistory: (username) => apiClient.get(`/api/hospital/patients/${encodeURIComponent(username)}/medical-history`, { retries: 1, auth: true }),
+  getPatientReports: (username) => apiClient.get(`/api/hospital/reports/patient/${encodeURIComponent(username)}`, { retries: 1, auth: true }),
 };
 
 export const doctorApi = {

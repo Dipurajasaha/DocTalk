@@ -226,7 +226,12 @@ export default function Login() {
       } else if (category === 'patient') {
         data = await authApi.signupPatient(username, name, password);
       } else {
-        data = await authApi.signupDoctor(username, name, password);
+        // Doctor registration: pass all extra fields
+        const extraFields = {};
+        ['specialization','registration_number','hospital_name','hospital_location','mobile','email','gender','bio','experience','address'].forEach(k => {
+          const v = fd.get(k); if (v) extraFields[k] = v;
+        });
+        data = await authApi.signupDoctor(username, name, password, extraFields);
       }
 
       if (data?.access_token) {

@@ -41,20 +41,41 @@ class AuthService:
         )
         return self._issue_token(normalized_username, "patient")
 
-    async def register_doctor(self, doctor_id: str, name: str, password: str) -> AuthResult:
+    async def register_doctor(self, doctor_id: str, name: str, password: str, **extra: Any) -> AuthResult:
         normalized_doctor_id = doctor_id.strip()
         normalized_name = name.strip()
         self._validate_signup_input(normalized_doctor_id, normalized_name, password)
 
         await self._ensure_user_available(normalized_doctor_id)
         hashed_password = hash_password(password)
-        await self._safe_create_doctor(
-            {
-                "doctorId": normalized_doctor_id,
-                "name": normalized_name,
-                "password": hashed_password,
-            }
-        )
+
+        create_data: dict[str, Any] = {
+            "doctorId": normalized_doctor_id,
+            "name": normalized_name,
+            "password": hashed_password,
+        }
+
+        # Map snake_case extra fields to Prisma camelCase
+        field_map = {
+            "specialization": "specialization",
+            "registration_number": "registrationNumber",
+            "hospital_name": "hospitalName",
+            "hospital_location": "hospitalLocation",
+            "mobile": "mobile",
+            "email": "email",
+            "gender": "gender",
+            "address": "address",
+            "bio": "bio",
+            "experience": "experience",
+        }
+        for api_key, prisma_key in field_map.items():
+            value = extra.get(api_key)
+            if value is not None:
+                if api_key == "gender" and isinstance(value, str):
+                    value = value.lower()
+                create_data[prisma_key] = value
+
+        await self._safe_create_doctor(create_data)
         return self._issue_token(normalized_doctor_id, "doctor")
 
     async def login_patient(self, username: str, password: str) -> AuthResult:
