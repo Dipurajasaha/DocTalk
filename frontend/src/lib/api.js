@@ -82,6 +82,8 @@ export const hospitalApi = {
   getGlobalDetailedAnalysis: () => apiClient.get('/api/hospital/public/detailed-analysis/global', { retries: 1 }),
   getPatientMedicalHistory: (username) => apiClient.get(`/api/hospital/patients/${encodeURIComponent(username)}/medical-history`, { retries: 1, auth: true }),
   getPatientReports: (username) => apiClient.get(`/api/hospital/reports/patient/${encodeURIComponent(username)}`, { retries: 1, auth: true }),
+  getProfile: () => apiClient.get('/api/hospital/profile', { retries: 0, auth: true }),
+  updateProfile: (data) => apiClient.put('/api/hospital/profile', data, { retries: 0, auth: true }),
 };
 
 export const doctorApi = {

@@ -259,6 +259,10 @@ export default function HospitalDashboard() {
   const recentReports  = dashboard?.recent_reports   || [];
   const totalReports   = Object.values(sevBreakdown).reduce((a,b)=>a+b,0);
   const criticalCount  = (sevBreakdown.critical||0)+(sevBreakdown.severe||0);
+  const totalBeds      = dashboard?.total_beds;
+  const availableBeds  = dashboard?.available_beds;
+  const occupiedBeds   = totalBeds != null ? Math.max(0, totalBeds - (availableBeds ?? 0)) : null;
+  const hospitalSpecialties = dashboard?.specialties || [];
 
   // filtered reports
   const filteredReports = reports.filter(r=>{
@@ -269,6 +273,100 @@ export default function HospitalDashboard() {
     return matchSearch && matchSev;
   });
 
+  // Settings state
+  const [profile, setProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const blankSpecialty = { name: '', doctors: 0 };
+  const [specialties, setSpecialties] = useState([]);
+  const blankSettings = {
+    total_beds: '',
+    available_beds: '',
+    name: '',
+    phone: '',
+    email: '',
+    address: '',
+    city: '',
+    state: '',
+    website: '',
+  };
+  const [settingsForm, setSettingsForm] = useState(blankSettings);
+
+  const loadProfile = useCallback(async () => {
+    setProfileLoading(true);
+    try {
+      const p = await hospitalApi.getProfile();
+      setProfile(p);
+      setSettingsForm({
+        total_beds: p.total_beds ?? '',
+        available_beds: p.available_beds ?? '',
+        name: p.name ?? '',
+        phone: p.phone ?? '',
+        email: p.email ?? '',
+        address: p.address ?? '',
+        city: p.city ?? '',
+        state: p.state ?? '',
+        website: p.website ?? '',
+      });
+      setSpecialties(p.specialties && p.specialties.length > 0 ? p.specialties.map(s => ({...s})) : [{ name: '', doctors: 1 }]);
+    } catch (err) {
+      // ignore
+    } finally { setProfileLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'settings') loadProfile();
+  }, [tab, loadProfile]);
+
+  const handleSettingsSave = async () => {
+    setProfileSaving(true);
+    try {
+      const totalBeds = settingsForm.total_beds !== '' ? parseInt(settingsForm.total_beds, 10) : undefined;
+      const availableBeds = settingsForm.available_beds !== '' ? parseInt(settingsForm.available_beds, 10) : undefined;
+      if (totalBeds != null && availableBeds != null && availableBeds > totalBeds) {
+        showToast('Available beds cannot exceed total beds', 'error');
+        return;
+      }
+
+      const payload = {
+        total_beds: totalBeds,
+        available_beds: availableBeds,
+        specialties: specialties.filter(s => s.name.trim()),
+        name: settingsForm.name?.trim() || undefined,
+        phone: settingsForm.phone?.trim() || undefined,
+        email: settingsForm.email?.trim() || undefined,
+        address: settingsForm.address?.trim() || undefined,
+        city: settingsForm.city?.trim() || undefined,
+        state: settingsForm.state?.trim() || undefined,
+        website: settingsForm.website?.trim() || undefined,
+      };
+      const updated = await hospitalApi.updateProfile(payload);
+      setProfile(updated);
+      setDashboard((prev) => prev ? {
+        ...prev,
+        hospital_name: updated.name || prev.hospital_name,
+        total_beds: updated.total_beds,
+        available_beds: updated.available_beds,
+        specialties: updated.specialties || [],
+      } : prev);
+      showToast('Hospital settings saved successfully!');
+    } catch (err) {
+      showToast(err?.message || 'Failed to save settings', 'error');
+    } finally { setProfileSaving(false); }
+  };
+
+  const addSpecialty = () => {
+    setSpecialties(prev => [...prev, { name: '', doctors: 1 }]);
+  };
+
+  const removeSpecialty = (idx) => {
+    setSpecialties(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const updateSpecialty = (idx, field, value) => {
+    setSpecialties(prev => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s));
+  };
+
   // ── nav items ─────────────────────────────────────────────────────────────
   const navItems = [
     { id:'overview',  icon:'🏠', label:'Overview'         },
@@ -276,6 +374,7 @@ export default function HospitalDashboard() {
     { id:'news',      icon:'📰', label:'News & Updates'   },
     { id:'patients',  icon:'👤', label:'Patients'         },
     { id:'analysis',  icon:'📊', label:'Disease Analysis' },
+    { id:'settings',  icon:'⚙️', label:'Settings'         },
   ];
 
   // ── loading / error screens ───────────────────────────────────────────────
@@ -390,6 +489,57 @@ export default function HospitalDashboard() {
                   </div>
                 ))}
               </div>
+
+              {(totalBeds != null || hospitalSpecialties.length > 0) && (
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:'16px',marginBottom:'20px'}}>
+                  {totalBeds != null && (
+                    <div className="h-card">
+                      <div className="h-card-header">
+                        <span className="h-card-title">🛏️ Bed Capacity</span>
+                        <button className="h-card-link" onClick={()=>setTab('settings')}>Edit →</button>
+                      </div>
+                      <div style={{display:'flex',gap:'20px',alignItems:'center',padding:'8px 0'}}>
+                        <div>
+                          <div style={{fontSize:'28px',fontWeight:'800',color:'#6C5CE7'}}>{availableBeds ?? '—'}</div>
+                          <div style={{fontSize:'12px',color:'#64748B'}}>Available beds</div>
+                        </div>
+                        <div style={{width:'1px',height:'48px',background:'#e2e8f0'}}/>
+                        <div>
+                          <div style={{fontSize:'28px',fontWeight:'800',color:'#0f172a'}}>{totalBeds}</div>
+                          <div style={{fontSize:'12px',color:'#64748B'}}>Total capacity</div>
+                        </div>
+                        <div style={{width:'1px',height:'48px',background:'#e2e8f0'}}/>
+                        <div>
+                          <div style={{fontSize:'28px',fontWeight:'800',color: occupiedBeds > totalBeds * 0.85 ? '#ef4444' : '#22c55e'}}>
+                            {occupiedBeds}
+                          </div>
+                          <div style={{fontSize:'12px',color:'#64748B'}}>Occupied</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {hospitalSpecialties.length > 0 && (
+                    <div className="h-card">
+                      <div className="h-card-header">
+                        <span className="h-card-title">🔬 Specialties</span>
+                        <button className="h-card-link" onClick={()=>setTab('settings')}>Edit →</button>
+                      </div>
+                      <div style={{display:'flex',flexDirection:'column',gap:'8px',padding:'4px 0'}}>
+                        {hospitalSpecialties.slice(0, 6).map((s, idx) => (
+                          <div key={`${s.name}-${idx}`} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 10px',background:'#f8fafc',borderRadius:'8px'}}>
+                            <span style={{fontSize:'13px',fontWeight:'600',color:'#0f172a'}}>{s.name}</span>
+                            <span style={{fontSize:'12px',fontWeight:'700',color:'#6C5CE7'}}>{s.doctors ?? 0} doctor{(s.doctors ?? 0) !== 1 ? 's' : ''}</span>
+                          </div>
+                        ))}
+                        {hospitalSpecialties.length > 6 && (
+                          <span style={{fontSize:'12px',color:'#94a3b8'}}>+{hospitalSpecialties.length - 6} more specialties</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="h-overview-grid">
                 <div className="h-card">
@@ -701,6 +851,106 @@ export default function HospitalDashboard() {
                   </table>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ══════════════ SETTINGS ══════════════ */}
+          {tab==='settings' && (
+            <div className="h-tab-content">
+              <div className="h-section-bar">
+                <div>
+                  <h2 className="h-section-title">Hospital Settings</h2>
+                  <p className="h-section-sub">Manage hospital capacity, specialties, and contact information</p>
+                </div>
+                <button className="h-btn-primary" onClick={handleSettingsSave} disabled={profileSaving}>
+                  {profileSaving ? 'Saving…' : '💾 Save Settings'}
+                </button>
+              </div>
+
+              {profileLoading ? (
+                <div className="h-splash" style={{padding:'40px'}}>
+                  <div className="h-spinner"/><p>Loading settings…</p>
+                </div>
+              ) : (
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px'}}>
+                  {/* Bed Capacity */}
+                  <div className="h-card">
+                    <div className="h-card-header"><span className="h-card-title">🛏️ Bed Capacity</span></div>
+                    <div style={{padding:'8px 0'}}>
+                      <div className="h-form-grid-2">
+                        <FF label="Total Beds" hint="Total bed capacity of your hospital">
+                          <input className="h-input" type="number" min={0} placeholder="e.g. 250" value={settingsForm.total_beds} onChange={e=>setSettingsForm(p=>({...p,total_beds:e.target.value}))}/>
+                        </FF>
+                        <FF label="Available Beds" hint="Currently available (unoccupied)">
+                          <input className="h-input" type="number" min={0} placeholder="e.g. 45" value={settingsForm.available_beds} onChange={e=>setSettingsForm(p=>({...p,available_beds:e.target.value}))}/>
+                        </FF>
+                      </div>
+                      {settingsForm.total_beds && (
+                        <div style={{marginTop:'12px',padding:'10px',background:'#f8fafc',borderRadius:'8px',fontSize:'13px'}}>
+                          <span style={{fontWeight:'600',color:'#0f172a'}}>Occupancy: </span>
+                          <span style={{fontWeight:'700',color:'#6C5CE7'}}>
+                            {parseInt(settingsForm.total_beds) - parseInt(settingsForm.available_beds||0)} / {settingsForm.total_beds} beds filled
+                          </span>
+                          <span style={{fontSize:'11px',color:'#94a3b8',marginLeft:'8px'}}>
+                            ({Math.round(((parseInt(settingsForm.total_beds)-parseInt(settingsForm.available_beds||0))/parseInt(settingsForm.total_beds))*100)}%)
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Specialties */}
+                  <div className="h-card">
+                    <div className="h-card-header">
+                      <span className="h-card-title">🔬 Specialties & Specialists</span>
+                      <button className="h-card-link" onClick={addSpecialty}>+ Add</button>
+                    </div>
+                    <div style={{padding:'4px 0'}}>
+                      {specialties.map((s, idx) => (
+                        <div key={idx} style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px',padding:'8px',background:'#f8fafc',borderRadius:'8px',border:'1px solid #e2e8f0'}}>
+                          <div style={{flex:1}}>
+                            <input className="h-input" style={{fontSize:'13px',padding:'8px 10px'}} placeholder="Specialty name (e.g. Cardiology)" value={s.name} onChange={e=>updateSpecialty(idx, 'name', e.target.value)}/>
+                          </div>
+                          <div style={{width:'100px'}}>
+                            <input className="h-input" style={{fontSize:'13px',padding:'8px 10px',textAlign:'center'}} type="number" min={0} placeholder="Doctors" value={s.doctors} onChange={e=>updateSpecialty(idx, 'doctors', parseInt(e.target.value)||0)}/>
+                          </div>
+                          <button style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:'18px',padding:'4px'}} onClick={()=>removeSpecialty(idx)}>✕</button>
+                        </div>
+                      ))}
+                      {specialties.length === 0 && (
+                        <div style={{textAlign:'center',padding:'16px',color:'#94a3b8',fontSize:'13px'}}>
+                          No specialties configured yet.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Contact Information */}
+                  <div className="h-card" style={{gridColumn:'span 2'}}>
+                    <div className="h-card-header"><span className="h-card-title">📞 Contact Information</span></div>
+                    <div className="h-form-grid-3" style={{padding:'8px 0'}}>
+                      <FF label="Hospital Name">
+                        <input className="h-input" placeholder="Full hospital name" value={settingsForm.name} onChange={e=>setSettingsForm(p=>({...p,name:e.target.value}))}/>
+                      </FF>
+                      <FF label="Phone">
+                        <input className="h-input" placeholder="+91 XXXXXXXXXX" value={settingsForm.phone} onChange={e=>setSettingsForm(p=>({...p,phone:e.target.value}))}/>
+                      </FF>
+                      <FF label="Email">
+                        <input className="h-input" type="email" placeholder="admin@hospital.com" value={settingsForm.email} onChange={e=>setSettingsForm(p=>({...p,email:e.target.value}))}/>
+                      </FF>
+                      <FF label="Address">
+                        <input className="h-input" placeholder="Street address" value={settingsForm.address} onChange={e=>setSettingsForm(p=>({...p,address:e.target.value}))}/>
+                      </FF>
+                      <FF label="City">
+                        <input className="h-input" placeholder="City" value={settingsForm.city} onChange={e=>setSettingsForm(p=>({...p,city:e.target.value}))}/>
+                      </FF>
+                      <FF label="State">
+                        <input className="h-input" placeholder="State" value={settingsForm.state} onChange={e=>setSettingsForm(p=>({...p,state:e.target.value}))}/>
+                      </FF>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

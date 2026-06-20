@@ -19,7 +19,12 @@ class PromptService:
     )
     _XRAY_TEMPLATE = PromptTemplate.from_template(
         "Analyze the medical image for educational support only. {language_hint} {context_block}"
-        "Return valid JSON only with keys: success, summary, findings, recommendations, warnings, metadata. "
+        "Return valid JSON only with the following exact keys: "
+        "success (bool), summary (str), findings (str), analysis (str), "
+        "has_defect (bool), severity (int 0-10), defect_type (str), "
+        "recommendations (list of strings), warnings (list of strings), "
+        "images (object with optional defect_marked and healthy_version URLs), "
+        "metadata (object). "
         "Do not provide a diagnosis. Emphasize observable findings and safe recommendations."
     )
     _CONSULTATION_TEMPLATE = PromptTemplate.from_template(

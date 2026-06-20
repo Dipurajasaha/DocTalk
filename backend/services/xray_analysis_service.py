@@ -48,15 +48,23 @@ class XRayAnalysisService:
                 temperature=0.2,
                 max_output_tokens=1024,
             )
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "X-ray analysis failed; falling back to OCR summary",
-                extra={"component": "xray_analysis", "file_path": str(image_path)},
+                extra={"component": "xray_analysis", "file_path": str(image_path), "error": str(exc)},
+                exc_info=True,
             )
             fallback_text = await self._fallback_from_ocr(image_path)
             merged_metadata = dict(metadata or {})
             merged_metadata.setdefault("source", "xray_analysis")
             merged_metadata["fallback"] = "ocr"
+            merged_metadata["vision_error"] = str(exc)
+            warnings = ["X-ray analysis fallback used."]
+            if "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc):
+                warnings.append(
+                    "Gemini vision quota exceeded for the configured model. "
+                    "Try GEMINI_MODEL=gemini-2.5-flash in .env and restart the backend."
+                )
             return {
                 "success": True,
                 "summary": fallback_text,
@@ -66,7 +74,7 @@ class XRayAnalysisService:
                 "severity": 0,
                 "defect_type": "",
                 "recommendations": [],
-                "warnings": ["X-ray analysis fallback used."],
+                "warnings": warnings,
                 "images": {},
                 "metadata": merged_metadata,
             }

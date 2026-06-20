@@ -10,7 +10,7 @@ configured exclusively by three environment variables:
 Changing these three values is sufficient to switch providers
 (OpenRouter, LongCat, self-hosted, etc.).
 
-Vision is controlled separately via VISION_ENDPOINT (gemini | imagga).
+Vision uses the native Google GenAI SDK (google-genai) with GEMINI_API_KEY.
 Embeddings use GEMINI_API_KEY / GEMINI_EMBED_MODEL / GEMINI_BASE_URL.
 """
 
@@ -85,7 +85,40 @@ def _normalize_text(value: str) -> str:
     cleaned = str(value or "").strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`").strip()
+    # Remove leading "json" language marker that Gemini sometimes prefixes
+    if cleaned.startswith("json") and len(cleaned) > 4 and cleaned[4:5] in ("\n", "\r", " ", "{"):
+        cleaned = cleaned[4:].strip()
     return cleaned
+
+
+def _extract_json(text: str) -> dict[str, Any] | None:
+    """Try to extract and parse a JSON object from text.
+    
+    Handles Gemini's tendency to prefix responses with ```json, json, etc.
+    """
+    cleaned = _normalize_text(text)
+    
+    # Try direct parse first
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    
+    # Find the first '{' and last '}' to extract JSON object
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        json_str = cleaned[start:end + 1]
+        try:
+            parsed = json.loads(json_str)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +189,7 @@ async def complete_image_json(
 ) -> dict[str, Any]:
     """Analyse an image using the vision endpoint configured by VISION_ENDPOINT.
 
-    VISION_ENDPOINT=gemini  → uses Gemini via OpenAI-compatible vision API
+    VISION_ENDPOINT=gemini  → uses native Google GenAI SDK
     VISION_ENDPOINT=imagga  → uses Imagga REST API (tagging/categorization)
     """
     endpoint = str(settings.vision_endpoint or "gemini").strip().lower()
@@ -164,7 +197,7 @@ async def complete_image_json(
     if endpoint == "imagga":
         return await _vision_imagga(image_path)
 
-    # Default: gemini (OpenAI-compatible vision via GEMINI credentials)
+    # Default: gemini (native google.genai SDK)
     return await _vision_gemini(
         prompt=prompt,
         image_path=image_path,
@@ -184,69 +217,68 @@ async def _vision_gemini(
     temperature: float = 0.2,
     max_output_tokens: int = 1024,
 ) -> dict[str, Any]:
-    """Vision analysis using Gemini via its OpenAI-compatible API."""
+    """Vision analysis using the native Google GenAI SDK (google-genai)."""
+    import asyncio
+
+    from google import genai as genai_sdk
+    from google.genai import types as genai_types
+
     gemini_api_key = str(settings.gemini_api_key or "").strip()
-    gemini_base_url = str(settings.gemini_base_url or "").strip() or None
     gemini_model = model or str(settings.gemini_model or "").strip() or "gemini-2.0-flash"
 
     if not gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is not set — required for vision (VISION_ENDPOINT=gemini)")
 
-    client = AsyncOpenAI(api_key=gemini_api_key, base_url=gemini_base_url)
+    client = genai_sdk.Client(api_key=gemini_api_key)
 
     path = Path(image_path)
     image_bytes = path.read_bytes()
-    image_mime = "image/png"
+
+    # Determine mime type
     suffix = path.suffix.lower()
-    if suffix in {".jpg", ".jpeg"}:
-        image_mime = "image/jpeg"
-    elif suffix == ".gif":
-        image_mime = "image/gif"
-    elif suffix == ".webp":
-        image_mime = "image/webp"
+    mime_map = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+        ".tiff": "image/tiff",
+        ".tif": "image/tiff",
+    }
+    image_mime = mime_map.get(suffix, "image/png")
 
-    user_content: list[dict[str, Any]] = []
+    # Build content parts
+    contents_parts = []
     if context_text:
-        user_content.append({"type": "text", "text": str(context_text)})
-    user_content.append({"type": "text", "text": "Analyze the attached medical image and return valid JSON only."})
-    user_content.append(
-        {
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:{image_mime};base64,{base64.b64encode(image_bytes).decode('ascii')}",
-            },
-        }
-    )
+        contents_parts.append(str(context_text))
+    contents_parts.append(prompt)
+    image_part = genai_types.Part.from_bytes(data=image_bytes, mime_type=image_mime)
+    contents_parts.append(image_part)
 
-    text = ""
-    try:
-        response = await client.chat.completions.create(
+    def _sync_call() -> str:
+        response = client.models.generate_content(
             model=gemini_model,
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": user_content},
-            ],
-            temperature=temperature,
-            max_tokens=max_output_tokens,
-            response_format={"type": "json_object"},
+            contents=contents_parts,
+            config=genai_types.GenerateContentConfig(
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+            ),
         )
-        choice = response.choices[0] if response.choices else None
-        raw = getattr(getattr(choice, "message", None), "content", "") if choice else ""
-        if isinstance(raw, list):
-            raw = "".join(
-                str(item.get("text") or item.get("content") or "")
-                for item in raw if isinstance(item, dict)
-            )
-        text = _normalize_text(str(raw or ""))
-    except Exception as exc:
-        raise RuntimeError(f"Gemini vision analysis failed: {exc}") from exc
+        return response.text or ""
 
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except Exception:
-        pass
+    # Run the synchronous Google SDK call in a thread pool
+    text = await asyncio.to_thread(_sync_call)
+
+    # Robust JSON extraction
+    parsed = _extract_json(text)
+    if parsed is not None:
+        return parsed
+
+    # If we got text but it wasn't valid JSON, wrap it
+    normalized = _normalize_text(text)
+    if normalized:
+        return {"raw_response": normalized, "analysis": normalized}
 
     return {}
 

@@ -28,7 +28,6 @@ from ..core.config import settings
 from ..core.security import CurrentUser, get_current_user
 from ..ai.core_services.llm_client import (
     _normalize_text,
-    get_llm_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,37 +116,7 @@ def _detect_mime(suffix: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Build vision messages for OpenAI-compatible providers
-# ---------------------------------------------------------------------------
-
-def _build_vision_messages(
-    image_bytes: bytes,
-    mime_type: str,
-    prompt: str | None = None,
-) -> list[dict[str, Any]]:
-    """Build a messages list suitable for any OpenAI-compatible vision API."""
-    b64_data = base64.b64encode(image_bytes).decode("ascii")
-    effective_prompt = prompt or _MEDICAL_ANALYSIS_PROMPT
-
-    user_content: list[dict[str, Any]] = [
-        {
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:{mime_type};base64,{b64_data}",
-                "detail": "high",
-            },
-        },
-        {"type": "text", "text": "Return valid JSON only."},
-    ]
-
-    return [
-        {"role": "system", "content": effective_prompt},
-        {"role": "user", "content": user_content},
-    ]
-
-
-# ---------------------------------------------------------------------------
-# Vision provider: Gemini (OpenAI-compatible vision API)
+# Vision provider: Gemini (native Google GenAI SDK)
 # ---------------------------------------------------------------------------
 
 async def _analyze_with_gemini_vision(
@@ -156,34 +125,39 @@ async def _analyze_with_gemini_vision(
     prompt: str | None = None,
     model: str | None = None,
 ) -> ImageAnalysisResponse:
-    """Analyze image using Gemini via its OpenAI-compatible vision API."""
-    from openai import AsyncOpenAI
+    """Analyze image using the native Google GenAI SDK (google-genai)."""
+    import asyncio
+
+    from google import genai as genai_sdk
+    from google.genai import types as genai_types
 
     gemini_api_key = str(settings.gemini_api_key or "").strip()
-    gemini_base_url = str(settings.gemini_base_url or "").strip() or None
     effective_model = model or str(settings.gemini_model or "").strip() or "gemini-2.0-flash"
 
     if not gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is not set — required for vision (VISION_ENDPOINT=gemini)")
 
-    client = AsyncOpenAI(api_key=gemini_api_key, base_url=gemini_base_url)
-    messages = _build_vision_messages(image_bytes, mime_type, prompt)
+    client = genai_sdk.Client(api_key=gemini_api_key)
+    effective_prompt = prompt or _MEDICAL_ANALYSIS_PROMPT
 
-    response = await client.chat.completions.create(
-        model=effective_model,
-        messages=messages,
-        temperature=0.2,
-        max_tokens=2048,
-        response_format={"type": "json_object"},
-    )
-    choice = response.choices[0] if response.choices else None
-    content = getattr(getattr(choice, "message", None), "content", "") if choice else ""
-    if isinstance(content, list):
-        content = "".join(
-            str(item.get("text") or item.get("content") or "")
-            for item in content if isinstance(item, dict)
+    # Build content parts
+    image_part = genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+    contents_parts = [effective_prompt, "Return valid JSON only.", image_part]
+
+    def _sync_call() -> str:
+        response = client.models.generate_content(
+            model=effective_model,
+            contents=contents_parts,
+            config=genai_types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=2048,
+            ),
         )
-    raw_text = _normalize_text(str(content or ""))
+        return response.text or ""
+
+    # Run the synchronous Google SDK call in a thread pool
+    text = await asyncio.to_thread(_sync_call)
+    raw_text = _normalize_text(text)
 
     # Try to parse JSON
     try:

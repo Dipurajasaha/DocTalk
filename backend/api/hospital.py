@@ -8,6 +8,8 @@ from ..schemas.hospital_schemas import (
     HospitalLoginRequest,
     HospitalNewsCreate,
     HospitalNewsResponse,
+    HospitalProfileUpdate,
+    HospitalProfileResponse,
     HospitalRegisterRequest,
     HospitalTokenResponse,
     SymptomReportCreate,
@@ -194,6 +196,34 @@ async def disease_summary(
 ) -> list[dict]:
     """Public endpoint to get aggregated disease counts."""
     return await service.get_disease_summary()
+
+
+
+
+# ─────────────────────── HOSPITAL PROFILE ───────────────────────
+
+
+@router.put("/profile", response_model=HospitalProfileResponse)
+async def update_hospital_profile(
+    payload: HospitalProfileUpdate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: HospitalService = Depends(get_hospital_service),
+) -> dict:
+    if current_user.role != "hospital":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only hospitals can update their profile")
+    return await service.update_hospital_profile(current_user.user_id, payload.model_dump(exclude_none=True))
+
+
+@router.get("/profile", response_model=HospitalProfileResponse)
+async def get_hospital_profile(
+    current_user: CurrentUser = Depends(get_current_user),
+    service: HospitalService = Depends(get_hospital_service),
+) -> dict:
+    """Get the hospital's own profile."""
+    if current_user.role != "hospital":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only hospitals can view their profile")
+    hospital = await service._get_hospital(current_user.user_id)
+    return service._format_hospital_profile(hospital)
 
 
 # ─────────────────────── DASHBOARD ───────────────────────

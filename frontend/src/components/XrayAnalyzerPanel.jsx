@@ -1,5 +1,65 @@
 import { useState } from 'react';
 
+const isJsonLike = (text) => {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (trimmed.startsWith('```json')) return true;
+  if (trimmed.startsWith('{')) return true;
+  if (trimmed.startsWith('[')) return true;
+  return false;
+};
+
+const tryParseJson = (text) => {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const stripped = trimmed.startsWith('```')
+    ? trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+    : trimmed;
+  try {
+    const parsed = JSON.parse(stripped);
+    if (parsed && typeof parsed === 'object') return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const getCleanAnalysisText = (analysis) => {
+  if (!analysis) return '';
+  const trimmed = analysis.trim();
+  if (isJsonLike(trimmed)) {
+    const parsed = tryParseJson(trimmed);
+    if (parsed) {
+      return parsed.analysis || parsed.findings || parsed.summary || parsed.description || JSON.stringify(parsed, null, 2);
+    }
+
+    // Fallback: Regex extraction for truncated JSON
+    const getValFor = (key) => {
+      const regex = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`, 'i');
+      const match = trimmed.match(regex);
+      if (match && match[1]) {
+        let val = match[1];
+        // Clean up unmatched escape quotes or JSON syntax characters at the end
+        val = val.replace(/\\"/g, '"').replace(/\\n/g, '\n').trim();
+        // If it was truncated, clean up trailing comma, closing quote, etc. if any matched
+        if (val.endsWith('"')) {
+          val = val.slice(0, -1);
+        }
+        return val;
+      }
+      return '';
+    };
+
+    const extractedAnalysis = getValFor('analysis');
+    if (extractedAnalysis) return extractedAnalysis;
+    const extractedFindings = getValFor('findings');
+    if (extractedFindings) return extractedFindings;
+    const extractedSummary = getValFor('summary');
+    if (extractedSummary) return extractedSummary;
+  }
+  return analysis;
+};
+
 export default function XrayAnalyzerPanel() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [language, setLanguage] = useState('en');
@@ -146,10 +206,16 @@ export default function XrayAnalyzerPanel() {
                 )}
               </div>
 
+              {Array.isArray(result.warnings) && result.warnings.length > 0 && (
+                <div style={{ background: '#FFFBEB', color: '#92400E', border: '1px solid #FDE68A', borderRadius: '12px', padding: '12px', fontSize: '11px', fontWeight: '600', lineHeight: '1.5' }}>
+                  {result.warnings.join(' ')}
+                </div>
+              )}
+
               <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '16px' }}>
                 <div style={{ fontSize: '12px', fontWeight: '700', color: '#1E293B', marginBottom: '8px' }}>Educational Summary</div>
                 <div style={{ fontSize: '12px', color: '#334155', whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
-                  {result.analysis}
+                  {getCleanAnalysisText(result.analysis)}
                 </div>
               </div>
 

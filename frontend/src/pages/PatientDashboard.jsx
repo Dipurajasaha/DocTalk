@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSession } from '../contexts/SessionContext';
 import { useNotifications, useAssetCache } from '../contexts';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -9,9 +9,67 @@ import XrayAnalyzerPanel from '../components/XrayAnalyzerPanel';
 import MarkdownMessage from '../components/chat/MarkdownMessage';
 import FileViewer from '../components/FileViewer';
 import AiProcessingCard from '../components/AiProcessingCard';
+import StructuredReply from '../components/StructuredReply';
 
 const GENERAL_UPLOADS_FOLDER_PATH = '/my_documents/general_uploads/';
 const LEGACY_UNCLASSIFIED_FOLDER_PATH = '/my_documents/unclassified/';
+
+const isJsonLike = (text) => {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (trimmed.startsWith('```json')) return true;
+  if (trimmed.startsWith('{')) return true;
+  if (trimmed.startsWith('[')) return true;
+  return false;
+};
+
+const tryParseJson = (text) => {
+  if (!text) return null;
+  const trimmed = text.trim();
+  const stripped = trimmed.startsWith('```')
+    ? trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+    : trimmed;
+  try {
+    const parsed = JSON.parse(stripped);
+    if (parsed && typeof parsed === 'object') return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const getCleanAnalysisText = (analysis) => {
+  if (!analysis) return '';
+  const trimmed = analysis.trim();
+  if (isJsonLike(trimmed)) {
+    const parsed = tryParseJson(trimmed);
+    if (parsed) {
+      return parsed.analysis || parsed.findings || parsed.summary || parsed.description || JSON.stringify(parsed, null, 2);
+    }
+
+    const getValFor = (key) => {
+      const regex = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`, 'i');
+      const match = trimmed.match(regex);
+      if (match && match[1]) {
+        let val = match[1];
+        val = val.replace(/\\"/g, '"').replace(/\\n/g, '\n').trim();
+        if (val.endsWith('"')) {
+          val = val.slice(0, -1);
+        }
+        return val;
+      }
+      return '';
+    };
+
+    const extractedAnalysis = getValFor('analysis');
+    if (extractedAnalysis) return extractedAnalysis;
+    const extractedFindings = getValFor('findings');
+    if (extractedFindings) return extractedFindings;
+    const extractedSummary = getValFor('summary');
+    if (extractedSummary) return extractedSummary;
+  }
+  return analysis;
+};
 
 const normalizeAbsoluteFolderPath = (value) => {
   const raw = String(value || '').trim();
@@ -2055,6 +2113,12 @@ export default function PatientDashboard() {
                           <div className="bubble" style={{ background: isOutgoingChatMessage(msg) ? '#8B7EFF' : '#F1F5F9', color: isOutgoingChatMessage(msg) ? '#FFF' : '#1E293B', padding: '12px 16px', borderRadius: '16px', maxWidth: '80%', boxShadow: '0 8px 16px rgba(0,0,0,0.08), 0 4px 6px rgba(0,0,0,0.04)' }}>
                             {isOutgoingChatMessage(msg) ? (
                               <div className="content" style={{ whiteSpace: 'pre-wrap' }}>{msg.text || ''}</div>
+                            ) : msg.structured ? (
+                              <div className="content"><StructuredReply data={msg.structured} /></div>
+                            ) : isJsonLike(msg.text) && tryParseJson(msg.text) ? (
+                              <div className="content"><StructuredReply data={tryParseJson(msg.text)} /></div>
+                            ) : isJsonLike(msg.text) ? (
+                              <div className="content"><MarkdownMessage text={getCleanAnalysisText(msg.text)} /></div>
                             ) : (
                               <div className="content"><MarkdownMessage text={msg.text || ''} /></div>
                             )}

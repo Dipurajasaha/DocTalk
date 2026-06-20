@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 SymptomSeverityEnum = Literal["mild", "moderate", "severe", "critical"]
@@ -178,6 +178,69 @@ class HospitalNewsResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# --- Hospital Profile / Settings ---
+class HospitalProfileUpdate(BaseModel):
+    name: str | None = None
+    display_name: str | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    website: str | None = None
+    registration_number: str | None = None
+    total_beds: int | None = Field(default=None, ge=0, le=100000)
+    available_beds: int | None = Field(default=None, ge=0, le=100000)
+    specialties: list[dict[str, Any]] | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("specialties")
+    @classmethod
+    def validate_specialties(cls, value: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+        if value is None:
+            return value
+        cleaned: list[dict[str, Any]] = []
+        for item in value:
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            doctors = item.get("doctors", 0)
+            try:
+                doctors_int = max(0, int(doctors))
+            except (TypeError, ValueError):
+                doctors_int = 0
+            cleaned.append({"name": name, "doctors": doctors_int})
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_bed_counts(self) -> "HospitalProfileUpdate":
+        if (
+            self.total_beds is not None
+            and self.available_beds is not None
+            and self.available_beds > self.total_beds
+        ):
+            raise ValueError("available_beds cannot exceed total_beds")
+        return self
+
+
+class HospitalProfileResponse(BaseModel):
+    hospital_id: str
+    name: str
+    display_name: str | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    website: str | None = None
+    registration_number: str | None = None
+    total_beds: int | None = None
+    available_beds: int | None = None
+    specialties: list[dict[str, Any]] | None = None
+    is_verified: bool = False
+
+
 # --- Dashboard / Stats ---
 class HospitalDashboardResponse(BaseModel):
     hospital_id: str
@@ -191,3 +254,6 @@ class HospitalDashboardResponse(BaseModel):
     discharged_count: int = 0
     death_count: int = 0
     patients: list[HospitalPatientResponse] = []
+    total_beds: int | None = None
+    available_beds: int | None = None
+    specialties: list[dict[str, Any]] | None = None

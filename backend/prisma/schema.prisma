@@ -236,6 +236,9 @@ model Hospital {
   role          Role           @default(hospital)
   profilePic    String?
   isVerified    Boolean        @default(false)
+  totalBeds     Int?
+  availableBeds Int?
+  specialties   Json?          @db.JsonB
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 

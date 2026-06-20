@@ -468,6 +468,78 @@ class HospitalService:
             for n in records
         ]
 
+    # ─────────────────────── HOSPITAL PROFILE UPDATE ───────────────────────
+
+    async def update_hospital_profile(self, hospital_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Update hospital profile including beds and specialties."""
+        return await self.update_profile(hospital_id, data)
+
+    async def update_profile(self, hospital_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Update hospital profile including beds and specialties."""
+        await self._get_hospital(hospital_id)
+
+        update_data: dict[str, Any] = {}
+
+        # Map snake_case API fields to Prisma camelCase fields
+        field_map = {
+            "name": "name",
+            "display_name": "displayName",
+            "address": "address",
+            "city": "city",
+            "state": "state",
+            "phone": "phone",
+            "email": "email",
+            "website": "website",
+            "registration_number": "registrationNumber",
+            "total_beds": "totalBeds",
+            "available_beds": "availableBeds",
+        }
+
+        for api_key, prisma_key in field_map.items():
+            if api_key in data and data[api_key] is not None:
+                update_data[prisma_key] = data[api_key]
+
+        # Handle specialties as JSON
+        if "specialties" in data and data["specialties"] is not None:
+            from prisma import Json
+            update_data["specialties"] = Json(data["specialties"])
+
+        if not update_data:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No fields to update")
+
+        updated = await self.client.hospital.update(
+            where={"hospitalId": hospital_id},
+            data=update_data,
+        )
+
+        return self._format_hospital_profile(updated)
+
+    def _format_hospital_profile(self, hospital: Any) -> dict[str, Any]:
+        specialties = hospital.specialties
+        if specialties is not None and not isinstance(specialties, list):
+            try:
+                import json as _json
+                specialties = _json.loads(specialties) if isinstance(specialties, str) else list(specialties) if hasattr(specialties, '__iter__') else None
+            except Exception:
+                specialties = None
+
+        return {
+            "hospital_id": hospital.hospitalId,
+            "name": hospital.name,
+            "display_name": hospital.displayName,
+            "address": hospital.address,
+            "city": hospital.city,
+            "state": hospital.state,
+            "phone": hospital.phone,
+            "email": hospital.email,
+            "website": hospital.website,
+            "registration_number": hospital.registrationNumber,
+            "total_beds": hospital.totalBeds,
+            "available_beds": hospital.availableBeds,
+            "specialties": specialties if isinstance(specialties, list) else ([] if specialties is None else list(specialties)),
+            "is_verified": hospital.isVerified,
+        }
+
     # ─────────────────────── DASHBOARD ───────────────────────
 
     async def get_dashboard(self, hospital_id: str) -> dict[str, Any]:
@@ -494,6 +566,15 @@ class HospitalService:
         patients_raw = await self.client.patient.find_many(where={"registeredByHospitalId": hospital_id}, order={"createdAt": "desc"})
         patients = [self._format_patient(p) for p in patients_raw]
 
+        # Parse specialties
+        specialties = hospital.specialties
+        if specialties is not None and not isinstance(specialties, list):
+            try:
+                import json as _json
+                specialties = _json.loads(specialties) if isinstance(specialties, str) else list(specialties) if hasattr(specialties, '__iter__') else None
+            except Exception:
+                specialties = None
+
         return {
             "hospital_id": hospital.hospitalId,
             "hospital_name": hospital.name,
@@ -507,6 +588,9 @@ class HospitalService:
             "discharged_count": discharged_count,
             "death_count": death_count,
             "patients": patients,
+            "total_beds": hospital.totalBeds,
+            "available_beds": hospital.availableBeds,
+            "specialties": specialties if isinstance(specialties, list) else ([] if specialties is None else list(specialties)),
         }
 
     # ─────────────────────── PATIENT REGISTRATION ───────────────────────

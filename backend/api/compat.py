@@ -15,6 +15,9 @@ from ..core.security import CurrentUser, get_current_user
 from ..services.asset_service import AssetService, AssetConfig
 from ..services.user_service import UserService
 from ..services.xray_analysis_service import xray_analysis_service
+from ..services.patient_history_service import patient_history_service
+from ..schemas.patient_history import CreatePatientHistory
+from ..core.database import prisma
 
 
 router = APIRouter()
@@ -215,3 +218,36 @@ async def analyze_xray(
             temp_path.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+@router.get("/medical-history")
+async def get_medical_history(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    entries = await patient_history_service.list_entries(current_user.user_id)
+    return {"success": True, "entries": entries}
+
+
+@router.post("/medical-history")
+async def upsert_medical_history(
+    entry: CreatePatientHistory,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    entry.patientId = current_user.user_id
+    result = await patient_history_service.create_entry(entry)
+    return {"success": True, "entry": result}
+
+
+@router.delete("/medical-history/{entry_id}")
+async def delete_medical_history(
+    entry_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    existing = await prisma.patientmedicalhistory.find_unique(where={"id": entry_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if existing.patientId != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    
+    await patient_history_service.delete_entry(entry_id)
+    return {"success": True}
