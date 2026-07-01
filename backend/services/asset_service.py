@@ -467,22 +467,43 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
         except Exception as exc:
             logger.exception("PatientMedicalHistory extraction failed", extra={"asset_id": asset_id, "error": str(exc)})
         
-        await pgvector_service.ingest_document(
-            patient_id=str(asset.userId),
-            consultation_id=None,
-            source_type=source_type,
-            content=ingestion_text,
-            summary=extracted_text or ingestion_text,
-            metadata={
-                "user_id": str(asset.userId),
-                "asset_id": asset_id,
-                "asset_category": category,
-                "mime_type": mime_type,
-                "file_path": destination_path.as_posix(),
-                "folder_path": logical_folder_path,
-            },
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1500,
+            chunk_overlap=150,
+            separators=["\n\n", "\n", " ", ""]
         )
+        
+        if not ingestion_text:
+            chunks = [f"{category} asset {asset_id}"]
+        else:
+            chunks = text_splitter.split_text(ingestion_text)
+            
+        chunk_count = len(chunks)
+        
+        for i, chunk_text in enumerate(chunks):
+            await pgvector_service.ingest_document(
+                patient_id=str(asset.userId),
+                consultation_id=None,
+                source_type=source_type,
+                content=chunk_text,
+                summary=chunk_text[:1000],
+                metadata={
+                    "user_id": str(asset.userId),
+                    "asset_id": asset_id,
+                    "asset_category": category,
+                    "mime_type": mime_type,
+                    "file_path": destination_path.as_posix(),
+                    "folder_path": logical_folder_path,
+                    "chunk_index": i,
+                    "total_chunks": chunk_count
+                },
+            )
+            
+        print(f"[DEBUG][RAG_STORAGE] Successfully stored asset {asset_id} in RAG ({chunk_count} chunk{'s' if chunk_count != 1 else ''})")
     except Exception as exc:
+        print(f"[DEBUG][RAG_STORAGE] Rejected/Failed storing asset {asset_id} in RAG. Error: {exc}")
         logger.exception("Asset background processing failed", extra={"component": "asset_processing", "asset_id": asset_id, "error": str(exc)})
         try:
             await db.medicalasset.update(
@@ -503,7 +524,12 @@ async def _classify_pdf_text(extracted_text: str) -> AssetCategory:
     )
     sample_text = (extracted_text or "").strip()[:1000]
     response = await _call_llm_json(prompt, sample_text or "No readable text was extracted from the PDF.")
-    return _normalize_category(response.get("category") or response.get("assetCategory") or response.get("label") or sample_text)
+    
+    category_val = response.get("category") or response.get("assetCategory") or response.get("label")
+    if not category_val:
+        category_val = "REPORT"  # Default fallback if LLM response is empty or missing key
+        
+    return _normalize_category(category_val)
 
 
 async def _extract_asset_text(source_path: Path, mimetype: str) -> str:

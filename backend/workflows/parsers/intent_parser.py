@@ -61,8 +61,30 @@ def parse_intent(text: str) -> ParsedIntent:
                 intent.history_type = htype
                 break
 
-    # Extract doctor name using regex
-    doc_match = re.search(r"(?:doctor|dr\.?)\s+([a-z]+(?:\s+[a-z]+)*?)(?:\s+(?:have|has|is|are|slot|available|open|any))", text.lower())
+    # Extract doctor name using regex – try multiple common patterns
+    lowered = text.lower()
+    doc_match = None
+
+    # Pattern 1: "doctor X" / "dr. X" followed by availability keywords
+    doc_match = re.search(
+        r"(?:doctor|dr\.?)\s+([a-z][a-z0-9]*(?:\s+[a-z]+)*?)(?:\s+(?:have|has|is|are|slot|available|open|any|on|for))",
+        lowered,
+    )
+
+    # Pattern 2: "with X" (covers "book an appointment with DocDipu for …")
+    if not doc_match:
+        doc_match = re.search(
+            r"\bwith\s+([a-z][a-z0-9]*(?:\s+[a-z]+)*?)(?:\s+(?:for|on|at|today|tomorrow|slot|please|thanks|$))",
+            lowered,
+        )
+
+    # Pattern 3: standalone "X available/slots/open" without a prefix
+    if not doc_match:
+        doc_match = re.search(
+            r"\b([a-z][a-z0-9]{2,}(?:\s+[a-z]+)*?)\s+(?:available|availability|slots?|open|schedule)",
+            lowered,
+        )
+
     if doc_match:
         intent.doctor_name = doc_match.group(1).strip()
         print(f"[DEBUG][DOCTOR_NAME_EXTRACTED] {intent.doctor_name}")
