@@ -25,13 +25,13 @@ class ComposedResponse:
             rtype = self.asset_selection_context.get("report_type", "document").replace("_", " ") if self.asset_selection_context else "document"
             
             if rag_evidence:
-                msg = f"Your {reason} {rtype} was located.\\nRetrieved Findings:"
+                msg = f"Your {reason} {rtype} was located.\nRetrieved Findings:"
                 for e in rag_evidence:
-                    msg += f"\\n* {e.get('content')}"
+                    msg += f"\n* {e.get('content')}"
             else:
-                msg = f"Your {reason} {rtype} was located.\\nSelected documents:"
+                msg = f"Your {reason} {rtype} was located.\nSelected documents:"
                 for aid in asset_ids:
-                    msg += f"\\n* {rtype.title()} ({aid})"
+                    msg += f"\n* {rtype.title()} ({aid})"
                     
             response_sections.append({"type": "asset_selection", "content": msg})
             text_parts.append(msg)
@@ -75,7 +75,7 @@ class ComposedResponse:
             text_parts.append("I am processing your request using general knowledge.")
             response_sections.append({"type": "general", "content": text_parts[-1]})
             
-        shadow_response = "\\n\\n".join(text_parts)
+        shadow_response = "\n\n".join(text_parts)
 
         return {
             "memory_context": self.memory_context,
