@@ -125,25 +125,38 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 # Core completion helpers
 # ---------------------------------------------------------------------------
 
+# Default max tokens for generation, raised to accommodate reasoning models
+DEFAULT_MAX_TOKENS = 16384
+
 async def complete_text(
     messages: list[BaseMessage | dict[str, Any]],
     *,
     model: str | None = None,
     temperature: float = 0.2,
-    max_output_tokens: int = 1024,
+    max_output_tokens: int = DEFAULT_MAX_TOKENS,
     response_format: dict[str, Any] | None = None,
 ) -> str:
     """Complete text via the configured OpenAI-compatible endpoint."""
     client = get_llm_client()
     effective_model = model or _get_model()
 
+    payload_messages = [_message_to_payload(message) for message in messages]
+    
+    print("=================== LLM INVOCATION PIPELINE (complete_text) ===================")
+    print(f"1. input model name: {effective_model}")
+    print(f"2. provider: {client.base_url}")
+    print(f"3. temperature: {temperature}")
+    print(f"4. max tokens: {max_output_tokens}")
+    print(f"5. messages being passed: {json.dumps(payload_messages, indent=2)}")
+    
     completion = await client.chat.completions.create(
         model=effective_model,
-        messages=[_message_to_payload(message) for message in messages],
+        messages=payload_messages,
         temperature=temperature,
         max_tokens=max_output_tokens,
         response_format=response_format,
     )
+    
     choice = completion.choices[0] if completion.choices else None
     content = getattr(getattr(choice, "message", None), "content", "") if choice else ""
     if isinstance(content, list):
@@ -159,7 +172,7 @@ async def complete_json(
     *,
     model: str | None = None,
     temperature: float = 0.2,
-    max_output_tokens: int = 1024,
+    max_output_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> dict[str, Any]:
     """Complete JSON via the configured OpenAI-compatible endpoint."""
     text = await complete_text(
@@ -185,7 +198,7 @@ async def complete_image_json(
     context_text: str | None = None,
     model: str | None = None,
     temperature: float = 0.2,
-    max_output_tokens: int = 1024,
+    max_output_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> dict[str, Any]:
     """Analyse an image using the vision endpoint configured by VISION_ENDPOINT.
 
@@ -215,7 +228,7 @@ async def _vision_gemini(
     context_text: str | None = None,
     model: str | None = None,
     temperature: float = 0.2,
-    max_output_tokens: int = 1024,
+    max_output_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> dict[str, Any]:
     """Vision analysis using the native Google GenAI SDK (google-genai)."""
     import asyncio
@@ -338,7 +351,7 @@ class LLMStructuredResult:
     response_model: type[Any]
     model: str | None = None
     temperature: float = 0.2
-    max_output_tokens: int = 1024
+    max_output_tokens: int = DEFAULT_MAX_TOKENS
 
     async def ainvoke(self, messages: list[BaseMessage | dict[str, Any]]) -> Any:
         payload = await complete_json(
@@ -357,7 +370,7 @@ class LLMStructuredResult:
 class LLMChatModel:
     model: str | None = None
     temperature: float = 0.2
-    max_output_tokens: int = 1024
+    max_output_tokens: int = DEFAULT_MAX_TOKENS
 
     async def ainvoke(self, messages: list[BaseMessage | dict[str, Any]]) -> AIMessage:
         text = await complete_text(
@@ -366,7 +379,8 @@ class LLMChatModel:
             temperature=self.temperature,
             max_output_tokens=self.max_output_tokens,
         )
-        return AIMessage(content=text)
+        msg = AIMessage(content=text)
+        return msg
 
     def with_structured_output(self, response_model: type[Any]) -> LLMStructuredResult:
         return LLMStructuredResult(

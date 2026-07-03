@@ -162,6 +162,16 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
     print("[DEBUG][LLM] prompt =", messages)
     
     response = await llm.ainvoke(messages)
+    
+    print("=================== DEBUG LOGGING LLM RESPONSE ===================")
+    print(f"1. type(response): {type(response)}")
+    print(f"2. repr(response): {repr(response)}")
+    print(f"3. response.content: {getattr(response, 'content', 'NOT_AVAILABLE')}")
+    print(f"4. response.additional_kwargs: {getattr(response, 'additional_kwargs', 'NOT_AVAILABLE')}")
+    print(f"5. response.response_metadata: {getattr(response, 'response_metadata', 'NOT_AVAILABLE')}")
+    print(f"6. message_content_text(response): {repr(message_content_text(response))}")
+    print("==================================================================")
+    
     response_text = message_content_text(response) or "I am here to help with your health question."
 
     return {
@@ -180,7 +190,16 @@ async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
     last_message = messages_list[-1] if messages_list else None
     query = message_content_text(last_message) if last_message else latest_message_text(messages_list)
     context = await patient_rag_tool.ainvoke({"query": query, "state": state})
-    context_str = json.dumps(jsonable_encoder(context), default=str)
+    
+    # Strip unnecessary metadata to save token budget
+    clean_items = []
+    for item in context.get("items", []):
+        if isinstance(item, dict) and "content" in item:
+            clean_items.append({"content": item["content"]})
+    
+    clean_context = {"items": clean_items} if clean_items else {}
+    context_str = json.dumps(clean_context, default=str) if clean_context else ""
+    
     sys_msg = SystemMessage(
         content=(
             "You are a medical AI. Answer the user's query using ONLY this retrieved data: "
@@ -205,6 +224,7 @@ async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
     print("[DEBUG][LLM] prompt =", messages)
     
     response = await llm.ainvoke(messages)
+    
     response_text = message_content_text(response) or "I am here to help with your health question."
 
     return {

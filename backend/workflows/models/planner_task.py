@@ -34,3 +34,12 @@ class PlannerTask:
             "action": self.action,
             "parameters": self.parameters
         }
+        
+    @property
+    def capability_name(self) -> str | None:
+        if self.task_type == "retrieve":
+            return self.retriever
+        elif self.task_type == "action":
+            return self.action_handler
+        return self.task_type
+

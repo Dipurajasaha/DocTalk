@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..planner.retrieval_strategy import RetrievalStrategy
-from .retrieval_registry import get_retriever
-from .action_registry import get_action_handler
+from .capability_registry import get_capability
 from ..composer.evidence_collector import EvidenceCollector
 from ..graph.state import UnifiedChatState
 
@@ -12,65 +10,38 @@ from ..models.task_execution_result import TaskExecutionResult
 from ..models.planner_task import PlannerTask
 
 async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask) -> dict[str, Any]:
-    task_name = task_info.task_type
-    result = {}
+    cap_name = task_info.capability_name
+    if not cap_name:
+        return {}
+        
+    capability = get_capability(cap_name)
+    if not capability:
+        print(f"[DEBUG][EXECUTOR] Capability not found: {cap_name}")
+        return {}
+        
+    role = str(state.get("role") or "")
+    has_patient = bool(state.get("user_id") if role == "patient" else state.get("target_patient_id"))
+    has_doctor = role == "doctor"
     
-    if task_name == "retrieve":
-        retriever_name = task_info.retriever
-        if retriever_name:
-            retriever_def = get_retriever(retriever_name)
-            if retriever_def:
-                role = str(state.get("role") or "")
-                has_patient = bool(state.get("user_id") if role == "patient" else state.get("target_patient_id"))
-                has_doctor = role == "doctor"
-                
-                if not (retriever_def.get("requires_patient") and not has_patient) and \
-                   not (retriever_def.get("requires_doctor") and not has_doctor):
-                    result = await retriever_def["retriever"](state, task_info.to_dict())
-                    
-    elif task_name == "action":
-        handler_name = task_info.action_handler
-        if handler_name:
-            handler_def = get_action_handler(handler_name)
-            if handler_def:
-                role = str(state.get("role") or "")
-                has_patient = bool(state.get("user_id") if role == "patient" else state.get("target_patient_id"))
-                has_doctor = role == "doctor"
-                
-                if not (handler_def.get("requires_patient") and not has_patient) and \
-                   not (handler_def.get("requires_doctor") and not has_doctor):
-                    action_result = await handler_def["handler"](state, task_info.to_dict())
-                    
-                    evidence = []
-                    appointment_context = {}
-                    for r in action_result.get("action_results", []):
-                        if r.get("type") == "appointment_context":
-                            appointment_context["action"] = r.get("action")
-                            if r.get("message"):
-                                appointment_context["message"] = r.get("message")
-                            if r.get("clear_doctor_availability"):
-                                result["clear_doctor_availability"] = True
-                        elif r.get("type") == "evidence":
-                            evidence.append(r["payload"])
-                        elif r.get("type") == "message":
-                            appointment_context["action"] = "confirmed"
-                            appointment_context["message"] = r.get("message")
-                            if r.get("clear_doctor_availability"):
-                                result["clear_doctor_availability"] = True
-                            print("[DEBUG][BOOKING_MESSAGE_CAPTURED] True")
-                    
-                    if appointment_context:
-                        result["appointment_context"] = appointment_context
-                    if evidence:
-                        result["evidence"] = evidence
-                    if "pending_tasks" in action_result:
-                        result["pending_tasks"] = action_result["pending_tasks"]
-                        
+    if capability.get("requires_patient") and not has_patient:
+        print(f"[DEBUG][EXECUTOR] Capability {cap_name} requires patient but none found.")
+        return {}
+    if capability.get("requires_doctor") and not has_doctor:
+        print(f"[DEBUG][EXECUTOR] Capability {cap_name} requires doctor but none found.")
+        return {}
+        
+    params = dict(task_info.parameters)
+    if task_info.action:
+        params["action"] = task_info.action
+        
+    print(f"[DEBUG][EXECUTOR] Executing capability: {cap_name} with params: {params}")
+    result = await capability["handler"](state, params)
+    
     if "appointment_context" in result:
         print("[DEBUG][APPOINTMENT_CONTEXT]", result["appointment_context"])
     if "evidence" in result:
         print("[DEBUG][APPOINTMENT_EVIDENCE]", result["evidence"])
-    print("[DEBUG][APPOINTMENT_RAW_RESULT]", result)
+    print("[DEBUG][CAPABILITY_RAW_RESULT]", result)
                         
     return result
 
