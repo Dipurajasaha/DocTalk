@@ -10,5 +10,6 @@ async def retrieve_asset_scoped_context(
     return await pgvector_service.search_documents_by_assets(
         patient_id=patient_id,
         query=query,
-        asset_ids=asset_ids
+        asset_ids=asset_ids,
+        similarity_threshold=0.30
     )

@@ -30,9 +30,11 @@ async def doctor_general_llm(state: UnifiedChatState) -> dict[str, Any]:
         *list(state.get("messages") or []),
     ]
     
-    print("[DEBUG][LLM] patient_history_context =", state.get("patient_history_context"))
-    print("[DEBUG][LLM] consultation_context =", state.get("consultation_context"))
-    print("[DEBUG][LLM] memory_context =", state.get("memory_context"))
+    evidence = state.get("evidence") or []
+    if evidence:
+        context_str = f"Evidence:\n{json.dumps(jsonable_encoder(evidence))}\n\n"
+        messages.insert(1, SystemMessage(content=f"You have access to the following retrieved context:\n{context_str}"))
+    
     print("[DEBUG][LLM] evidence =", state.get("evidence"))
     print("[DEBUG][LLM] prompt =", messages)
     
@@ -59,9 +61,8 @@ async def doctor_scoped_llm(state: UnifiedChatState) -> dict[str, Any]:
 
     messages_list = list(state.get("messages") or [])
     last_message = messages_list[-1] if messages_list else None
-    query = message_content_text(last_message) if last_message else latest_message_text(messages_list)
-    context = await doctor_rag_tool.ainvoke({"query": query, "state": state})
-    context_str = json.dumps(jsonable_encoder(context), default=str)
+    evidence = state.get("evidence") or []
+    context_str = json.dumps(jsonable_encoder(evidence), default=str) if evidence else ""
     sys_msg = SystemMessage(
         content=(
             "You are a medical AI. Answer the user's query using ONLY this retrieved data: "
@@ -70,9 +71,6 @@ async def doctor_scoped_llm(state: UnifiedChatState) -> dict[str, Any]:
     )
     
     messages = [sys_msg] + messages_list
-    print("[DEBUG][LLM] patient_history_context =", state.get("patient_history_context"))
-    print("[DEBUG][LLM] consultation_context =", state.get("consultation_context"))
-    print("[DEBUG][LLM] memory_context =", state.get("memory_context"))
     print("[DEBUG][LLM] evidence =", state.get("evidence"))
     print("[DEBUG][LLM] prompt =", messages)
     

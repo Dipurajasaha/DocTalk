@@ -47,7 +47,10 @@ log_file = open(log_filename, "w", encoding="utf-8")
 
 def log_print(*args, **kwargs):
     """Prints to console and also writes to the log file."""
-    print(*args, **kwargs)
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        pass
     print(*args, file=log_file, **kwargs)
     log_file.flush()
 
@@ -94,8 +97,24 @@ TEST_PROMPTS = [
         "prompt": "Summarize my previous consultations and latest blood report."
     },
     {
-        "category": "APPOINTMENTS",
-        "prompt": "Cancel my appointment."
+        "category": "WORKFLOW_SEQUENCE",
+        "prompt": "Is there any appointment slots available for Dr. DocDipu?",
+        "clear_chat": True
+    },
+    {
+        "category": "WORKFLOW_SEQUENCE",
+        "prompt": "Book the first available slot.",
+        "clear_chat": False
+    },
+    {
+        "category": "WORKFLOW_SEQUENCE",
+        "prompt": "Yes, please book it.",
+        "clear_chat": False
+    },
+    {
+        "category": "WORKFLOW_SEQUENCE",
+        "prompt": "Cancel my appointment.",
+        "clear_chat": False
     }
 ]
 
@@ -158,7 +177,8 @@ def get_websocket_url(token: str) -> str:
 def clear_chats() -> None:
     """Clear AI chats using the backend script."""
     # NOTE: Assuming python is available in PATH or inside the active virtual environment
-    subprocess.run(["python", "backend/clear_ai_chats.py"], capture_output=True)
+    import sys
+    subprocess.run([sys.executable, "-B", "backend/clear_ai_chats.py"], capture_output=True)
 
 async def test_single_prompt(query: str, ws_url: str) -> tuple[str, str, int]:
     """
@@ -277,7 +297,8 @@ async def main():
         log_print(f"Category: {category}")
         log_print(f"Prompt:   {query}")
         
-        if CLEAR_CHAT_BEFORE_EACH_TEST:
+        clear_chat_for_this_test = test_case.get("clear_chat", CLEAR_CHAT_BEFORE_EACH_TEST)
+        if clear_chat_for_this_test:
             clear_chats()
             
         output, status, exec_time = await test_single_prompt(query, ws_url)

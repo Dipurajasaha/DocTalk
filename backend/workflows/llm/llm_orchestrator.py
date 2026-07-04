@@ -9,6 +9,22 @@ from ..graph.state import WorkflowState
 logger = logging.getLogger(__name__)
 
 async def llm_orchestrator_node(state: WorkflowState) -> dict[str, Any]:
+    # Check if ResponseComposer set a direct final_response for an action capability outcome
+    action_direct_response = state.get("final_response")
+    if action_direct_response:
+        from langchain_core.messages import AIMessage
+        ai_msg = AIMessage(content=action_direct_response)
+        payload = dict(state.get("context_payload") or {})
+        return {
+            "messages": [ai_msg],
+            "final_response": action_direct_response,
+            "context_payload": {
+                **payload,
+                "route": "action_direct_composer",
+                "assistant_mode": "action_confirmation",
+            },
+        }
+
     role = str(state.get("role") or "patient").lower()
     
     if role == "doctor":
@@ -19,6 +35,7 @@ async def llm_orchestrator_node(state: WorkflowState) -> dict[str, Any]:
             return await doctor_general_llm(state)
     else:
         # Patient logic
+
         
         # 1. Evaluate triage
         triage_result = await triage_evaluator(state)

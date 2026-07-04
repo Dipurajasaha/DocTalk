@@ -1,5 +1,6 @@
 from typing import Any, Callable, TypedDict, Awaitable
 from ..graph.state import UnifiedChatState
+from ..graph.common import latest_message_text
 import re
 from datetime import datetime, timezone
 try:
@@ -160,7 +161,7 @@ async def handle_asset_index_retrieve(state: UnifiedChatState, params: dict[str,
             "asset_ids": asset_ids
         })
         
-        query = state.get("messages", [])[-1].content if state.get("messages") else ""
+        query = latest_message_text(state.get("messages"))
         if p_id and query:
             rag_result = await retrieve_asset_scoped_context(
                 query=query,
@@ -199,17 +200,32 @@ async def handle_appointment_book(state: UnifiedChatState, params: dict[str, Any
     doctor_id = None
     doctor_name = None
     for avail in (state.get("doctor_availability_context") or []):
-        if avail.get("doctor_id"):
+        if isinstance(avail, dict) and avail.get("doctor_id"):
             doctor_id = avail["doctor_id"]
             doctor_name = avail.get("doctor_name")
             break
+
+    search_name = params.get("doctor_name") or params.get("doctor_id") or doctor_name
+    matching_doc_ids = []
+    if search_name:
+        matching_docs = await prisma.doctor.find_many(
+            where={
+                "OR": [
+                    {"doctorId": search_name},
+                    {"name": {"contains": search_name, "mode": "insensitive"}}
+                ]
+            }
+        )
+        matching_doc_ids = [d.doctorId for d in matching_docs if d.doctorId]
 
     where_clause = {
         "isBooked": False,
         "isActive": True,
         "startTime": {"gt": datetime.now(timezone.utc)}
     }
-    if doctor_id:
+    if matching_doc_ids:
+        where_clause["doctorId"] = {"in": matching_doc_ids}
+    elif doctor_id:
         where_clause["doctorId"] = doctor_id
     
     slots = await prisma.doctorslot.find_many(
@@ -219,6 +235,7 @@ async def handle_appointment_book(state: UnifiedChatState, params: dict[str, Any
     )
     
     matched_slot = None
+    print(f"[DEBUG][BOOKING_SLOT_MATCH] target_time={target_time}, found_slots={[(s.id, s.startTime) for s in slots]}")
     if target_time:
         for s in slots:
             if s.startTime.date() == target_time.date() and s.startTime.hour == target_time.hour and s.startTime.minute == target_time.minute:
@@ -347,7 +364,25 @@ async def handle_appointment_reschedule(state: UnifiedChatState, params: dict[st
     )
 
 async def handle_appointment_search_slots(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
-    return CapabilityResult(capability_name="APPOINTMENT_SEARCH_SLOTS")
+    doctor_name = params.get("doctor_name")
+    docs = await retrieve_doctor_availability(doctor_name=doctor_name)
+    
+    evidence = []
+    for d in docs:
+        if "error" in d or "message" in d:
+            evidence.append(d.get("message") or d.get("error"))
+        else:
+            slots = "\n- ".join(d.get("available_slots", []))
+            if slots:
+                evidence.append(f"Available slots for Dr. {d.get('doctor_name')}:\n- {slots}")
+            else:
+                evidence.append(f"No available slots for Dr. {d.get('doctor_name')}.")
+                
+    return CapabilityResult(
+        capability_name="APPOINTMENT_SEARCH_SLOTS",
+        data=docs,
+        evidence=evidence
+    )
 
 REGISTRY: dict[str, Capability] = {
     # Retrievers

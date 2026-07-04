@@ -22,12 +22,16 @@ class ParsedIntent:
 def parse_intent(text: str) -> ParsedIntent:
     intent = ParsedIntent(original_text=text)
     
+    # Helper to check if a word/phrase exists with word boundaries
+    def has_word(word: str, target: str) -> bool:
+        return bool(re.search(r'\b' + re.escape(word) + r'\b', target, re.IGNORECASE))
+
     # Appointment extraction
-    has_appointment_entity = any(entity in text for entity in APPOINTMENT_RULE_CONFIG["entities"])
+    has_appointment_entity = any(has_word(entity, text) for entity in APPOINTMENT_RULE_CONFIG["entities"])
     has_appointment_action = False
     
     for action_key, action_aliases in APPOINTMENT_RULE_CONFIG["appointment_actions"].items():
-        if any(a in text for a in action_aliases):
+        if any(has_word(a, text) for a in action_aliases):
             has_appointment_action = True
             if action_key not in intent.actions:
                 intent.actions.append(action_key)
@@ -35,19 +39,19 @@ def parse_intent(text: str) -> ParsedIntent:
     if has_appointment_entity and has_appointment_action:
         intent.is_appointment = True
         intent.intent_type = "appointment"
-        intent.entities.extend([e for e in APPOINTMENT_RULE_CONFIG["entities"] if e in text])
+        intent.entities.extend([e for e in APPOINTMENT_RULE_CONFIG["entities"] if has_word(e, text)])
         
     # Consultation extraction
-    if any(entity in text for entity in CONSULTATION_RULE_CONFIG["entities"]):
+    if any(has_word(entity, text) for entity in CONSULTATION_RULE_CONFIG["entities"]):
         intent.is_consultation = True
         intent.intent_type = "symptom"
-        intent.entities.extend([e for e in CONSULTATION_RULE_CONFIG["entities"] if e in text])
-    elif any(trigger in text for trigger in CONSULTATION_RULE_CONFIG["consultation_triggers"]):
+        intent.entities.extend([e for e in CONSULTATION_RULE_CONFIG["entities"] if has_word(e, text)])
+    elif any(has_word(trigger, text) for trigger in CONSULTATION_RULE_CONFIG["consultation_triggers"]):
         intent.is_consultation = True
         intent.intent_type = "consultation"
         
     for action_key, action_aliases in CONSULTATION_RULE_CONFIG.get("consultation_actions", {}).items():
-        if any(a in text for a in action_aliases):
+        if any(has_word(a, text) for a in action_aliases):
             if action_key not in intent.actions:
                 intent.actions.append(action_key)
 
@@ -65,29 +69,24 @@ def parse_intent(text: str) -> ParsedIntent:
     lowered = text.lower()
     doc_match = None
 
-    # Pattern 1: "doctor X" / "dr. X" followed by availability keywords
+    # Pattern 1: "doctor X" or "dr. X"
     doc_match = re.search(
-        r"(?:doctor|dr\.?)\s+([a-z][a-z0-9]*(?:\s+[a-z]+)*?)(?:\s+(?:have|has|is|are|slot|available|open|any|on|for))",
+        r"(?:doctor|dr\.?)\s+([a-z0-9_]+)",
         lowered,
     )
 
-    # Pattern 2: "with X" (covers "book an appointment with DocDipu for …")
+    # Pattern 2: "with X"
     if not doc_match:
         doc_match = re.search(
-            r"\bwith\s+([a-z][a-z0-9]*(?:\s+[a-z]+)*?)(?:\s+(?:for|on|at|today|tomorrow|slot|please|thanks|$))",
-            lowered,
-        )
-
-    # Pattern 3: standalone "X available/slots/open" without a prefix
-    if not doc_match:
-        doc_match = re.search(
-            r"\b([a-z][a-z0-9]{2,}(?:\s+[a-z]+)*?)\s+(?:available|availability|slots?|open|schedule)",
+            r"\bwith\s+([a-z0-9_]+)(?:\s+(?:for|on|at|today|tomorrow|slot|please|thanks|$))",
             lowered,
         )
 
     if doc_match:
-        intent.doctor_name = doc_match.group(1).strip()
-        print(f"[DEBUG][DOCTOR_NAME_EXTRACTED] {intent.doctor_name}")
+        extracted = doc_match.group(1).strip()
+        if extracted not in ["me", "you", "a", "the", "this"]:
+            intent.doctor_name = extracted
+            print(f"[DEBUG][DOCTOR_NAME_EXTRACTED] {intent.doctor_name}")
 
     # Extract booking slots if booking intent is detected
     if "book" in intent.actions:

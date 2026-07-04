@@ -9,7 +9,6 @@ from ..graph.state import UnifiedChatState
 
 
 _CLINICAL_PROGNOSIS_KEYWORDS = (
-    "you have",
     "diagnose",
     "suffer from",
 )

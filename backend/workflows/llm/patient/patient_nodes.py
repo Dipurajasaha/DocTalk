@@ -99,27 +99,11 @@ async def triage_evaluator(state: UnifiedChatState) -> dict[str, Any]:
 
 async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
     print("[DEBUG][LLM_STATE_KEYS]", state.keys())
-    print("[DEBUG][LLM_STATE_RAW]", {
-        "patient_history_context": state.get("patient_history_context"),
-        "consultation_context": state.get("consultation_context"),
-        "memory_context": state.get("memory_context")
-    })
+    print("[DEBUG][LLM_STATE_KEYS]", state.keys())
     
-    patient_history_context = state.get("patient_history_context") or []
-    consultation_context = state.get("consultation_context") or []
-    memory_context = state.get("memory_context") or []
-    appointment_context = state.get("appointment_context") or {}
     evidence = state.get("evidence") or []
     
     context_str = ""
-    if patient_history_context:
-        context_str += f"Patient History:\n{json.dumps(jsonable_encoder(patient_history_context))}\n\n"
-    if consultation_context:
-        context_str += f"Consultations:\n{json.dumps(jsonable_encoder(consultation_context))}\n\n"
-    if memory_context:
-        context_str += f"Memory:\n{json.dumps(jsonable_encoder(memory_context))}\n\n"
-    if appointment_context:
-        context_str += f"Appointments:\n{json.dumps(jsonable_encoder(appointment_context))}\n\n"
     if evidence:
         context_str += f"Evidence:\n{json.dumps(jsonable_encoder(evidence))}\n\n"
         
@@ -150,15 +134,9 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
     print("[DEBUG][PREVIOUS_AI_MESSAGES]", ai_message_count)
     
     print("[DEBUG][STATE_BEFORE_LLM]", {
-        "patient_history_context": len(patient_history_context),
-        "consultation_context": len(consultation_context),
-        "memory_context": len(memory_context),
         "evidence": len(evidence),
     })
     print("[DEBUG][LLM_PROMPT_CONTEXT_INJECTED]", bool(context_str))
-    print("[DEBUG][PATIENT_HISTORY_LEN]", len(patient_history_context))
-    print("[DEBUG][APPOINTMENT_LEN]", len(appointment_context.get("appointments", [])) if isinstance(appointment_context, dict) else 0)
-    print("[DEBUG][APPOINTMENT_PROMPT]", sys_content)
     print("[DEBUG][LLM] prompt =", messages)
     
     response = await llm.ainvoke(messages)
@@ -188,17 +166,8 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
 async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
     messages_list = list(state.get("messages") or [])
     last_message = messages_list[-1] if messages_list else None
-    query = message_content_text(last_message) if last_message else latest_message_text(messages_list)
-    context = await patient_rag_tool.ainvoke({"query": query, "state": state})
-    
-    # Strip unnecessary metadata to save token budget
-    clean_items = []
-    for item in context.get("items", []):
-        if isinstance(item, dict) and "content" in item:
-            clean_items.append({"content": item["content"]})
-    
-    clean_context = {"items": clean_items} if clean_items else {}
-    context_str = json.dumps(clean_context, default=str) if clean_context else ""
+    evidence = state.get("evidence") or []
+    context_str = json.dumps(jsonable_encoder(evidence), default=str) if evidence else ""
     
     sys_msg = SystemMessage(
         content=(
@@ -217,9 +186,6 @@ async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
     
     print("[DEBUG][MESSAGE_COUNT]", len(messages))
     print("[DEBUG][PREVIOUS_AI_MESSAGES]", ai_message_count)
-    print("[DEBUG][LLM] patient_history_context =", state.get("patient_history_context"))
-    print("[DEBUG][LLM] consultation_context =", state.get("consultation_context"))
-    print("[DEBUG][LLM] memory_context =", state.get("memory_context"))
     print("[DEBUG][LLM] evidence =", state.get("evidence"))
     print("[DEBUG][LLM] prompt =", messages)
     

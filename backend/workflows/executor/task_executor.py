@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .capability_registry import get_capability
+from .freshness_policy import evaluate_freshness_policy
 from ..composer.evidence_collector import EvidenceCollector
 from ..graph.state import UnifiedChatState
 
@@ -34,6 +35,15 @@ async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask) -
     params = dict(task_info.parameters)
     if task_info.action:
         params["action"] = task_info.action
+        
+    if "metadata" in capability:
+        try:
+            task_dict = task_info.model_dump()
+        except AttributeError:
+            task_dict = {"capability_name": cap_name, "parameters": params, "action": task_info.action}
+            
+        decision = evaluate_freshness_policy(capability["metadata"], state, task_dict)
+        print(f"[DEBUG][FRESHNESS_POLICY] {cap_name}: {decision.model_dump()}")
         
     print(f"[DEBUG][EXECUTOR] Executing capability: {cap_name} with params: {params}")
     result = await capability["handler"](state, params)
@@ -173,7 +183,7 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                     "content": f"Found {len(res.data)} available doctors.",
                     "metadata": {}
                 })
-        elif cap_name in ("APPOINTMENT_BOOK", "APPOINTMENT_CANCEL", "APPOINTMENT_RESCHEDULE", "APPOINTMENT_SEARCH_SLOTS"):
+        elif cap_name in ("APPOINTMENT_BOOK", "APPOINTMENT_CANCEL", "APPOINTMENT_RESCHEDULE"):
             if res.data is not None:
                 if result_dict.get("appointment_context") is None:
                     result_dict["appointment_context"] = {}
@@ -188,12 +198,30 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                     "content": msg,
                     "metadata": {"action": action}
                 })
+        elif cap_name == "APPOINTMENT_SEARCH_SLOTS":
+            if res.data is not None:
+                result_dict["doctor_availability_context"] = res.data
+                
+                if hasattr(res, "evidence") and res.evidence:
+                    content_str = "\n".join(res.evidence)
+                else:
+                    content_str = f"Found {len(res.data)} available doctors."
+                    
+                unified_evidence.append({
+                    "source": cap_name,
+                    "type": "doctor_availability",
+                    "content": content_str,
+                    "metadata": {}
+                })
                     
         if res.metadata.get("clear_doctor_availability"):
             clear_doctor_availability = True
 
     if clear_doctor_availability:
         result_dict["doctor_availability_context"] = []
+        pmeta = dict(state.get("planner_metadata") or {})
+        pmeta.pop("active_workflow", None)
+        result_dict["planner_metadata"] = pmeta
         
     result_dict["evidence"] = unified_evidence
 
