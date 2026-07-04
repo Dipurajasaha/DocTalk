@@ -104,115 +104,27 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     
     for res in aggregate.results:
         cap_name = res.capability_name
+        capability = get_capability(cap_name)
+        if not capability:
+            continue
+            
+        metadata = capability["metadata"]
         
-        if cap_name == "MEMORY":
-            if res.data is not None:
-                result_dict["memory_context"] = res.data
-                unified_evidence.append({
-                    "source": cap_name,
-                    "type": "memory",
-                    "content": f"Retrieved {len(res.data)} previous conversation messages.",
-                    "metadata": {}
-                })
-        elif cap_name == "CONSULTATION":
-            if res.data is not None:
-                result_dict["consultation_context"] = res.data
-                unified_evidence.append({
-                    "source": cap_name,
-                    "type": "consultation",
-                    "content": f"Retrieved {len(res.data)} past consultations.",
-                    "metadata": {}
-                })
-        elif cap_name == "PATIENT_HISTORY":
-            if res.data is not None:
-                result_dict["patient_history_context"] = res.data
-                unified_evidence.append({
-                    "source": cap_name,
-                    "type": "patient_history",
-                    "content": f"Medical history shows {len(res.data)} active conditions or records.",
-                    "metadata": {}
-                })
-        elif cap_name == "ASSET_INDEX":
-            if isinstance(res.data, dict):
-                asset_ctx = res.data.get("asset_selection_context", {})
-                if asset_ctx:
-                    result_dict["asset_selection_context"] = asset_ctx
-                if "rag_scope" in res.data:
-                    result_dict["rag_scope"] = res.data["rag_scope"]
-                    
-                asset_ids = asset_ctx.get("asset_ids", [])
-                reason = asset_ctx.get("selection_reason", "relevant")
-                rtype = asset_ctx.get("report_type", "document").replace("_", " ")
-                rag_evidence = [e for e in res.evidence if e.get("type") == "rag"]
+        for target_key in getattr(metadata, "target_context_keys", []):
+            if res.data is None:
+                continue
                 
-                if asset_ids:
-                    if rag_evidence:
-                        msg = f"Your {reason} {rtype} was located.\nRetrieved Findings:"
-                        for e in rag_evidence:
-                            msg += f"\n* {e.get('content')}"
-                    else:
-                        msg = f"Your {reason} {rtype} was located.\nSelected documents:"
-                        for aid in asset_ids:
-                            msg += f"\n* {rtype.title()} ({aid})"
-                            
-                    unified_evidence.append({
-                        "source": cap_name,
-                        "type": "asset_selection",
-                        "content": msg,
-                        "metadata": {"asset_ids": asset_ids}
-                    })
-        elif cap_name == "APPOINTMENT":
-            if res.data is not None:
-                result_dict["appointment_context"] = res.data
-                
-                if isinstance(res.data, dict):
-                    action = res.data.get("action", "processing")
-                    msg = res.data.get("message") or f"Appointment status: {action}."
-                    unified_evidence.append({
-                        "source": cap_name,
-                        "type": "appointment",
-                        "content": msg,
-                        "metadata": {"action": action}
-                    })
-        elif cap_name == "DOCTOR_AVAILABILITY":
-            if res.data is not None:
-                result_dict["doctor_availability_context"] = res.data
-                unified_evidence.append({
-                    "source": cap_name,
-                    "type": "doctor_availability",
-                    "content": f"Found {len(res.data)} available doctors.",
-                    "metadata": {}
-                })
-        elif cap_name in ("APPOINTMENT_BOOK", "APPOINTMENT_CANCEL", "APPOINTMENT_RESCHEDULE"):
-            if res.data is not None:
-                if result_dict.get("appointment_context") is None:
-                    result_dict["appointment_context"] = {}
-                if isinstance(res.data, dict):
-                    result_dict["appointment_context"].update(res.data)
-                    
-                action = result_dict["appointment_context"].get("action", "processing")
-                msg = result_dict["appointment_context"].get("message") or f"Appointment status: {action}."
-                unified_evidence.append({
-                    "source": cap_name,
-                    "type": "appointment",
-                    "content": msg,
-                    "metadata": {"action": action}
-                })
-        elif cap_name == "APPOINTMENT_SEARCH_SLOTS":
-            if res.data is not None:
-                result_dict["doctor_availability_context"] = res.data
-                
-                if hasattr(res, "evidence") and res.evidence:
-                    content_str = "\n".join(res.evidence)
+            if isinstance(res.data, dict) and target_key in res.data:
+                result_dict[target_key] = res.data[target_key]
+            else:
+                if isinstance(res.data, dict) and isinstance(result_dict.get(target_key), dict):
+                    result_dict[target_key].update(res.data)
                 else:
-                    content_str = f"Found {len(res.data)} available doctors."
+                    result_dict[target_key] = res.data
                     
-                unified_evidence.append({
-                    "source": cap_name,
-                    "type": "doctor_availability",
-                    "content": content_str,
-                    "metadata": {}
-                })
+        # Evidence is now generated entirely by the capabilities
+        if hasattr(res, "evidence") and res.evidence:
+            unified_evidence.extend(res.evidence)
                     
         if res.metadata.get("clear_doctor_availability"):
             clear_doctor_availability = True

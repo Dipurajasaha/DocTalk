@@ -1,0 +1,165 @@
+Initializing Test Runner (Role: PATIENT)
+
+Starting 7 tests...
+
+------------------------------------------------------------
+[1/7]
+Category: GENERAL
+Prompt:   Hello
+Status:   PASS
+Time:     11641 ms
+
+Final Response:
+Hello! I'm here to help you with any medical questions you might have. Please feel free to ask me anything, and I'll do my best to provide you with clear, helpful information. How can I assist you today?
+
+------------------------------------------------------------
+[2/7]
+Category: RAG
+Prompt:   Explain my latest blood report.
+Status:   PASS
+Time:     34039 ms
+
+Final Response:
+## Your Latest Blood Report Summary
+
+Here's an explanation of your blood test results:
+
+---
+
+### 🔴 **Key Abnormal Findings:**
+
+**1. Hemoglobin (Hb): 12.5 g/dL — LOW**
+- Normal range: 13.0 – 17.0 g/dL
+- Your hemoglobin is below the normal range, which suggests **mild anemia**. This means your blood has a reduced capacity to carry oxygen.
+
+**2. Packed Cell Volume (PCV): 57.5% — HIGH**
+- Normal range: 40 – 50%
+- This is elevated, which can sometimes be seen with dehydration or certain blood conditions. It's interesting that it's high while hemoglobin is low — this may warrant further investigation.
+
+**3. Platelet Count: 150,000/cumm — BORDERLINE LOW**
+- Normal range: 150,000 – 410,000/cumm
+- Your platelet count is at the very lower end of normal. Platelets help with blood clotting, so this should be monitored.
+
+---
+
+### ✅ **Normal Findings:**
+
+| Parameter | Your Value | Status |
+|-----------|-----------|--------|
+| RBC Count | 5.2 mill/cumm | Normal |
+| WBC Count | 9,000/cumm | Normal |
+| Neutrophils | 60% | Normal |
+| Lymphocytes | 31% | Normal |
+| Eosinophils | 1% | Normal |
+| Monocytes | 7% | Normal |
+| Basophils | 1% | Normal |
+| MCV | 87.75 fL | Normal |
+| MCH | 27.2 pg | Normal |
+| MCHC | 32.8 g/dL | Normal |
+| RDW | 13.6% | Normal |
+
+---
+
+### 📋 **Lab Interpretation:**
+The lab has noted: **"Further confirm for Anemia"**
+
+---
+
+### 💡 **What This May Mean:**
+- Your **low hemoglobin** points toward **anemia**, likely mild in nature
+- Your RBC indices (MCV, MCH, MCHC) are normal, suggesting the red blood cells are of normal size and color — this pattern is often seen in **normocytic anemia**
+- The **high PCV** alongside low hemoglobin is unusual and may need clarification with your doctor
+
+---
+
+### ⚠️ **Recommendation:**
+Please **consult your referring doctor (Dr. Hiren Shah)** to:
+1. Confirm the type and cause of anemia
+2. Investigate the elevated PCV
+3. Monitor your borderline platelet count
+4. Discuss whether any treatment or dietary changes are needed
+
+*Report generated on: 02 Dec, 202X | Lab: Drlogy Pathology Lab, Mumbai*
+
+------------------------------------------------------------
+[3/7]
+Category: MEMORY
+Prompt:   Summarize my previous consultations.
+Status:   PASS
+Time:     13845 ms
+
+Final Response:
+Based on the information available, there are no previous consultations to summarize.
+
+------------------------------------------------------------
+[4/7]
+Category: MULTI-CAPABILITY
+Prompt:   Summarize my previous consultations and latest blood report.
+Status:   PASS
+Time:     25396 ms
+
+Final Response:
+Based on the retrieved data, here is the summary:
+
+**Previous Consultations:**
+No past consultations were found in the records.
+
+**Latest Blood Report (Complete Blood Count):**
+Your blood test shows a few values outside the normal reference ranges:
+*   **Hemoglobin (Hb):** 15.5 g/dL (Normal: 13.0-17.0 g/dL)
+*   **Packed Cell Volume (PCV):** 57.5% (High; Normal: 40-50%)
+*   **Platelet Count:** 150,000/cumm (Borderline low; Normal: 150,000-410,000/cumm)
+
+Other parameters, including RBC count, WBC count, and differential counts, are within their normal ranges. The lab's interpretation note suggests further confirmation for anemia.
+
+------------------------------------------------------------
+[5/7]
+Category: WORKFLOW_SEQUENCE
+Prompt:   Is there any appointment slots available for Dr. DocDipu?
+Status:   PASS
+Time:     12767 ms
+
+Final Response:
+Yes, there are appointment slots available for Dr. DocDipu. Here are the available times:
+
+- **July 07, 2026 at 04:00 PM**
+- **July 07, 2026 at 04:30 PM**
+- **July 07, 2026 at 09:30 PM**
+
+Would you like to book one of these slots?
+
+------------------------------------------------------------
+[6/7]
+Category: WORKFLOW_SEQUENCE
+Prompt:   Book the first available slot.
+Status:   PASS
+Time:     13715 ms
+
+Final Response:
+I found the first available slot for you:
+
+**July 07, 2026 at 04:00 PM** with **Dr. DocDipu**
+
+Would you like me to proceed with booking this appointment?
+
+------------------------------------------------------------
+[7/7]
+Category: WORKFLOW_SEQUENCE
+Prompt:   Cancel my appointment.
+Status:   PASS
+Time:     5684 ms
+
+Final Response:
+I couldn't find any upcoming appointments to cancel.
+
+============================================================
+SUMMARY
+============================================================
+Total Tests            : 7
+Passed                 : 7
+Failed                 : 0
+Average Execution Time : 16726 ms
+============================================================
+
+Saved 7 results to test_results.csv
+Console log saved to logs/regression_2026-07-05_04-15.log

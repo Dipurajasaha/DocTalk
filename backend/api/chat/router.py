@@ -546,19 +546,20 @@ async def _run_ai_websocket(
             conversation_messages = _langchain_messages_from_db_history(db_history)
             conversation_messages.append(HumanMessage(content=user_text))
 
-            workflow_state = create_workflow_state(
-                messages=conversation_messages,
-                role=current_user.role,  # type: ignore[arg-type]
-                user_id=current_user.user_id,
-                ai_session_id=ai_session_id,
-                target_patient_id=normalized_target_patient_id,
-                context_payload={
+            input_state = {
+                "messages": conversation_messages,
+                "role": current_user.role,
+                "user_id": current_user.user_id,
+                "ai_session_id": ai_session_id,
+                "target_patient_id": normalized_target_patient_id,
+                "context_payload": {
                     "ai_session_id": ai_session_id,
                     "user_id": current_user.user_id,
                     "target_patient_id": normalized_target_patient_id,
                     "role": current_user.role,
                 },
-            )
+                "final_response": "",
+            }
 
             final_response = ""
             streamed_token = False
@@ -566,7 +567,7 @@ async def _run_ai_websocket(
             metadata_buffer = _StreamingMetadataBuffer()
 
             try:
-                async for event in unified_chat_graph.astream_events(workflow_state, config=ai_config, version="v2"):
+                async for event in unified_chat_graph.astream_events(input_state, config=ai_config, version="v2"):
                     event_name = str(event.get("event") or "")
                     node_name = str(event.get("name") or "")
                     data = dict(event.get("data") or {})

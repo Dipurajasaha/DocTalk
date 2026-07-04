@@ -13,3 +13,5 @@ class CapabilityMetadata(BaseModel):
     priority: int = Field(default=10, description="Execution priority (lower number = higher priority).")
     supports_parallel_execution: bool = Field(default=True, description="If True, this capability can be executed concurrently with others.")
     description: str = Field(description="Human-readable description of what this capability does.")
+    target_context_keys: list[str] = Field(default_factory=list, description="Keys in the UnifiedChatState where the result data should be merged.")
+    evidence_behavior: str = Field(default="pass_through", description="How evidence is collected for this capability.")

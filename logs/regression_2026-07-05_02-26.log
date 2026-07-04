@@ -1,0 +1,182 @@
+Initializing Test Runner (Role: PATIENT)
+
+Starting 8 tests...
+
+------------------------------------------------------------
+[1/8]
+Category: GENERAL
+Prompt:   Hello
+Status:   PASS
+Time:     8763 ms
+
+Final Response:
+Hello! How can I help you today?
+
+------------------------------------------------------------
+[2/8]
+Category: RAG
+Prompt:   Explain my latest blood report.
+Status:   PASS
+Time:     30750 ms
+
+Final Response:
+Based on the retrieved blood test report for Yash M. Patel (Age: 21, Sex: Male), here is an explanation of the findings:
+
+**Key Finding: Anemia**
+The report indicates a low hemoglobin level, which is the main marker for anemia.
+*   **Hemoglobin (Hb): 12.5 g/dL (Low)**
+    *   Reference Range: 13.0 - 17.0 g/dL
+    *   This value is below the normal range, confirming anemia.
+
+**Complete Blood Count (CBC) Breakdown:**
+
+*   **Red Blood Cells (RBCs):**
+    *   **RBC Count: 5.2 mill/cumm** (Normal range: 4.5 - 5.5) - This is within the normal range.
+    *   **Packed Cell Volume (PCV) / Hematocrit: 57.5% (High)** - Reference Range: 40 - 50%. This value is elevated.
+    *   **Mean Corpuscular Volume (MCV): 87.75 fL** (Normal range: 83 - 101) - Normal.
+    *   **Mean Corpuscular Hemoglobin (MCH): 27.2 pg** (Normal range: 27 - 32) - Normal.
+    *   **Mean Corpuscular Hemoglobin Concentration (MCHC): 32.8 g/dL** (Normal range: 32.5 - 34.5) - Normal.
+    *   **Red Cell Distribution Width (RDW): 13.6%** (Normal range: 11.6 - 14.0) - Normal.
+
+*   **White Blood Cells (WBCs):**
+    *   **Total WBC Count: 9000/cumm** (Normal range: 4000 - 11000) - Normal.
+    *   **Differential Count:**
+        *   Neutrophils: 60% (Normal)
+        *   Lymphocytes: 31% (Normal)
+        *   Eosinophils: 1% (Normal)
+        *   Monocytes: 7% (Normal)
+        *   Basophils: 1% (Normal)
+
+*   **Platelets:**
+    *   **Platelet Count: 150,000/cumm (Borderline)** - Reference Range: 150,000 - 410,000. This is at the lower limit of normal.
+
+**Report Interpretation:**
+The lab's interpretation states: "Further confirm for Anemia."
+
+**Summary:**
+The report confirms anemia due to low hemoglobin. The RBC count and indices (MCV, MCH, MCHC, RDW) are normal, which can help classify the type of anemia. The high PCV is unusual alongside low hemoglobin and may require correlation. The WBC count and differential are normal, and the platelet count is at the borderline lower limit. The report recommends further confirmation for anemia.
+
+------------------------------------------------------------
+[3/8]
+Category: MEMORY
+Prompt:   Summarize my previous consultations.
+Status:   PASS
+Time:     12493 ms
+
+Final Response:
+Based on the available records, there are no previous consultations to summarize. The system shows that 0 past consultations were retrieved for your account.
+
+If you believe you should have consultation history or need information about a specific past visit, please let me know and I can help guide you on next steps.
+
+------------------------------------------------------------
+[4/8]
+Category: MULTI-CAPABILITY
+Prompt:   Summarize my previous consultations and latest blood report.
+Status:   PASS
+Time:     30489 ms
+
+Final Response:
+## Summary
+
+### Previous Consultations
+**No past consultations found.** There are no previous consultation records available in the system.
+
+---
+
+### Latest Blood Report Summary
+
+**Patient:** Yash M. Patel (21 Years, Male)  
+**Report Date:** 02 Dec, 202X  
+**Ref. By:** Dr. Hiren Shah
+
+#### Key Findings:
+
+**Abnormal Values:**
+- **Hemoglobin (Hb):** 12.5 g/dL — **LOW** (Normal: 13.0-17.0)
+- **Packed Cell Volume (PCV):** 57.5% — **HIGH** (Normal: 40-50%)
+- **Platelet Count:** 150,000 — **BORDERLINE** (Normal: 150,000-410,000)
+
+**Normal Values:**
+- RBC Count: 5.2 mill/cumm ✅
+- WBC Count: 9,000 cumm ✅
+- Differential Count (Neutrophils, Lymphocytes, Eosinophils, Monocytes, Basophils): All within normal limits ✅
+- MCV, MCH, MCHC, RDW: All within normal limits ✅
+
+#### Interpretation:
+The report indicates **low hemoglobin** with **elevated PCV**, and suggests **further confirmation for anemia**. The borderline platelet count also warrants attention.
+
+**Recommendation:** Please consult with your healthcare provider for proper evaluation and to determine if further testing or treatment is needed for the anemia indication.
+
+------------------------------------------------------------
+[5/8]
+Category: WORKFLOW_SEQUENCE
+Prompt:   Is there any appointment slots available for Dr. DocDipu?
+Status:   PASS
+Time:     12032 ms
+
+Final Response:
+Yes, there are appointment slots available for Dr. DocDipu. Here are the available times:
+
+- **July 07, 2026 at 04:00 PM**
+- **July 07, 2026 at 04:30 PM**
+- **July 07, 2026 at 09:30 PM**
+
+Would you like me to help you book one of these slots?
+
+------------------------------------------------------------
+[6/8]
+Category: WORKFLOW_SEQUENCE
+Prompt:   Book the first available slot.
+Status:   PASS
+Time:     11087 ms
+
+Final Response:
+Your appointment has been booked successfully.
+
+Doctor: DocDipu
+Date: July 07, 2026
+Time: 04:00 PM
+Status: Confirmed
+
+------------------------------------------------------------
+[7/8]
+Category: WORKFLOW_SEQUENCE
+Prompt:   Yes, please book it.
+Status:   PASS
+Time:     14094 ms
+
+Final Response:
+I'd be happy to help you book an appointment! However, I need a bit more information to proceed:
+
+1. **Which doctor would you like to book with?** I can see that Dr. DocDipu has available slots on July 07, 2026 at:
+   - 04:00 PM
+   - 04:30 PM
+   - 09:30 PM
+
+2. **Which time slot would you prefer?**
+
+3. **What is the appointment for?** (e.g., general consultation, follow-up, specific concern)
+
+Once you provide these details, I can help you book the appointment.
+
+------------------------------------------------------------
+[8/8]
+Category: WORKFLOW_SEQUENCE
+Prompt:   Cancel my appointment.
+Status:   PASS
+Time:     5144 ms
+
+Final Response:
+I couldn't find any upcoming appointments to cancel.
+
+============================================================
+SUMMARY
+============================================================
+Total Tests            : 8
+Passed                 : 8
+Failed                 : 0
+Average Execution Time : 15606 ms
+============================================================
+
+Saved 8 results to test_results.csv
+Console log saved to logs/regression_2026-07-05_02-26.log

@@ -29,9 +29,16 @@ from ..capabilities.retrievers.doctor_availability_retriever import retrieve_doc
 async def handle_memory_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
     ai_session_id = str(state.get("ai_session_id") or "")
     if ai_session_id:
+        data = await retrieve_conversation_memory(session_id=ai_session_id)
         return CapabilityResult(
             capability_name="MEMORY",
-            data=await retrieve_conversation_memory(session_id=ai_session_id)
+            data=data,
+            evidence=[{
+                "source": "MEMORY",
+                "type": "memory",
+                "content": f"Retrieved {len(data)} previous conversation messages.",
+                "metadata": {}
+            }]
         )
     return CapabilityResult(capability_name="MEMORY")
 
@@ -50,29 +57,29 @@ async def handle_appointment_retrieve(state: UnifiedChatState, params: dict[str,
             doctor_id=c_doctor_id,
             upcoming_only=(action == "upcoming")
         )
-        evidence = []
-        for appt in appointments:
-            appt["type"] = "appointment"
-            evidence.append(appt)
         return CapabilityResult(
             capability_name="APPOINTMENT",
-            data={"action": "list", "appointments": appointments},
-            evidence=evidence
+            data={"action": action, "appointments": appointments},
+            evidence=[{
+                "source": "APPOINTMENT",
+                "type": "appointment",
+                "content": f"Appointment status: {action}.",
+                "metadata": {"action": action}
+            }]
         )
     return CapabilityResult(capability_name="APPOINTMENT")
 
 async def handle_doctor_availability_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
-    doctor_name = params.get("doctor_name")
     docs = await retrieve_doctor_availability(doctor_name=doctor_name)
-    evidence = []
-    for d in docs:
-        d_copy = dict(d)
-        d_copy["type"] = "doctor_availability"
-        evidence.append(d_copy)
     return CapabilityResult(
         capability_name="DOCTOR_AVAILABILITY",
         data=docs,
-        evidence=evidence
+        evidence=[{
+            "source": "DOCTOR_AVAILABILITY",
+            "type": "doctor_availability",
+            "content": f"Found {len(docs)} available doctors.",
+            "metadata": {}
+        }]
     )
 
 async def handle_consultation_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
@@ -84,14 +91,20 @@ async def handle_consultation_retrieve(state: UnifiedChatState, params: dict[str
     c_doctor_id = user_id if role == "doctor" else None
             
     if c_patient_id or c_doctor_id:
-        consultation_context = await retrieve_consultations(
+        data = await retrieve_consultations(
             patient_id=c_patient_id, 
             doctor_id=c_doctor_id, 
             limit=5
         )
         return CapabilityResult(
             capability_name="CONSULTATION",
-            data=consultation_context
+            data=data,
+            evidence=[{
+                "source": "CONSULTATION",
+                "type": "consultation",
+                "content": f"Retrieved {len(data)} past consultations.",
+                "metadata": {}
+            }]
         )
     return CapabilityResult(capability_name="CONSULTATION")
 
@@ -107,18 +120,15 @@ async def handle_patient_history_retrieve(state: UnifiedChatState, params: dict[
         
     if p_id:
         history_entries = await get_history_by_type(p_id, history_type) if history_type else await get_patient_history(p_id)
-        evidence = []
-        for entry in history_entries:
-            evidence.append({
-                "type": "patient_history",
-                "history_type": entry.get("historyType"),
-                "title": entry.get("title"),
-                "value": entry.get("value")
-            })
         return CapabilityResult(
             capability_name="PATIENT_HISTORY",
             data=history_entries,
-            evidence=evidence
+            evidence=[{
+                "source": "PATIENT_HISTORY",
+                "type": "patient_history",
+                "content": f"Medical history shows {len(history_entries)} active conditions or records.",
+                "metadata": {}
+            }]
         )
     return CapabilityResult(capability_name="PATIENT_HISTORY")
 
@@ -156,12 +166,9 @@ async def handle_asset_index_retrieve(state: UnifiedChatState, params: dict[str,
     evidence = []
     if asset_ids:
         data["rag_scope"] = {"asset_ids": asset_ids}
-        evidence.append({
-            "type": "asset_selection",
-            "asset_ids": asset_ids
-        })
         
         query = latest_message_text(state.get("messages"))
+        rag_evidence = []
         if p_id and query:
             rag_result = await retrieve_asset_scoped_context(
                 query=query,
@@ -169,11 +176,29 @@ async def handle_asset_index_retrieve(state: UnifiedChatState, params: dict[str,
                 patient_id=p_id
             )
             for item in rag_result.get("items", []):
-                evidence.append({
+                rag_evidence.append({
                     "type": "rag",
                     "content": item.get("content", ""),
                     "source_asset": item.get("metadata", {}).get("asset_id", "")
                 })
+                
+        reason = asset_selection_context.get("selection_reason", "relevant")
+        rtype = asset_selection_context.get("report_type", "document").replace("_", " ")
+        if rag_evidence:
+            msg = f"Your {reason} {rtype} was located.\nRetrieved Findings:"
+            for e in rag_evidence:
+                msg += f"\n* {e.get('content')}"
+        else:
+            msg = f"Your {reason} {rtype} was located.\nSelected documents:"
+            for aid in asset_ids:
+                msg += f"\n* {rtype.title()} ({aid})"
+                
+        evidence.append({
+            "source": "ASSET_INDEX",
+            "type": "asset_selection",
+            "content": msg,
+            "metadata": {"asset_ids": asset_ids}
+        })
     return CapabilityResult(
         capability_name="ASSET_INDEX",
         data=data,
@@ -254,12 +279,19 @@ async def handle_appointment_book(state: UnifiedChatState, params: dict[str, Any
             matched_slot = slots[0]
             
     if not matched_slot:
+        data = {
+            "action": "confirmed",
+            "message": "This slot is no longer available or could not be found. Please check available slots again."
+        }
         return CapabilityResult(
             capability_name="APPOINTMENT_BOOK",
-            data={
-                "action": "confirmed",
-                "message": "This slot is no longer available or could not be found. Please check available slots again."
-            }
+            data=data,
+            evidence=[{
+                "source": "APPOINTMENT_BOOK",
+                "type": "appointment",
+                "content": data["message"],
+                "metadata": {"action": "confirmed"}
+            }]
         )
         
     try:
@@ -283,22 +315,36 @@ async def handle_appointment_book(state: UnifiedChatState, params: dict[str, Any
             tz = zoneinfo.ZoneInfo("Asia/Kolkata")
             local_time = matched_slot.startTime.astimezone(tz)
             
+            data = {
+                "action": "confirmed",
+                "message": f"Appointment booked successfully.\n\nDoctor: {matched_slot.doctor.name}\nDate: {local_time.strftime('%B %d, %Y')}\nTime: {local_time.strftime('%I:%M %p')}\nStatus: Confirmed"
+            }
             return CapabilityResult(
                 capability_name="APPOINTMENT_BOOK",
-                data={
-                    "action": "confirmed",
-                    "message": f"Appointment booked successfully.\n\nDoctor: {matched_slot.doctor.name}\nDate: {local_time.strftime('%B %d, %Y')}\nTime: {local_time.strftime('%I:%M %p')}\nStatus: Confirmed"
-                },
+                data=data,
+                evidence=[{
+                    "source": "APPOINTMENT_BOOK",
+                    "type": "appointment",
+                    "content": data["message"],
+                    "metadata": {"action": "confirmed"}
+                }],
                 metadata={"clear_doctor_availability": True}
             )
     except Exception as exc:
         print(f"[DEBUG][BOOKING_ERROR] {exc}")
+        data = {
+            "action": "error",
+            "message": "An error occurred while booking the appointment. Please try again."
+        }
         return CapabilityResult(
             capability_name="APPOINTMENT_BOOK",
-            data={
-                "action": "confirmed",
-                "message": "An error occurred while booking the appointment. Please try again."
-            }
+            data=data,
+            evidence=[{
+                "source": "APPOINTMENT_BOOK",
+                "type": "appointment",
+                "content": data["message"],
+                "metadata": {"action": "error"}
+            }]
         )
 
 async def handle_appointment_cancel(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
@@ -315,12 +361,19 @@ async def handle_appointment_cancel(state: UnifiedChatState, params: dict[str, A
     )
     
     if not upcoming:
+        data = {
+            "action": "cancel",
+            "message": "I couldn't find any upcoming appointments to cancel."
+        }
         return CapabilityResult(
             capability_name="APPOINTMENT_CANCEL",
-            data={
-                "action": "cancel",
-                "message": "I couldn't find any upcoming appointments to cancel."
-            }
+            data=data,
+            evidence=[{
+                "source": "APPOINTMENT_CANCEL",
+                "type": "appointment",
+                "content": data["message"],
+                "metadata": {"action": "cancel"}
+            }]
         )
         
     try:
@@ -338,28 +391,49 @@ async def handle_appointment_cancel(state: UnifiedChatState, params: dict[str, A
         tz = zoneinfo.ZoneInfo("Asia/Kolkata")
         local_time = upcoming.appointmentDate.astimezone(tz)
         
+        data = {
+            "action": "cancel",
+            "message": f"I have successfully cancelled your appointment with Dr. {upcoming.doctor.name} on {local_time.strftime('%B %d, %Y at %I:%M %p')}."
+        }
         return CapabilityResult(
             capability_name="APPOINTMENT_CANCEL",
-            data={
-                "action": "cancel",
-                "message": f"I have successfully cancelled your appointment with Dr. {upcoming.doctor.name} on {local_time.strftime('%B %d, %Y at %I:%M %p')}."
-            },
+            data=data,
+            evidence=[{
+                "source": "APPOINTMENT_CANCEL",
+                "type": "appointment",
+                "content": data["message"],
+                "metadata": {"action": "cancel"}
+            }],
             metadata={"clear_doctor_availability": True}
         )
     except Exception as exc:
         print(f"[DEBUG][CANCEL_ERROR] {exc}")
+        data = {
+            "action": "cancel",
+            "message": "An error occurred while cancelling the appointment."
+        }
         return CapabilityResult(
             capability_name="APPOINTMENT_CANCEL",
-            data={
-                "action": "cancel",
-                "message": "An error occurred while cancelling the appointment."
-            }
+            data=data,
+            evidence=[{
+                "source": "APPOINTMENT_CANCEL",
+                "type": "appointment",
+                "content": data["message"],
+                "metadata": {"action": "cancel"}
+            }]
         )
 
 async def handle_appointment_reschedule(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
+    data = {"action": "reschedule", "message": "Appointment status: reschedule."}
     return CapabilityResult(
         capability_name="APPOINTMENT_RESCHEDULE",
-        data={"action": "reschedule"},
+        data=data,
+        evidence=[{
+            "source": "APPOINTMENT_RESCHEDULE",
+            "type": "appointment",
+            "content": data["message"],
+            "metadata": {"action": "reschedule"}
+        }],
         metadata={"clear_doctor_availability": True}
     )
 
@@ -367,21 +441,27 @@ async def handle_appointment_search_slots(state: UnifiedChatState, params: dict[
     doctor_name = params.get("doctor_name")
     docs = await retrieve_doctor_availability(doctor_name=doctor_name)
     
-    evidence = []
+    evidence_strings = []
     for d in docs:
         if "error" in d or "message" in d:
-            evidence.append(d.get("message") or d.get("error"))
+            evidence_strings.append(d.get("message") or d.get("error"))
         else:
             slots = "\n- ".join(d.get("available_slots", []))
             if slots:
-                evidence.append(f"Available slots for Dr. {d.get('doctor_name')}:\n- {slots}")
+                evidence_strings.append(f"Available slots for Dr. {d.get('doctor_name')}:\n- {slots}")
             else:
-                evidence.append(f"No available slots for Dr. {d.get('doctor_name')}.")
+                evidence_strings.append(f"No available slots for Dr. {d.get('doctor_name')}.")
                 
+    content_str = "\n".join(evidence_strings) if evidence_strings else f"Found {len(docs)} available doctors."
     return CapabilityResult(
         capability_name="APPOINTMENT_SEARCH_SLOTS",
         data=docs,
-        evidence=evidence
+        evidence=[{
+            "source": "APPOINTMENT_SEARCH_SLOTS",
+            "type": "doctor_availability",
+            "content": content_str,
+            "metadata": {}
+        }]
     )
 
 REGISTRY: dict[str, Capability] = {
@@ -399,7 +479,9 @@ REGISTRY: dict[str, Capability] = {
             allow_cache=False,
             priority=10,
             supports_parallel_execution=True,
-            description="Retrieves the conversational memory context for the active AI session."
+            description="Retrieves the conversational memory context for the active AI session.",
+            target_context_keys=["memory_context"],
+            evidence_behavior="pass_through"
         )
     },
     "CONSULTATION": {
@@ -415,7 +497,9 @@ REGISTRY: dict[str, Capability] = {
             allow_cache=True,
             priority=10,
             supports_parallel_execution=True,
-            description="Retrieves the recent consultations for the user or target patient."
+            description="Retrieves the recent consultations for the user or target patient.",
+            target_context_keys=["consultation_context"],
+            evidence_behavior="pass_through"
         )
     },
     "PATIENT_HISTORY": {
@@ -431,7 +515,9 @@ REGISTRY: dict[str, Capability] = {
             allow_cache=True,
             priority=10,
             supports_parallel_execution=True,
-            description="Retrieves structured patient history like vitals and conditions."
+            description="Retrieves structured patient history like vitals and conditions.",
+            target_context_keys=["patient_history_context"],
+            evidence_behavior="pass_through"
         )
     },
     "ASSET_INDEX": {
@@ -447,7 +533,9 @@ REGISTRY: dict[str, Capability] = {
             allow_cache=True,
             priority=10,
             supports_parallel_execution=True,
-            description="Retrieves documents or reports for the patient."
+            description="Retrieves documents or reports for the patient.",
+            target_context_keys=["asset_selection_context", "rag_scope"],
+            evidence_behavior="pass_through"
         )
     },
     "APPOINTMENT": {
@@ -463,7 +551,9 @@ REGISTRY: dict[str, Capability] = {
             allow_cache=False,
             priority=10,
             supports_parallel_execution=True,
-            description="Retrieves the list of upcoming or past appointments."
+            description="Retrieves the list of upcoming or past appointments.",
+            target_context_keys=["appointment_context"],
+            evidence_behavior="pass_through"
         )
     },
     "DOCTOR_AVAILABILITY": {
@@ -479,7 +569,9 @@ REGISTRY: dict[str, Capability] = {
             allow_cache=False,
             priority=10,
             supports_parallel_execution=True,
-            description="Retrieves available slots for doctors."
+            description="Retrieves available slots for doctors.",
+            target_context_keys=["doctor_availability_context"],
+            evidence_behavior="pass_through"
         )
     },
     # Actions
@@ -496,7 +588,9 @@ REGISTRY: dict[str, Capability] = {
             allow_cache=False,
             priority=20,
             supports_parallel_execution=False,
-            description="Books an appointment."
+            description="Books an appointment.",
+            target_context_keys=["appointment_context"],
+            evidence_behavior="pass_through"
         )
     },
     "APPOINTMENT_CANCEL": {
@@ -512,7 +606,9 @@ REGISTRY: dict[str, Capability] = {
             allow_cache=False,
             priority=20,
             supports_parallel_execution=False,
-            description="Cancels an upcoming appointment."
+            description="Cancels an upcoming appointment.",
+            target_context_keys=["appointment_context"],
+            evidence_behavior="pass_through"
         )
     },
     "APPOINTMENT_RESCHEDULE": {
@@ -528,7 +624,9 @@ REGISTRY: dict[str, Capability] = {
             allow_cache=False,
             priority=20,
             supports_parallel_execution=False,
-            description="Reschedules an appointment."
+            description="Reschedules an appointment.",
+            target_context_keys=["appointment_context"],
+            evidence_behavior="pass_through"
         )
     },
     "APPOINTMENT_SEARCH_SLOTS": {
@@ -544,7 +642,9 @@ REGISTRY: dict[str, Capability] = {
             allow_cache=False,
             priority=10,
             supports_parallel_execution=True,
-            description="Searches for available appointment slots."
+            description="Searches for available appointment slots.",
+            target_context_keys=["doctor_availability_context"],
+            evidence_behavior="pass_through"
         )
     }
 }

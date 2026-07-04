@@ -277,13 +277,19 @@ class PlanningEngine:
                     if booking_datetime:
                         self.plan.metadata["booking_datetime"] = booking_datetime
 
+                    # Fallback to existing contexts if missing from resolved entity
+                    avail_ctx = self.state.get("doctor_availability_context") or []
+                    avail_dict = avail_ctx[0] if isinstance(avail_ctx, list) and len(avail_ctx) > 0 else {}
+                    prev_wf_dict = self.plan.metadata.get("active_workflow") or {}
+                    prev_ctx = prev_wf_dict.get("context", {}) if isinstance(prev_wf_dict, dict) else {}
+
                     wf_context = {
-                        "doctor_name": doc_name or res_ctx.resolved_entity.get("doctor_name"),
-                        "doctor_id": doc_name or res_ctx.resolved_entity.get("doctor_id"),
+                        "doctor_name": doc_name or res_ctx.resolved_entity.get("doctor_name") or avail_dict.get("doctor_name") or prev_ctx.get("doctor_name"),
+                        "doctor_id": doc_name or res_ctx.resolved_entity.get("doctor_id") or avail_dict.get("doctor_id") or prev_ctx.get("doctor_id"),
                         "selected_slot": booking_datetime,
                         "appointment_time": booking_datetime,
                         "selection_type": booking_ordinal,
-                        "available_slots": slots,
+                        "available_slots": slots or avail_dict.get("available_slots") or prev_ctx.get("available_slots", []),
                     }
                     new_wf = ActiveWorkflow(
                         type="appointment_booking",
@@ -291,6 +297,7 @@ class PlanningEngine:
                         context=wf_context
                     )
                     self.plan.metadata["active_workflow"] = new_wf.to_dict()
+                    tasks.append(PlannerTask.create_retrieve("APPOINTMENT_SEARCH_SLOTS", parameters=params))
                 elif doc_name or ("book" in self.intent.actions):
                     wf_context = {
                         "doctor_name": doc_name,
@@ -383,7 +390,13 @@ class PlanningEngine:
                 current_wf_dict = self.plan.metadata.get("active_workflow")
                 current_wf = ActiveWorkflow.from_dict(current_wf_dict) if current_wf_dict else None
                 wf_ctx = current_wf.context if current_wf else {}
-                b_dt = self.plan.metadata.get("booking_datetime") or res_ent.get("booking_datetime") or res_ent.get("appointment_time") or res_ent.get("selected_slot")
+                b_dt = (
+                    res_ent.get("booking_datetime") or 
+                    res_ent.get("appointment_time") or 
+                    res_ent.get("selected_slot") or 
+                    (self.intent.booking_datetime if self.intent else None) or 
+                    self.plan.metadata.get("booking_datetime")
+                )
                 b_ord = self.plan.metadata.get("booking_ordinal") or res_ent.get("selection_type") or wf_ctx.get("selection_type")
 
                 updated_ctx = {

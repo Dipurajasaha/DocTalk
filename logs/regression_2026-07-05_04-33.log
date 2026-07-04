@@ -1,0 +1,158 @@
+Initializing Test Runner (Role: PATIENT)
+
+Starting 7 tests...
+
+------------------------------------------------------------
+[1/7]
+Category: GENERAL
+Prompt:   Hello
+Status:   PASS
+Time:     12676 ms
+
+Final Response:
+Hello! I'm here to help you with any health-related questions or concerns you might have. How can I assist you today?
+
+------------------------------------------------------------
+[2/7]
+Category: RAG
+Prompt:   Explain my latest blood report.
+Status:   PASS
+Time:     33944 ms
+
+Final Response:
+Based on the retrieved blood test report, here is an explanation of your latest results:
+
+**Key Findings:**
+Your report indicates a few values outside the normal reference range, primarily suggesting a need to investigate for anemia.
+
+**Detailed Breakdown:**
+
+*   **Hemoglobin (Hb): 12.5 g/dL (Low)**
+    *   **Normal Range:** 13.0 - 17.0 g/dL
+    *   **Explanation:** This is below the normal level, which is a key indicator of anemia. Anemia means your blood has a reduced capacity to carry oxygen to your body's tissues.
+
+*   **Packed Cell Volume (PCV) / Hematocrit: 57.5% (High)**
+    *   **Normal Range:** 40 - 50%
+    *   **Explanation:** This measures the proportion of your blood that is made up of red blood cells. A high PCV can sometimes be seen in conditions where the body is trying to compensate for low oxygen-carrying capacity (like in some anemias), or it could indicate dehydration. It's an unusual finding alongside low hemoglobin and needs clinical correlation.
+
+*   **Platelet Count: 150,000 /cumm (Borderline Low)**
+    *   **Normal Range:** 150,000 - 410,000 /cumm
+    *   **Explanation:** Your platelet count is at the very lower limit of the normal range. Platelets are crucial for blood clotting. A borderline low count might not cause immediate issues but should be monitored.
+
+*   **Other Red Blood Cell Indices (MCV, MCH, MCHC, RDW):**
+    *   These values (MCV 87.75 fL, MCH 27.2 pg, MCHC 32.8 g/dL, RDW 13.6%) are all within their normal ranges. This suggests that the red blood cells you do have are of normal size and contain a normal amount of hemoglobin.
+
+*   **White Blood Cell (WBC) Count and Differential:**
+    *   Your total WBC count (9000 /cumm) and the percentages of different types of white blood cells (Neutrophils, Lymphocytes, etc.) are all within normal ranges. This generally indicates no active infection or significant inflammation at the time of the test.
+
+**Report Interpretation:**
+The report itself states: "Further confirm for Anemia." This directly aligns with the low hemoglobin level.
+
+**Important Note:**
+This explanation is based solely on the provided lab report. It is not a medical diagnosis. The combination of low hemoglobin with a high PCV is unusual and requires a doctor's evaluation to determine the underlying cause. Please discuss these results with your healthcare provider, who can interpret them in the context of your overall health, symptoms, and medical history.
+
+------------------------------------------------------------
+[3/7]
+Category: MEMORY
+Prompt:   Summarize my previous consultations.
+Status:   PASS
+Time:     14943 ms
+
+Final Response:
+Based on the available information, there are **no previous consultations** found in your records.
+
+If you believe you should have past consultations on file or need help with something else, please let me know how I can assist you.
+
+------------------------------------------------------------
+[4/7]
+Category: MULTI-CAPABILITY
+Prompt:   Summarize my previous consultations and latest blood report.
+Status:   PASS
+Time:     28845 ms
+
+Final Response:
+Based on the retrieved data, here is your summary:
+
+## Previous Consultations
+**No past consultations found.** There are no records of previous consultations in the system.
+
+## Latest Blood Report Summary
+
+**Patient:** 21-year-old Male (PID: 555)
+**Sample Collection:** December 2, 202X at 03:11 PM
+**Reported:** December 2, 202X at 04:35 PM
+**Referral:** Dr. Hiren Shah
+**Lab:** Drlogy Pathology Lab, Mumbai
+
+### Key Findings:
+
+**Abnormal Results:**
+- **Hemoglobin (Hb): 12.5 g/dL** — **Low** (Normal: 13.0-17.0 g/dL)
+- **Packed Cell Volume (PCV): 57.5%** — **High** (Normal: 40-50%)
+- **Platelet Count: 150,000/cumm** — **Borderline low** (Normal: 150,000-410,000)
+
+**Normal Results:**
+- RBC Count: 5.2 mill/cumm ✅
+- WBC Count: 9,000/cumm ✅
+- Differential WBC (Neutrophils, Lymphocytes, Eosinophils, Monocytes, Basophils) — All within normal range ✅
+- MCV: 87.75 fL ✅
+- MCH: 27.2 pg ✅
+- MCHC: 32.8 g/dL ✅
+- RDW: 13.6% ✅
+
+### Lab Interpretation:
+The report notes **"Further confirm for Anemia"** based on the low hemoglobin level. The elevated PCV (hematocrit) alongside low hemoglobin is notable and may warrant further clinical correlation.
+
+**Recommendation:** Please consult with your doctor to discuss these results, particularly the low hemoglobin and borderline platelet count, and to determine if further investigation or treatment is needed.
+
+------------------------------------------------------------
+[5/7]
+Category: WORKFLOW_SEQUENCE
+Prompt:   Is there any appointment slots available for Dr. DocDipu?
+Status:   PASS
+Time:     13780 ms
+
+Final Response:
+Yes, there are appointment slots available for Dr. DocDipu. Here are the available times:
+
+- **July 07, 2026 at 04:00 PM**
+- **July 07, 2026 at 04:30 PM**
+- **July 07, 2026 at 09:30 PM**
+
+Would you like to schedule an appointment for any of these time slots?
+
+------------------------------------------------------------
+[6/7]
+Category: WORKFLOW_SEQUENCE
+Prompt:   Book the first available slot.
+Status:   PASS
+Time:     13397 ms
+
+Final Response:
+Based on the available data, the first available slot is:
+
+**Dr. DocDipu - July 07, 2026 at 04:00 PM**
+
+However, I should note that as an AI assistant, I cannot actually book appointments for you. You would need to contact the healthcare provider's office or use their booking system to confirm and schedule this appointment.
+
+------------------------------------------------------------
+[7/7]
+Category: WORKFLOW_SEQUENCE
+Prompt:   Cancel my appointment.
+Status:   PASS
+Time:     5439 ms
+
+Final Response:
+I couldn't find any upcoming appointments to cancel.
+
+============================================================
+SUMMARY
+============================================================
+Total Tests            : 7
+Passed                 : 7
+Failed                 : 0
+Average Execution Time : 17574 ms
+============================================================
+
+Saved 7 results to test_results.csv
+Console log saved to logs/regression_2026-07-05_04-33.log
