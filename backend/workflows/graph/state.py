@@ -83,6 +83,7 @@ def create_workflow_state(
         asset_selection_context={},
         rag_scope={},
         patient_history_context=[],
+        doctor_availability_context=[],
         planner_metadata={},
         shadow_execution_completed=False,
         shadow_response="",

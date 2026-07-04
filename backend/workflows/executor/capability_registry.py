@@ -8,10 +8,11 @@ except ImportError:
     from backports import zoneinfo
 import dateutil.parser
 from backend.core.database import prisma, ensure_connected
+from ..models.capability_result import CapabilityResult
 
 class Capability(TypedDict):
     name: str
-    handler: Callable[[UnifiedChatState, dict[str, Any]], Awaitable[dict[str, Any]]]
+    handler: Callable[[UnifiedChatState, dict[str, Any]], Awaitable[CapabilityResult]]
     requires_patient: bool
     requires_doctor: bool
 
@@ -22,13 +23,16 @@ from ..capabilities.retrievers.patient_history_retriever import get_patient_hist
 from ..capabilities.retrievers.appointment_retriever import retrieve_appointments
 from ..capabilities.retrievers.doctor_availability_retriever import retrieve_doctor_availability
 
-async def handle_memory_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> dict[str, Any]:
+async def handle_memory_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
     ai_session_id = str(state.get("ai_session_id") or "")
     if ai_session_id:
-        return {"memory_context": await retrieve_conversation_memory(session_id=ai_session_id)}
-    return {}
+        return CapabilityResult(
+            capability_name="MEMORY",
+            data=await retrieve_conversation_memory(session_id=ai_session_id)
+        )
+    return CapabilityResult(capability_name="MEMORY")
 
-async def handle_appointment_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> dict[str, Any]:
+async def handle_appointment_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
     user_id = str(state.get("user_id") or "")
     role = str(state.get("role") or "")
     target_patient_id = state.get("target_patient_id")
@@ -47,10 +51,14 @@ async def handle_appointment_retrieve(state: UnifiedChatState, params: dict[str,
         for appt in appointments:
             appt["type"] = "appointment"
             evidence.append(appt)
-        return {"appointment_context": {"action": "list", "appointments": appointments}, "evidence": evidence}
-    return {}
+        return CapabilityResult(
+            capability_name="APPOINTMENT",
+            data={"action": "list", "appointments": appointments},
+            evidence=evidence
+        )
+    return CapabilityResult(capability_name="APPOINTMENT")
 
-async def handle_doctor_availability_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> dict[str, Any]:
+async def handle_doctor_availability_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
     doctor_name = params.get("doctor_name")
     docs = await retrieve_doctor_availability(doctor_name=doctor_name)
     evidence = []
@@ -58,9 +66,13 @@ async def handle_doctor_availability_retrieve(state: UnifiedChatState, params: d
         d_copy = dict(d)
         d_copy["type"] = "doctor_availability"
         evidence.append(d_copy)
-    return {"doctor_availability_context": docs, "evidence": evidence}
+    return CapabilityResult(
+        capability_name="DOCTOR_AVAILABILITY",
+        data=docs,
+        evidence=evidence
+    )
 
-async def handle_consultation_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> dict[str, Any]:
+async def handle_consultation_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
     user_id = str(state.get("user_id") or "")
     role = str(state.get("role") or "")
     target_patient_id = state.get("target_patient_id")
@@ -74,10 +86,13 @@ async def handle_consultation_retrieve(state: UnifiedChatState, params: dict[str
             doctor_id=c_doctor_id, 
             limit=5
         )
-        return {"consultation_context": consultation_context}
-    return {}
+        return CapabilityResult(
+            capability_name="CONSULTATION",
+            data=consultation_context
+        )
+    return CapabilityResult(capability_name="CONSULTATION")
 
-async def handle_patient_history_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> dict[str, Any]:
+async def handle_patient_history_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
     p_metadata = state.get("planner_metadata", {})
     history_type = p_metadata.get("history_type")
     
@@ -97,10 +112,14 @@ async def handle_patient_history_retrieve(state: UnifiedChatState, params: dict[
                 "title": entry.get("title"),
                 "value": entry.get("value")
             })
-        return {"patient_history_context": history_entries, "evidence": evidence}
-    return {}
+        return CapabilityResult(
+            capability_name="PATIENT_HISTORY",
+            data=history_entries,
+            evidence=evidence
+        )
+    return CapabilityResult(capability_name="PATIENT_HISTORY")
 
-async def handle_asset_index_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> dict[str, Any]:
+async def handle_asset_index_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
     action = params.get("action", "latest")
     p_metadata = state.get("planner_metadata", {})
     report_type = p_metadata.get("report_type", "general")
@@ -130,10 +149,11 @@ async def handle_asset_index_retrieve(state: UnifiedChatState, params: dict[str,
         "selection_reason": action
     }
     
-    res = {"asset_selection_context": asset_selection_context, "evidence": []}
+    data = {"asset_selection_context": asset_selection_context}
+    evidence = []
     if asset_ids:
-        res["rag_scope"] = {"asset_ids": asset_ids}
-        res["evidence"].append({
+        data["rag_scope"] = {"asset_ids": asset_ids}
+        evidence.append({
             "type": "asset_selection",
             "asset_ids": asset_ids
         })
@@ -146,14 +166,18 @@ async def handle_asset_index_retrieve(state: UnifiedChatState, params: dict[str,
                 patient_id=p_id
             )
             for item in rag_result.get("items", []):
-                res["evidence"].append({
+                evidence.append({
                     "type": "rag",
                     "content": item.get("content", ""),
                     "source_asset": item.get("metadata", {}).get("asset_id", "")
                 })
-    return res
+    return CapabilityResult(
+        capability_name="ASSET_INDEX",
+        data=data,
+        evidence=evidence
+    )
 
-async def handle_appointment_book(state: UnifiedChatState, params: dict[str, Any]) -> dict[str, Any]:
+async def handle_appointment_book(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
     await ensure_connected()
     
     booking_datetime = params.get("booking_datetime")
@@ -211,12 +235,13 @@ async def handle_appointment_book(state: UnifiedChatState, params: dict[str, Any
             matched_slot = slots[0]
             
     if not matched_slot:
-        return {
-            "appointment_context": {
+        return CapabilityResult(
+            capability_name="APPOINTMENT_BOOK",
+            data={
                 "action": "confirmed",
                 "message": "This slot is no longer available or could not be found. Please check available slots again."
             }
-        }
+        )
         
     try:
         async with prisma.tx() as transaction:
@@ -239,23 +264,25 @@ async def handle_appointment_book(state: UnifiedChatState, params: dict[str, Any
             tz = zoneinfo.ZoneInfo("Asia/Kolkata")
             local_time = matched_slot.startTime.astimezone(tz)
             
-            return {
-                "appointment_context": {
+            return CapabilityResult(
+                capability_name="APPOINTMENT_BOOK",
+                data={
                     "action": "confirmed",
                     "message": f"Appointment booked successfully.\n\nDoctor: {matched_slot.doctor.name}\nDate: {local_time.strftime('%B %d, %Y')}\nTime: {local_time.strftime('%I:%M %p')}\nStatus: Confirmed"
                 },
-                "clear_doctor_availability": True
-            }
+                metadata={"clear_doctor_availability": True}
+            )
     except Exception as exc:
         print(f"[DEBUG][BOOKING_ERROR] {exc}")
-        return {
-            "appointment_context": {
+        return CapabilityResult(
+            capability_name="APPOINTMENT_BOOK",
+            data={
                 "action": "confirmed",
                 "message": "An error occurred while booking the appointment. Please try again."
             }
-        }
+        )
 
-async def handle_appointment_cancel(state: UnifiedChatState, params: dict[str, Any]) -> dict[str, Any]:
+async def handle_appointment_cancel(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
     await ensure_connected()
     patient_username = state.get("target_patient_id") or state.get("user_id")
     upcoming = await prisma.appointment.find_first(
@@ -269,12 +296,13 @@ async def handle_appointment_cancel(state: UnifiedChatState, params: dict[str, A
     )
     
     if not upcoming:
-        return {
-            "appointment_context": {
+        return CapabilityResult(
+            capability_name="APPOINTMENT_CANCEL",
+            data={
                 "action": "cancel",
                 "message": "I couldn't find any upcoming appointments to cancel."
             }
-        }
+        )
         
     try:
         if upcoming.slotId:
@@ -291,30 +319,33 @@ async def handle_appointment_cancel(state: UnifiedChatState, params: dict[str, A
         tz = zoneinfo.ZoneInfo("Asia/Kolkata")
         local_time = upcoming.appointmentDate.astimezone(tz)
         
-        return {
-            "appointment_context": {
+        return CapabilityResult(
+            capability_name="APPOINTMENT_CANCEL",
+            data={
                 "action": "cancel",
                 "message": f"I have successfully cancelled your appointment with Dr. {upcoming.doctor.name} on {local_time.strftime('%B %d, %Y at %I:%M %p')}."
             },
-            "clear_doctor_availability": True
-        }
+            metadata={"clear_doctor_availability": True}
+        )
     except Exception as exc:
         print(f"[DEBUG][CANCEL_ERROR] {exc}")
-        return {
-            "appointment_context": {
+        return CapabilityResult(
+            capability_name="APPOINTMENT_CANCEL",
+            data={
                 "action": "cancel",
                 "message": "An error occurred while cancelling the appointment."
             }
-        }
+        )
 
-async def handle_appointment_reschedule(state: UnifiedChatState, params: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "appointment_context": {"action": "reschedule"},
-        "clear_doctor_availability": True
-    }
+async def handle_appointment_reschedule(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
+    return CapabilityResult(
+        capability_name="APPOINTMENT_RESCHEDULE",
+        data={"action": "reschedule"},
+        metadata={"clear_doctor_availability": True}
+    )
 
-async def handle_appointment_search_slots(state: UnifiedChatState, params: dict[str, Any]) -> dict[str, Any]:
-    return {}
+async def handle_appointment_search_slots(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
+    return CapabilityResult(capability_name="APPOINTMENT_SEARCH_SLOTS")
 
 REGISTRY: dict[str, Capability] = {
     # Retrievers

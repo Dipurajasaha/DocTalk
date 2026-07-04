@@ -1,8 +1,7 @@
 from .planner import planner_node
-from .retrieval_strategy import retrieval_strategy_node, RetrievalStrategy
+from .retrieval_strategy import RetrievalStrategy
 
 __all__ = [
     "planner_node",
-    "retrieval_strategy_node",
     "RetrievalStrategy",
 ]

@@ -31,6 +31,8 @@ const shouldRetry = (error, responseStatus) => {
   return error instanceof TypeError; // network/connection level fetch errors
 };
 
+const inFlightRequests = new Map();
+
 /**
  * Minimal fetch wrapper with retries, JSON parsing, and uniform errors.
  */
@@ -61,44 +63,64 @@ export async function apiRequest(path, options = {}) {
     finalHeaders.Authorization = `Bearer ${resolvedToken}`;
   }
 
-  let attempt = 0;
-  let lastError = null;
-
-  while (attempt <= retries) {
-    try {
-      const response = await fetch(path, {
-        method,
-        headers: finalHeaders,
-        body: payload,
-        credentials,
-        signal,
-      });
-
-      const data = await readPayload(response);
-      if (response.ok) return data;
-
-      const message = (data && (data.detail || data.error || data.message)) || `Request failed (${response.status})`;
-      const apiError = new ApiError(message, response.status, data);
-
-      if (attempt < retries && shouldRetry(apiError, response.status)) {
-        await sleep(retryDelayMs * (attempt + 1));
-        attempt += 1;
-        continue;
-      }
-      throw apiError;
-    } catch (error) {
-      lastError = error;
-      if (attempt < retries && shouldRetry(error)) {
-        await sleep(retryDelayMs * (attempt + 1));
-        attempt += 1;
-        continue;
-      }
-      break;
-    }
+  const cacheKey = method === 'GET' ? `${method}:${path}:${resolvedToken || ''}` : null;
+  if (cacheKey && inFlightRequests.has(cacheKey)) {
+    return inFlightRequests.get(cacheKey);
   }
 
-  if (lastError instanceof ApiError) throw lastError;
-  throw new ApiError(lastError?.message || 'Network request failed', 0, null);
+  const performRequest = async () => {
+    let attempt = 0;
+    let lastError = null;
+
+    while (attempt <= retries) {
+      try {
+        const response = await fetch(path, {
+          method,
+          headers: finalHeaders,
+          body: payload,
+          credentials,
+          signal,
+        });
+
+        const data = await readPayload(response);
+        if (response.ok) return data;
+
+        const message = (data && (data.detail || data.error || data.message)) || `Request failed (${response.status})`;
+        const apiError = new ApiError(message, response.status, data);
+
+        if (attempt < retries && shouldRetry(apiError, response.status)) {
+          await sleep(retryDelayMs * (attempt + 1));
+          attempt += 1;
+          continue;
+        }
+        throw apiError;
+      } catch (error) {
+        lastError = error;
+        if (attempt < retries && shouldRetry(error)) {
+          await sleep(retryDelayMs * (attempt + 1));
+          attempt += 1;
+          continue;
+        }
+        break;
+      }
+    }
+
+    if (lastError instanceof ApiError) throw lastError;
+    throw new ApiError(lastError?.message || 'Network request failed', 0, null);
+  };
+
+  const requestPromise = performRequest();
+  
+  if (cacheKey) {
+    inFlightRequests.set(cacheKey, requestPromise);
+    requestPromise.finally(() => {
+      if (inFlightRequests.get(cacheKey) === requestPromise) {
+        inFlightRequests.delete(cacheKey);
+      }
+    });
+  }
+
+  return requestPromise;
 }
 
 export const apiClient = {

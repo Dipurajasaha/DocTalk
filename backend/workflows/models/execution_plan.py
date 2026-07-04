@@ -4,7 +4,7 @@ from .planner_task import PlannerTask
 
 @dataclass
 class ExecutionPlan:
-    goal: str = "general_chat"
+    goals: list[str] = field(default_factory=list)
     required_information: list[str] = field(default_factory=list)
     tasks: list[PlannerTask] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)

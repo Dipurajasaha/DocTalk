@@ -1,0 +1,128 @@
+Initializing Test Runner (Role: PATIENT)
+
+Starting 5 tests...
+
+------------------------------------------------------------
+[1/5]
+Category: GENERAL
+Prompt:   Hello
+Status:   PASS
+Time:     9525 ms
+
+Final Response:
+Hello! How can I help you today? I'm here to assist with any health-related questions or concerns you might have.
+
+------------------------------------------------------------
+[2/5]
+Category: RAG
+Prompt:   Explain my latest blood report.
+Status:   PASS
+Time:     32885 ms
+
+Final Response:
+Based on the provided blood report for Yash M. Patel (Age: 21, Male), here is an explanation of the results.
+
+The report shows a few values outside the normal reference range, which are highlighted below.
+
+### Key Findings Summary
+
+- **Low Hemoglobin (Hb):** 12.5 g/dL (Normal: 13.0 - 17.0 g/dL)
+- **High Packed Cell Volume (PCV):** 57.5% (Normal: 40 - 50%)
+- **Borderline Platelet Count:** 150,000 /cumm (Normal: 150,000 - 410,000 /cumm)
+
+---
+
+### Detailed Breakdown
+
+**1. Red Blood Cells (RBCs) & Anemia Indices**
+
+- **Hemoglobin (Hb):** Your hemoglobin level is **low**. Hemoglobin is the protein in red blood cells that carries oxygen. A low level is a primary indicator of anemia.
+- **RBC Count:** 5.2 million/cumm (Normal: 4.5 - 5.5 million/cumm). This is within the normal range.
+- **Packed Cell Volume (PCV) / Hematocrit:** This is **high**. It measures the percentage of your blood volume made up of red blood cells. A high PCV can sometimes be due to dehydration, which concentrates the blood, but it's unusual to see it alongside low hemoglobin.
+- **Mean Corpuscular Volume (MCV):** 87.75 fL (Normal: 83 - 101 fL). This is normal, indicating your red blood cells are of normal size (normocytic).
+- **Mean Corpuscular Hemoglobin (MCH):** 27.2 pg (Normal: 27 - 32 pg). This is at the lower end of normal, suggesting each red blood cell has a slightly lower amount of hemoglobin.
+- **Mean Corpuscular Hemoglobin Concentration (MCHC):** 32.8 g/dL (Normal: 32.5 - 34.5 g/dL). This is normal, indicating the concentration of hemoglobin within each cell is adequate.
+- **Red Cell Distribution Width (RDW):** 13.6% (Normal: 11.6 - 14.0%). This is normal, meaning your red blood cells are fairly uniform in size.
+
+**Interpretation:** The combination of low hemoglobin with a normal MCV and MCHC suggests a **normocytic normochromic anemia**. The lab's interpretation note explicitly states: **"Further confirm for Anemia."** The high PCV is a contradictory finding that your doctor will need to interpret, possibly considering factors like dehydration at the time of the blood draw.
+
+**2. White Blood Cells (WBCs)**
+
+- **Total WBC Count:** 9000 /cumm (Normal: 4000 - 11000 /cumm). This is perfectly normal, indicating no sign of a major infection or immune system issue.
+- **Differential Count:**
+    - **Neutrophils:** 60% (Normal: 50 - 62%) - Normal.
+    - **Lymphocytes:** 31% (Normal: 20 - 40%) - Normal.
+    - **Eosinophils:** 1% (Normal: 0 - 6%) - Normal.
+    - **Monocytes:** 7% (Normal: 0 - 10%) - Normal.
+    - **Basophils:** 1% (Normal: 0 - 2%) - Normal.
+
+**Interpretation:** Your white blood cell count and differential are entirely normal, which is a good sign.
+
+**3. Platelets**
+
+- **Platelet Count:** 150,000 /cumm (Normal: 150,000 - 410,000 /cumm). This is at the very lower limit of the normal range, described as **"Borderline."** It is not critically low, but it is something to monitor.
+
+**Interpretation:** A borderline low platelet count (mild thrombocytopenia) can have various causes, from a recent viral infection to other conditions. It's not an immediate cause for alarm but should be noted.
+
+---
+
+**Important Note:** This explanation is for informational purposes only based on the data provided. The combination of a low hemoglobin and a high PCV is unusual and requires a doctor's clinical correlation. Please discuss these results with your referring physician, **Dr. Hiren Shah**, who can interpret them in the context of your overall health, medical history, and any symptoms you may have.
+
+------------------------------------------------------------
+[3/5]
+Category: MEMORY
+Prompt:   Summarize my previous consultations.
+Status:   PASS
+Time:     15226 ms
+
+Final Response:
+I cannot provide a definitive diagnosis. Please consult a licensed physician.
+
+------------------------------------------------------------
+[4/5]
+Category: MULTI-CAPABILITY
+Prompt:   Summarize my previous consultations and latest blood report.
+Status:   PASS
+Time:     23025 ms
+
+Final Response:
+Based on the provided data, there are no records of any previous consultations.
+
+Here is a summary of the latest blood report:
+
+**Patient:** Yash M. Patel, 21 Years, Male
+
+**Key Findings from the CBC Report:**
+*   **Hemoglobin (Hb):** 12.5 g/dL (Low, reference range 13.0 - 17.0 g/dL)
+*   **Packed Cell Volume (PCV):** 57.5% (High, reference range 40 - 50%)
+*   **RBC Count:** 5.2 mill/cumm (Normal)
+*   **WBC Count:** 9000/cumm (Normal)
+*   **Differential Count:** All components (Neutrophils, Lymphocytes, Eosinophils, Monocytes, Basophils) are within normal limits.
+*   **Platelet Count:** 150,000/cumm (Borderline low, reference range 150,000 - 410,000/cumm)
+*   **Other Indices:** MCV, MCH, MCHC, and RDW are all within normal limits.
+
+**Lab Note:** The report suggests further confirmation for anemia.
+
+------------------------------------------------------------
+[5/5]
+Category: APPOINTMENTS
+Prompt:   Cancel my appointment.
+Status:   PASS
+Time:     11584 ms
+
+Final Response:
+I checked your account, but I couldn't find any upcoming appointments to cancel. It looks like you don't have any scheduled appointments at the moment.
+
+If you believe this is incorrect or if you need help with something else, please let me know and I'll be happy to assist you further.
+
+============================================================
+SUMMARY
+============================================================
+Total Tests            : 5
+Passed                 : 5
+Failed                 : 0
+Average Execution Time : 18449 ms
+============================================================
+
+Saved 5 results to test_results.csv
+Console log saved to logs/regression_2026-07-04_05-48.log
