@@ -9,12 +9,14 @@ except ImportError:
 import dateutil.parser
 from backend.core.database import prisma, ensure_connected
 from ..models.capability_result import CapabilityResult
+from ..models.capability_metadata import CapabilityMetadata
 
 class Capability(TypedDict):
     name: str
     handler: Callable[[UnifiedChatState, dict[str, Any]], Awaitable[CapabilityResult]]
     requires_patient: bool
     requires_doctor: bool
+    metadata: CapabilityMetadata
 
 from ..capabilities.retrievers import retrieve_conversation_memory, retrieve_consultations
 from ..capabilities.retrievers.asset_index_retriever import get_latest_document, get_latest_report_by_type, get_reports_by_report_type
@@ -353,62 +355,162 @@ REGISTRY: dict[str, Capability] = {
         "name": "MEMORY",
         "handler": handle_memory_retrieve,
         "requires_patient": False,
-        "requires_doctor": False
+        "requires_doctor": False,
+        "metadata": CapabilityMetadata(
+            capability_name="MEMORY",
+            capability_type="retriever",
+            always_refresh=False,
+            allow_memory=False,
+            allow_cache=False,
+            priority=10,
+            supports_parallel_execution=True,
+            description="Retrieves the conversational memory context for the active AI session."
+        )
     },
     "CONSULTATION": {
         "name": "CONSULTATION",
         "handler": handle_consultation_retrieve,
         "requires_patient": False,
-        "requires_doctor": False
+        "requires_doctor": False,
+        "metadata": CapabilityMetadata(
+            capability_name="CONSULTATION",
+            capability_type="retriever",
+            always_refresh=False,
+            allow_memory=True,
+            allow_cache=True,
+            priority=10,
+            supports_parallel_execution=True,
+            description="Retrieves the recent consultations for the user or target patient."
+        )
     },
     "PATIENT_HISTORY": {
         "name": "PATIENT_HISTORY",
         "handler": handle_patient_history_retrieve,
         "requires_patient": True,
-        "requires_doctor": False
+        "requires_doctor": False,
+        "metadata": CapabilityMetadata(
+            capability_name="PATIENT_HISTORY",
+            capability_type="retriever",
+            always_refresh=False,
+            allow_memory=True,
+            allow_cache=True,
+            priority=10,
+            supports_parallel_execution=True,
+            description="Retrieves structured patient history like vitals and conditions."
+        )
     },
     "ASSET_INDEX": {
         "name": "ASSET_INDEX",
         "handler": handle_asset_index_retrieve,
         "requires_patient": True,
-        "requires_doctor": False
+        "requires_doctor": False,
+        "metadata": CapabilityMetadata(
+            capability_name="ASSET_INDEX",
+            capability_type="retriever",
+            always_refresh=False,
+            allow_memory=True,
+            allow_cache=True,
+            priority=10,
+            supports_parallel_execution=True,
+            description="Retrieves documents or reports for the patient."
+        )
     },
     "APPOINTMENT": {
         "name": "APPOINTMENT",
         "handler": handle_appointment_retrieve,
         "requires_patient": False,
-        "requires_doctor": False
+        "requires_doctor": False,
+        "metadata": CapabilityMetadata(
+            capability_name="APPOINTMENT",
+            capability_type="retriever",
+            always_refresh=True,
+            allow_memory=True,
+            allow_cache=False,
+            priority=10,
+            supports_parallel_execution=True,
+            description="Retrieves the list of upcoming or past appointments."
+        )
     },
     "DOCTOR_AVAILABILITY": {
         "name": "DOCTOR_AVAILABILITY",
         "handler": handle_doctor_availability_retrieve,
         "requires_patient": False,
-        "requires_doctor": False
+        "requires_doctor": False,
+        "metadata": CapabilityMetadata(
+            capability_name="DOCTOR_AVAILABILITY",
+            capability_type="retriever",
+            always_refresh=True,
+            allow_memory=True,
+            allow_cache=False,
+            priority=10,
+            supports_parallel_execution=True,
+            description="Retrieves available slots for doctors."
+        )
     },
     # Actions
     "APPOINTMENT_BOOK": {
         "name": "APPOINTMENT_BOOK",
         "handler": handle_appointment_book,
         "requires_patient": False,
-        "requires_doctor": False
+        "requires_doctor": False,
+        "metadata": CapabilityMetadata(
+            capability_name="APPOINTMENT_BOOK",
+            capability_type="action",
+            always_refresh=True,
+            allow_memory=True,
+            allow_cache=False,
+            priority=20,
+            supports_parallel_execution=False,
+            description="Books an appointment."
+        )
     },
     "APPOINTMENT_CANCEL": {
         "name": "APPOINTMENT_CANCEL",
         "handler": handle_appointment_cancel,
         "requires_patient": False,
-        "requires_doctor": False
+        "requires_doctor": False,
+        "metadata": CapabilityMetadata(
+            capability_name="APPOINTMENT_CANCEL",
+            capability_type="action",
+            always_refresh=True,
+            allow_memory=True,
+            allow_cache=False,
+            priority=20,
+            supports_parallel_execution=False,
+            description="Cancels an upcoming appointment."
+        )
     },
     "APPOINTMENT_RESCHEDULE": {
         "name": "APPOINTMENT_RESCHEDULE",
         "handler": handle_appointment_reschedule,
         "requires_patient": False,
-        "requires_doctor": False
+        "requires_doctor": False,
+        "metadata": CapabilityMetadata(
+            capability_name="APPOINTMENT_RESCHEDULE",
+            capability_type="action",
+            always_refresh=True,
+            allow_memory=True,
+            allow_cache=False,
+            priority=20,
+            supports_parallel_execution=False,
+            description="Reschedules an appointment."
+        )
     },
     "APPOINTMENT_SEARCH_SLOTS": {
         "name": "APPOINTMENT_SEARCH_SLOTS",
         "handler": handle_appointment_search_slots,
         "requires_patient": False,
-        "requires_doctor": False
+        "requires_doctor": False,
+        "metadata": CapabilityMetadata(
+            capability_name="APPOINTMENT_SEARCH_SLOTS",
+            capability_type="action",
+            always_refresh=True,
+            allow_memory=True,
+            allow_cache=False,
+            priority=10,
+            supports_parallel_execution=True,
+            description="Searches for available appointment slots."
+        )
     }
 }
 
