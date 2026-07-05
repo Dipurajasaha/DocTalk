@@ -25,17 +25,21 @@ AVAILABLE CAPABILITIES:
 
 RULES:
 1. Always return valid JSON.
-2. If the user asks for appointment slots (e.g. "Is there any appointment slots available for Dr. X?"), use APPOINTMENT_SEARCH_SLOTS.
-3. If the user selects a slot (e.g. "Book the first available slot"), use APPOINTMENT_SEARCH_SLOTS again to retrieve the context, but update the workflow status to "waiting_confirmation" and set "booking_ordinal" in metadata.
-4. If the user confirms a booking (e.g. "Yes, please book it"), use APPOINTMENT_BOOK.
-5. If the user asks to cancel an appointment (e.g. "Cancel my appointment"), use APPOINTMENT_CANCEL.
-6. For multi-capability requests (e.g. "Summarize my previous consultations and latest blood report"), output multiple tasks. For a blood report, use ASSET_INDEX with action "latest".
-7. For general greetings (e.g. "Hello", "Hi"), return NO tasks and "query_type": "general". DO NOT include workflow or appointment metadata.
-8. For general medical knowledge (e.g. "Tell me about anemia", "What is diabetes?"), return NO tasks and "query_type": "knowledge". DO NOT include workflow or appointment metadata.
-9. Always preserve the active_workflow if we are in the middle of a booking, UNLESS the query is unrelated (general or knowledge) or cancelled. For unrelated queries, omit workflow metadata entirely to prevent context pollution.
+2. PREFER RETRIEVAL: If the user asks a question, retrieve data first before answering. Do not attempt to guess or hallucinate.
+3. AVOID HALLUCINATION: ONLY output capabilities that exactly match the list above. Never make up capability names.
+4. MULTI-CAPABILITY: For queries spanning multiple topics (e.g. "Summarize my previous consultations and latest blood report"), output multiple tasks. Do NOT create unnecessary tasks.
+5. If the user asks for appointment slots (e.g. "Is there any appointment slots available for Dr. X?"), use APPOINTMENT_SEARCH_SLOTS.
+6. If the user selects a slot (e.g. "Book the first available slot"), use APPOINTMENT_SEARCH_SLOTS again to retrieve the context, but update the workflow status to "waiting_confirmation" and set "booking_ordinal" in metadata.
+7. If the user confirms a booking (e.g. "Yes, please book it"), use APPOINTMENT_BOOK.
+8. If the user asks to cancel an appointment (e.g. "Cancel my appointment"), use APPOINTMENT_CANCEL.
+9. For general greetings (e.g. "Hello", "Hi"), return NO tasks and "query_type": "general". DO NOT include workflow or appointment metadata.
+10. For general medical knowledge (e.g. "Tell me about anemia", "What is diabetes?"), return NO tasks and "query_type": "knowledge". DO NOT include workflow or appointment metadata.
+11. Always preserve the active_workflow if we are in the middle of a booking, UNLESS the query is unrelated (general or knowledge) or cancelled. For unrelated queries, omit workflow metadata entirely to prevent context pollution.
 
 OUTPUT SCHEMA (JSON ONLY):
 {
+  "confidence": 0.95,
+  "reasoning": "Short explanation of why this plan was chosen.",
   "query_type": "general|knowledge|rag|workflow",
   "tasks": [
       {
@@ -60,28 +64,28 @@ OUTPUT SCHEMA (JSON ONLY):
 
 Examples:
 USER: "Hello!"
-OUTPUT: {"query_type":"general","tasks":[],"metadata":{}}
+OUTPUT: {"confidence":1.0,"reasoning":"Greeting detected","query_type":"general","tasks":[],"metadata":{}}
 
 USER: "Tell me about anemia."
-OUTPUT: {"query_type":"knowledge","tasks":[],"metadata":{}}
+OUTPUT: {"confidence":0.98,"reasoning":"Medical knowledge query","query_type":"knowledge","tasks":[],"metadata":{}}
 
 USER: "Explain my latest blood report."
-OUTPUT: {"query_type":"rag","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"ASSET_INDEX","action":"latest","depends_on":[]},{"task_id":"t2","task_type":"retrieve","retriever":"MEMORY","depends_on":[]}],"metadata":{}}
+OUTPUT: {"confidence":0.95,"reasoning":"Needs asset and memory","query_type":"rag","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"ASSET_INDEX","action":"latest","depends_on":[]},{"task_id":"t2","task_type":"retrieve","retriever":"MEMORY","depends_on":[]}],"metadata":{}}
 
 USER: "Summarize my previous consultations."
-OUTPUT: {"query_type":"rag","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"CONSULTATION","depends_on":[]}],"metadata":{}}
+OUTPUT: {"confidence":0.95,"reasoning":"Needs consultation history","query_type":"rag","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"CONSULTATION","depends_on":[]}],"metadata":{}}
 
 USER: "Is there any appointment slots available for Dr. DocDipu?"
-OUTPUT: {"query_type":"workflow","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"APPOINTMENT_SEARCH_SLOTS","depends_on":[]}],"metadata":{"doctor_name":"DocDipu"}}
+OUTPUT: {"confidence":0.92,"reasoning":"Search slots for specific doctor","query_type":"workflow","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"APPOINTMENT_SEARCH_SLOTS","depends_on":[]}],"metadata":{"doctor_name":"DocDipu"}}
 
 USER: "Book the first available slot." (Context: Waiting for selection)
-OUTPUT: {"query_type":"workflow","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"APPOINTMENT_SEARCH_SLOTS","depends_on":[]}],"workflow":{"type":"appointment_booking","status":"waiting_confirmation"},"metadata":{"booking_ordinal":"first"}}
+OUTPUT: {"confidence":0.90,"reasoning":"Selecting first ordinal slot","query_type":"workflow","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"APPOINTMENT_SEARCH_SLOTS","depends_on":[]}],"workflow":{"type":"appointment_booking","status":"waiting_confirmation"},"metadata":{"booking_ordinal":"first"}}
 
 USER: "Yes, please book it." (Context: Waiting for confirmation)
-OUTPUT: {"query_type":"workflow","tasks":[{"task_id":"t1","task_type":"action","action_handler":"APPOINTMENT_BOOK","depends_on":[]}],"workflow":{"type":"appointment_booking","status":"confirmed"},"metadata":{}}
+OUTPUT: {"confidence":0.95,"reasoning":"Confirming booking","query_type":"workflow","tasks":[{"task_id":"t1","task_type":"action","action_handler":"APPOINTMENT_BOOK","depends_on":[]}],"workflow":{"type":"appointment_booking","status":"confirmed"},"metadata":{}}
 
 USER: "Cancel my appointment."
-OUTPUT: {"query_type":"workflow","tasks":[{"task_id":"t1","task_type":"action","action_handler":"APPOINTMENT_CANCEL","depends_on":[]}],"metadata":{}}
+OUTPUT: {"confidence":0.98,"reasoning":"Canceling appointment","query_type":"workflow","tasks":[{"task_id":"t1","task_type":"action","action_handler":"APPOINTMENT_CANCEL","depends_on":[]}],"metadata":{}}
 """
 
 class LLMPlanningEngine:
@@ -99,7 +103,13 @@ class LLMPlanningEngine:
         if not parsed:
             raise ValueError("LLM returned invalid or empty JSON")
             
+        confidence = parsed.get("confidence", 1.0)
+        if confidence < 0.65:
+            raise ValueError(f"LLM planner confidence ({confidence}) is below threshold 0.65")
+            
         plan = ExecutionPlan()
+        plan.reasoning = parsed.get("reasoning", "")
+        plan.confidence = confidence
         
         for t_dict in parsed.get("tasks", []):
             task_type = t_dict.get("task_type")
@@ -117,9 +127,18 @@ class LLMPlanningEngine:
                     depends_on=t_dict.get("depends_on") or []
                 ))
                 
-        # Parse metadata and workflow
-        plan.metadata = dict(self.previous_metadata)
-        plan.metadata.update(parsed.get("metadata", {}))
+        # Parse metadata and workflow (deep merge)
+        import copy
+        plan.metadata = copy.deepcopy(self.previous_metadata)
+        
+        # Only overwrite with fields explicitly returned by planner
+        returned_meta = parsed.get("metadata", {})
+        for k, v in returned_meta.items():
+            if isinstance(v, dict) and isinstance(plan.metadata.get(k), dict):
+                plan.metadata[k].update(v)
+            else:
+                plan.metadata[k] = v
+                
         plan.metadata["query_type"] = parsed.get("query_type", "general")
         
         wf_dict = parsed.get("workflow")

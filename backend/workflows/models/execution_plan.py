@@ -8,6 +8,8 @@ class ExecutionPlan:
     required_information: list[str] = field(default_factory=list)
     tasks: list[PlannerTask] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    confidence: float = 1.0
+    reasoning: str = ""
     
     def add_task(self, task: PlannerTask) -> None:
         self.tasks.append(task)

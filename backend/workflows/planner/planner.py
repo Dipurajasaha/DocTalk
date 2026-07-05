@@ -448,16 +448,31 @@ async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
     local_state = dict(state)
     local_state["planner_metadata"] = hydrated_metadata
     
+    fallback_reason = None
+    validation_errors = []
+    llm_confidence = None
+    
     if os.environ.get("USE_LLM_PLANNER", "true").lower() == "true":
         try:
             from .llm_planner import LLMPlanningEngine
+            from .planning_validator import PlanningValidator
             llm_engine = LLMPlanningEngine(local_state)
             plan = await llm_engine.execute()
+            
+            is_valid, errors = PlanningValidator.validate(plan)
+            if not is_valid:
+                validation_errors = errors
+                raise ValueError(f"Plan validation failed: {', '.join(errors)}")
+                
             strategy = plan.metadata.get("retrieval_strategy", "general")
             used_llm = True
+            llm_confidence = getattr(plan, "confidence", None)
         except Exception as e:
+            fallback_reason = str(e)
             log_error(f"LLM Planner failed: {e}. Falling back to rule-based planner.")
-            traceback.print_exc()
+            # Do not print stack trace for intended fallbacks like low confidence
+            if "confidence" not in str(e).lower() and "validation failed" not in str(e).lower():
+                traceback.print_exc()
 
     if not used_llm:
         engine = PlanningEngine(local_state)
@@ -468,20 +483,35 @@ async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
     timing = state.get("timing_metrics", {})
     timing["planner"] = plan_time
     
+    planner_stats = {
+        "planner_used": "LLM" if used_llm else "Rule-based",
+        "planning_time_ms": int(plan_time),
+        "confidence": llm_confidence,
+        "fallback_reason": fallback_reason,
+        "validation_errors": validation_errors
+    }
+    
     log_section("PLANNER")
     log_key_value("Planner", "LLM" if used_llm else "Rule-based")
-    log_key_value("Intent", plan.metadata.get("query_type"))
-    if plan.metadata.get("active_workflow"):
-        log_key_value("Workflow", plan.metadata["active_workflow"].get("type"))
-    if plan.tasks:
-        log_key_value("Tasks", plan.tasks)
+    if used_llm and llm_confidence is not None:
+        log_key_value("Confidence", f"{llm_confidence:.2f}")
     
-    # Filter out bulky metadata for standard display
-    display_metadata = {k: v for k, v in plan.metadata.items() if k not in ["detected_entities", "active_workflow"]}
-    if display_metadata:
-        log_key_value("Metadata", display_metadata)
+    log_key_value("Validation", "PASSED" if not validation_errors else "FAILED")
+    
+    if plan.tasks:
+        task_summaries = []
+        for i, t in enumerate(plan.tasks):
+            task_summaries.append(f"{i+1}. {t.task_id or 'unknown'} ({t.capability_name})")
+        log_key_value("Tasks", "\n".join(task_summaries))
+    else:
+        log_key_value("Tasks", "[]")
         
-    log_key_value("Execution Time", f"{int(plan_time)} ms")
+    display_metadata = {k: v for k, v in plan.metadata.items() if k not in ["detected_entities", "active_workflow"]}
+    log_key_value("Metadata Updated", display_metadata if display_metadata else "{}")
+    log_key_value("Fallback", fallback_reason if fallback_reason else "None")
+    log_key_value("Planning Time", f"{int(plan_time)} ms")
+    
+    plan.metadata["planner_stats"] = planner_stats
     
     return {
         "execution_plan": plan.tasks,

@@ -593,22 +593,7 @@ async def _run_ai_websocket(
 
 
 
-                    if event_name == "on_chain_end" and node_name in {
-                        "patient_assistant_llm",
-                        "patient_general_llm",
-                        "doctor_general_llm",
-                        "doctor_scoped_llm",
-                    }:
-                        output = data.get("output")
-                        chunk = _extract_message_text(output)
-                        if chunk:
-                            final_response = _sanitize_ai_message(chunk)
-                            try:
-                                await websocket.send_text(final_response)
-                            except Exception:
-                                raise
-                            streamed_token = True
-                        continue
+
 
                     if event_name in {"on_chat_model_stream", "on_llm_stream"}:
                         chunk_text = _extract_stream_chunk_text(data.get("chunk"))
@@ -634,11 +619,7 @@ async def _run_ai_websocket(
 
                 final_response = _sanitize_ai_message(final_response)
 
-                if final_response and not streamed_token:
-                    try:
-                        await websocket.send_text(final_response)
-                    except Exception:
-                        raise
+
 
                 db_history = await chat_service.append_ai_chat_exchange(
                     ai_session_id=ai_session_id,
