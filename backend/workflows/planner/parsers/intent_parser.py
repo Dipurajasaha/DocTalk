@@ -86,15 +86,12 @@ def parse_intent(text: str) -> ParsedIntent:
         extracted = doc_match.group(1).strip()
         if extracted not in ["me", "you", "a", "the", "this"]:
             intent.doctor_name = extracted
-            print(f"[DEBUG][DOCTOR_NAME_EXTRACTED] {intent.doctor_name}")
 
     # Extract booking slots if booking intent is detected
     if "book" in intent.actions:
-        print("[DEBUG][BOOKING_INTENT_DETECTED] True")
         ordinal_match = re.search(r"(first|second|third|fourth|fifth|last)\s+(?:slot|appointment|one)", text.lower())
         if ordinal_match:
             intent.booking_ordinal = ordinal_match.group(1)
-            print(f"[DEBUG][BOOKING_ORDINAL] {intent.booking_ordinal}")
         else:
             # Extract whatever comes after 'slot ' or 'appointment ' if any
             slot_match = re.search(r"(?:slot|appointment)\s+(?:on\s+|for\s+)?([a-z0-9\s,:]+?)(?:$|please|thanks)", text.lower())
@@ -102,6 +99,5 @@ def parse_intent(text: str) -> ParsedIntent:
                 extracted = slot_match.group(1).strip()
                 if extracted and extracted not in ["this", "that"]:
                     intent.booking_datetime = extracted
-                    print(f"[DEBUG][BOOKING_DATETIME] {intent.booking_datetime}")
 
     return intent

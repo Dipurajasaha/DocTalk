@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from .patient.patient_nodes import patient_assistant_llm, patient_general_llm, triage_evaluator
+from .patient.patient_nodes import patient_assistant_llm, patient_general_llm, patient_knowledge_llm, triage_evaluator
 from .doctor.doctor_nodes import doctor_general_llm, doctor_scoped_llm
 from .patient.routing import classify_intent
 from ..graph.state import WorkflowState
@@ -50,6 +50,8 @@ async def llm_orchestrator_node(state: WorkflowState) -> dict[str, Any]:
         # 3. Route to specific LLM
         if intent in ("emergency", "patient_rag"):
             llm_result = await patient_assistant_llm(temp_state)
+        elif intent == "knowledge":
+            llm_result = await patient_knowledge_llm(temp_state)
         else:
             llm_result = await patient_general_llm(temp_state)
             

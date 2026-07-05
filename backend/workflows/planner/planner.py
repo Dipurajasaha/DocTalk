@@ -428,24 +428,65 @@ class PlanningEngine:
                 task.parameters = {}
             task.parameters["retrieval_strategy"] = legacy_strategy
 
-        print(f"[DEBUG][PLANNER] goals = {self.plan.goals}")
-        print(f"[DEBUG][PLANNER] strategy = {legacy_strategy}")
-        print("[DEBUG][PLANNER] execution_plan =", self.plan.tasks)
-        print("[DEBUG][PLANNER_CLASSIFICATION]", self.plan.metadata)
-        print(f"[DEBUG][PLANNER_DOCTOR_NAME] {self.plan.metadata.get('doctor_name')}")
-        print(f"[DEBUG][INTENT_TYPE] {self.intent.intent_type or 'general' if self.intent else 'general'}")
-        print(f"[DEBUG][RETRIEVER_SELECTED] {legacy_strategy}")
-        
+
         return self.plan
 
 
 async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
-    engine = PlanningEngine(state)
-    plan = engine.execute()
+    import os
+    import traceback
+    import time
+    from ..utils.logger import log_section, log_key_value, log_error
+    
+    start_time = time.time()
+    used_llm = False
+    
+    from ..memory.conversation_memory import ConversationMemoryManager
+    memory_manager = ConversationMemoryManager(state)
+    hydrated_metadata = memory_manager.hydrate_planner_metadata()
+    
+    local_state = dict(state)
+    local_state["planner_metadata"] = hydrated_metadata
+    
+    if os.environ.get("USE_LLM_PLANNER", "true").lower() == "true":
+        try:
+            from .llm_planner import LLMPlanningEngine
+            llm_engine = LLMPlanningEngine(local_state)
+            plan = await llm_engine.execute()
+            strategy = plan.metadata.get("retrieval_strategy", "general")
+            used_llm = True
+        except Exception as e:
+            log_error(f"LLM Planner failed: {e}. Falling back to rule-based planner.")
+            traceback.print_exc()
+
+    if not used_llm:
+        engine = PlanningEngine(local_state)
+        plan = engine.execute()
+        strategy = engine.derive_legacy_strategy()
+        
+    plan_time = (time.time() - start_time) * 1000
+    timing = state.get("timing_metrics", {})
+    timing["planner"] = plan_time
+    
+    log_section("PLANNER")
+    log_key_value("Planner", "LLM" if used_llm else "Rule-based")
+    log_key_value("Intent", plan.metadata.get("query_type"))
+    if plan.metadata.get("active_workflow"):
+        log_key_value("Workflow", plan.metadata["active_workflow"].get("type"))
+    if plan.tasks:
+        log_key_value("Tasks", plan.tasks)
+    
+    # Filter out bulky metadata for standard display
+    display_metadata = {k: v for k, v in plan.metadata.items() if k not in ["detected_entities", "active_workflow"]}
+    if display_metadata:
+        log_key_value("Metadata", display_metadata)
+        
+    log_key_value("Execution Time", f"{int(plan_time)} ms")
     
     return {
         "execution_plan": plan.tasks,
         "planner_metadata": plan.metadata,
-        "retrieval_strategy": engine.derive_legacy_strategy()
+        "retrieval_strategy": strategy,
+        "timing_metrics": timing
     }
 

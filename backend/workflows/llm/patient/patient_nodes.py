@@ -98,8 +98,7 @@ async def triage_evaluator(state: UnifiedChatState) -> dict[str, Any]:
 
 
 async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
-    print("[DEBUG][LLM_STATE_KEYS]", state.keys())
-    print("[DEBUG][LLM_STATE_KEYS]", state.keys())
+
     
     evidence = state.get("evidence") or []
     
@@ -130,37 +129,81 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
         *chat_messages,
     ]
     
-    print("[DEBUG][MESSAGE_COUNT]", len(messages))
-    print("[DEBUG][PREVIOUS_AI_MESSAGES]", ai_message_count)
+    import time
+    from ...utils.logger import log_section, log_key_value, log_trace, format_duration
     
-    print("[DEBUG][STATE_BEFORE_LLM]", {
-        "evidence": len(evidence),
-    })
-    print("[DEBUG][LLM_PROMPT_CONTEXT_INJECTED]", bool(context_str))
-    print("[DEBUG][LLM] prompt =", messages)
+    log_section("COMPOSER")
+    log_key_value("Response Mode", "patient_general_llm")
+    log_trace("Prompts", [{"type": getattr(m, "type", ""), "content": m.content} for m in messages])
     
+    start_time = time.time()
     response = await llm.ainvoke(messages)
+    comp_time = (time.time() - start_time) * 1000
     
-    print("=================== DEBUG LOGGING LLM RESPONSE ===================")
-    print(f"1. type(response): {type(response)}")
-    print(f"2. repr(response): {repr(response)}")
-    print(f"3. response.content: {getattr(response, 'content', 'NOT_AVAILABLE')}")
-    print(f"4. response.additional_kwargs: {getattr(response, 'additional_kwargs', 'NOT_AVAILABLE')}")
-    print(f"5. response.response_metadata: {getattr(response, 'response_metadata', 'NOT_AVAILABLE')}")
-    print(f"6. message_content_text(response): {repr(message_content_text(response))}")
-    print("==================================================================")
+    timing = state.get("timing_metrics", {})
+    timing["composer"] = timing.get("composer", 0) + comp_time
     
     response_text = message_content_text(response) or "I am here to help with your health question."
+    
+    log_section("FINAL RESPONSE")
+    print(f"{response_text}\n")
 
     return {
         "messages": [response],
         "final_response": response_text,
+        "timing_metrics": timing,
         "context_payload": {
             **dict(state.get("context_payload") or {}),
             "route": "patient_general_llm",
             "assistant_mode": "general_health_assistant",
         },
     }
+
+async def patient_knowledge_llm(state: UnifiedChatState) -> dict[str, Any]:
+    sys_content = (
+        "You are a knowledgeable, empathetic medical assistant. "
+        "Provide educational, general medical information about the user's query in plain, patient-friendly language. "
+        "Do not diagnose the user or provide personalized medical advice. "
+        "Explain medical terms clearly."
+    )
+        
+    all_messages = list(state.get("messages") or [])
+    
+    messages = [
+        SystemMessage(content=sys_content),
+        *all_messages,
+    ]
+    
+    import time
+    from ...utils.logger import log_section, log_key_value, log_trace, format_duration
+    
+    log_section("COMPOSER")
+    log_key_value("Response Mode", "patient_knowledge_llm")
+    log_trace("Prompts", [{"type": getattr(m, "type", ""), "content": m.content} for m in messages])
+    
+    start_time = time.time()
+    response = await llm.ainvoke(messages)
+    comp_time = (time.time() - start_time) * 1000
+    
+    timing = state.get("timing_metrics", {})
+    timing["composer"] = timing.get("composer", 0) + comp_time
+    
+    response_text = message_content_text(response) or "I am here to help with your health question."
+    
+    log_section("FINAL RESPONSE")
+    print(f"{response_text}\n")
+
+    return {
+        "messages": [response],
+        "final_response": response_text,
+        "timing_metrics": timing,
+        "context_payload": {
+            **dict(state.get("context_payload") or {}),
+            "route": "patient_knowledge_llm",
+            "assistant_mode": "medical_knowledge_assistant",
+        },
+    }
+
 
 
 async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
@@ -184,18 +227,29 @@ async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
         
     messages = [sys_msg] + chat_messages
     
-    print("[DEBUG][MESSAGE_COUNT]", len(messages))
-    print("[DEBUG][PREVIOUS_AI_MESSAGES]", ai_message_count)
-    print("[DEBUG][LLM] evidence =", state.get("evidence"))
-    print("[DEBUG][LLM] prompt =", messages)
+    import time
+    from ...utils.logger import log_section, log_key_value, log_trace, format_duration
     
+    log_section("COMPOSER")
+    log_key_value("Response Mode", "patient_assistant_llm")
+    log_trace("Prompts", [{"type": getattr(m, "type", ""), "content": m.content} for m in messages])
+    
+    start_time = time.time()
     response = await llm.ainvoke(messages)
+    comp_time = (time.time() - start_time) * 1000
+    
+    timing = state.get("timing_metrics", {})
+    timing["composer"] = timing.get("composer", 0) + comp_time
     
     response_text = message_content_text(response) or "I am here to help with your health question."
+    
+    log_section("FINAL RESPONSE")
+    print(f"{response_text}\n")
 
     return {
         "messages": [response],
         "final_response": response_text,
+        "timing_metrics": timing,
         "context_payload": {
             **dict(state.get("context_payload") or {}),
             "route": "patient_assistant_llm",

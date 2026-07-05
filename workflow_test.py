@@ -85,6 +85,10 @@ TEST_PROMPTS = [
         "prompt": "Hello"
     },
     {
+        "category": "KNOWLEDGE",
+        "prompt": "Tell me about anemia."
+    },
+    {
         "category": "RAG",
         "prompt": "Explain my latest blood report.",
         "clear_chat": True

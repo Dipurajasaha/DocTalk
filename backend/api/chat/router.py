@@ -542,6 +542,15 @@ async def _run_ai_websocket(
             user_text = (await websocket.receive_text()).strip()
             if not user_text:
                 continue
+                
+            import time
+            from ...workflows.utils.logger import log_section, log_key_value, format_duration
+            
+            request_start_time = time.time()
+            log_section("REQUEST")
+            log_key_value("User", user_text)
+            log_key_value("Role", current_user.role.upper())
+            log_key_value("Session", ai_session_id)
 
             conversation_messages = _langchain_messages_from_db_history(db_history)
             conversation_messages.append(HumanMessage(content=user_text))
@@ -618,9 +627,7 @@ async def _run_ai_websocket(
                                 streamed_token = True
 
                 final_state = unified_chat_graph.get_state(ai_config).values
-                print("[DEBUG][FINAL_RESPONSE]", bool(final_response))
                 if not final_response:
-                    print("[DEBUG][ROUTER] graph result =", final_state)
                     final_response = str(final_state.get("final_response") or "").strip()
                 if not final_response:
                     final_response = _role_scaffold_message(current_user.role)
@@ -647,9 +654,18 @@ async def _run_ai_websocket(
                         "target_patient_id": normalized_target_patient_id,
                         "content": final_response,
                     }
-                    print("[DEBUG][ROUTER] outgoing message =", payload)
-                    print("[DEBUG][PATIENT_HISTORY_LEN]", len(final_state.get("patient_history_context") or []))
                     await websocket.send_json(payload)
+                    
+                    total_time = (time.time() - request_start_time) * 1000
+                    timing = final_state.get("timing_metrics") or {}
+                    
+                    log_section("TOTAL")
+                    log_key_value("Planning", format_duration(timing.get("planner", 0)))
+                    log_key_value("Execution", format_duration(timing.get("executor", 0)))
+                    log_key_value("Composition", format_duration(timing.get("composer", 0)))
+                    log_key_value("Total", format_duration(total_time))
+                    
+
                 except Exception:
                     raise
             except WebSocketDisconnect:

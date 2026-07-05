@@ -18,7 +18,8 @@ async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask, e
         
     capability = get_capability(cap_name)
     if not capability:
-        print(f"[DEBUG][EXECUTOR] Capability not found: {cap_name}")
+        from ..utils.logger import log_warning
+        log_warning(f"Capability not found: {cap_name}")
         return None
         
     role = str(state.get("role") or "")
@@ -26,10 +27,12 @@ async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask, e
     has_doctor = role == "doctor"
     
     if capability.get("requires_patient") and not has_patient:
-        print(f"[DEBUG][EXECUTOR] Capability {cap_name} requires patient but none found.")
+        from ..utils.logger import log_warning
+        log_warning(f"Capability {cap_name} requires patient but none found.")
         return None
     if capability.get("requires_doctor") and not has_doctor:
-        print(f"[DEBUG][EXECUTOR] Capability {cap_name} requires doctor but none found.")
+        from ..utils.logger import log_warning
+        log_warning(f"Capability {cap_name} requires doctor but none found.")
         return None
         
     params = dict(task_info.parameters)
@@ -48,18 +51,19 @@ async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask, e
             task_dict = {"capability_name": cap_name, "parameters": params, "action": task_info.action}
             
         decision = evaluate_freshness_policy(capability["metadata"], state, task_dict)
-        print(f"[DEBUG][FRESHNESS_POLICY] {cap_name}: {decision.model_dump()}")
+        from ..utils.logger import log_trace
+        log_trace(f"{cap_name} Freshness Policy", decision.model_dump())
         
-    print(f"[DEBUG][EXECUTOR] Executing capability: {cap_name} with params: {params}")
     result = await capability["handler"](state, params)
     
-    print("[DEBUG][CAPABILITY_RAW_RESULT]", result)
-                        
     return result
 
 async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
+    import time
+    from ..utils.logger import log_section, log_key_value, log_error, log_trace, format_duration
+    
+    exec_start_time = time.time()
     execution_plan = state.get("execution_plan") or []
-    print("[DEBUG][EXECUTOR] received_plan =", execution_plan)
     collector = EvidenceCollector()
     aggregate = TaskExecutionResult()
     
@@ -69,6 +73,8 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     loops = 0
     execution_context: dict[str, Any] = {}
     completed_task_ids: set[str] = set()
+    
+    log_section("EXECUTOR")
     
     while queue:
         if loops >= MAX_PENDING_TASK_DEPTH:
@@ -89,13 +95,29 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
                 "type": "warning",
                 "message": "dependency cycle or missing dependency detected, aborting execution"
             })
-            print("[DEBUG][EXECUTOR] Dependency cycle or missing dependency detected.")
+            log_error("Dependency cycle or missing dependency detected.")
             break
             
         task = queue.pop(ready_task_index)
-        print("[DEBUG][EXECUTOR] executing =", task)
+        
+        cap_start = time.time()
         result = await execute_single_task(state, task, execution_context)
-        print("[DEBUG][EXECUTOR] result =", result)
+        cap_time = (time.time() - cap_start) * 1000
+        
+        log_key_value("Executing", task.capability_name)
+        params_dict = dict(task.parameters) if getattr(task, "parameters", None) else {}
+        if getattr(task, "action", None): params_dict["action"] = task.action
+        if params_dict: log_key_value("Parameters", params_dict)
+        
+        if result:
+            log_key_value("Result", "SUCCESS")
+            if getattr(result, "evidence", None):
+                log_key_value("Evidence", f"{len(result.evidence)} block(s)")
+            log_trace(f"{task.capability_name} Result", result.model_dump() if hasattr(result, "model_dump") else result)
+        else:
+            log_key_value("Result", "FAILED")
+            
+        log_key_value("Duration", format_duration(cap_time))
         
         if getattr(task, "task_id", None):
             completed_task_ids.add(task.task_id)
@@ -168,6 +190,13 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
         result_dict["planner_metadata"] = pmeta
         
     result_dict["evidence"] = unified_evidence
+    
+    timing = state.get("timing_metrics", {})
+    timing["executor"] = (time.time() - exec_start_time) * 1000
+    result_dict["timing_metrics"] = timing
+    
+    from ..memory.conversation_memory import ConversationMemoryManager
+    memory_manager = ConversationMemoryManager(state)
+    result_dict["conversation_memory"] = memory_manager.update(result_dict)
 
-    print("[DEBUG][EXECUTOR_RETURN]", result_dict.keys())
     return result_dict

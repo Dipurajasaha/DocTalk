@@ -42,6 +42,8 @@ class WorkflowState(TypedDict):
     execution_iteration: int
     pending_tasks: list[PlannerTask]
     response_sections: list[dict[str, Any]]
+    timing_metrics: dict[str, float]
+    conversation_memory: dict[str, Any]
 
 
 UnifiedChatState = WorkflowState
@@ -91,6 +93,8 @@ def create_workflow_state(
         execution_iteration=0,
         pending_tasks=[],
         response_sections=[],
+        timing_metrics={},
+        conversation_memory={},
     )
 
 
