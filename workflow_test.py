@@ -80,24 +80,24 @@ OUTPUT_FILE = "test_results.csv"
 # ==============================================================================
 
 TEST_PROMPTS = [
-    # {
-    #     "category": "GENERAL",
-    #     "prompt": "Hello"
-    # },
-    # {
-    #     "category": "RAG",
-    #     "prompt": "Explain my latest blood report.",
-    #     "clear_chat": True
-    # },
-    # {
-    #     "category": "MEMORY",
-    #     "prompt": "Summarize my previous consultations.",
-    #     "clear_chat": False
-    # },
-    # {
-    #     "category": "MULTI-CAPABILITY",
-    #     "prompt": "Summarize my previous consultations and latest blood report."
-    # },
+    {
+        "category": "GENERAL",
+        "prompt": "Hello"
+    },
+    {
+        "category": "RAG",
+        "prompt": "Explain my latest blood report.",
+        "clear_chat": True
+    },
+    {
+        "category": "MEMORY",
+        "prompt": "Summarize my previous consultations.",
+        "clear_chat": False
+    },
+    {
+        "category": "MULTI-CAPABILITY",
+        "prompt": "Summarize my previous consultations and latest blood report."
+    },
     {
         "category": "WORKFLOW_SEQUENCE",
         "prompt": "Is there any appointment slots available for Dr. DocDipu?",

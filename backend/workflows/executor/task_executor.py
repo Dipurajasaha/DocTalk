@@ -11,7 +11,7 @@ from ..models.task_execution_result import TaskExecutionResult
 from ..models.planner_task import PlannerTask
 from ..models.capability_result import CapabilityResult
 
-async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask) -> CapabilityResult | None:
+async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask, execution_context: dict[str, Any]) -> CapabilityResult | None:
     cap_name = task_info.capability_name
     if not cap_name:
         return None
@@ -35,6 +35,11 @@ async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask) -
     params = dict(task_info.parameters)
     if task_info.action:
         params["action"] = task_info.action
+        
+    if getattr(task_info, "consumes", None):
+        for key in task_info.consumes:
+            if key in execution_context:
+                params[key] = execution_context[key]
         
     if "metadata" in capability:
         try:
@@ -62,6 +67,8 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     
     MAX_PENDING_TASK_DEPTH = 20
     loops = 0
+    execution_context: dict[str, Any] = {}
+    completed_task_ids: set[str] = set()
     
     while queue:
         if loops >= MAX_PENDING_TASK_DEPTH:
@@ -71,13 +78,38 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
             })
             break
             
-        task = queue.pop(0)
+        ready_task_index = next(
+            (i for i, task in enumerate(queue) 
+             if not getattr(task, "depends_on", None) or all(dep in completed_task_ids for dep in task.depends_on)),
+            None
+        )
+        
+        if ready_task_index is None:
+            aggregate.evidence.append({
+                "type": "warning",
+                "message": "dependency cycle or missing dependency detected, aborting execution"
+            })
+            print("[DEBUG][EXECUTOR] Dependency cycle or missing dependency detected.")
+            break
+            
+        task = queue.pop(ready_task_index)
         print("[DEBUG][EXECUTOR] executing =", task)
-        result = await execute_single_task(state, task)
+        result = await execute_single_task(state, task, execution_context)
         print("[DEBUG][EXECUTOR] result =", result)
+        
+        if getattr(task, "task_id", None):
+            completed_task_ids.add(task.task_id)
         
         if result:
             aggregate.merge(result)
+            
+            if getattr(task, "produces", None) and result.data is not None:
+                if isinstance(result.data, dict):
+                    for k in task.produces:
+                        if k in result.data:
+                            execution_context[k] = result.data[k]
+                elif len(task.produces) == 1:
+                    execution_context[task.produces[0]] = result.data
             
             if aggregate.pending_tasks:
                 queue.extend(aggregate.pending_tasks)
