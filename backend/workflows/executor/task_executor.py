@@ -4,23 +4,23 @@ from typing import Any
 
 from .capability_registry import get_capability
 from .freshness_policy import evaluate_freshness_policy
-from ..composer.evidence_collector import EvidenceCollector
 from ..graph.state import UnifiedChatState
 
-from ..models.task_execution_result import TaskExecutionResult
 from ..models.planner_task import PlannerTask
 from ..models.capability_result import CapabilityResult
+from ..models.execution_context import ExecutionContext
 
-async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask, execution_context: dict[str, Any]) -> CapabilityResult | None:
+async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask, ctx: ExecutionContext) -> CapabilityResult:
+    import time
     cap_name = task_info.capability_name
     if not cap_name:
-        return None
+        return CapabilityResult(capability_name="UNKNOWN", status="FAILED", errors=["No capability name provided"])
         
     capability = get_capability(cap_name)
     if not capability:
         from ..utils.logger import log_warning
         log_warning(f"Capability not found: {cap_name}")
-        return None
+        return CapabilityResult(capability_name=cap_name, status="FAILED", errors=[f"Capability not found: {cap_name}"])
         
     role = str(state.get("role") or "")
     has_patient = bool(state.get("user_id") if role == "patient" else state.get("target_patient_id"))
@@ -29,11 +29,11 @@ async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask, e
     if capability.get("requires_patient") and not has_patient:
         from ..utils.logger import log_warning
         log_warning(f"Capability {cap_name} requires patient but none found.")
-        return None
+        return CapabilityResult(capability_name=cap_name, status="FAILED", errors=["Requires patient context"])
     if capability.get("requires_doctor") and not has_doctor:
         from ..utils.logger import log_warning
         log_warning(f"Capability {cap_name} requires doctor but none found.")
-        return None
+        return CapabilityResult(capability_name=cap_name, status="FAILED", errors=["Requires doctor context"])
         
     params = dict(task_info.parameters)
     if task_info.action:
@@ -41,8 +41,8 @@ async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask, e
         
     if getattr(task_info, "consumes", None):
         for key in task_info.consumes:
-            if key in execution_context:
-                params[key] = execution_context[key]
+            if key in ctx.shared_context:
+                params[key] = ctx.shared_context[key]
         
     if "metadata" in capability:
         try:
@@ -54,8 +54,30 @@ async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask, e
         from ..utils.logger import log_trace
         log_trace(f"{cap_name} Freshness Policy", decision.model_dump())
         
-    result = await capability["handler"](state, params)
-    
+    start_time = time.time()
+    try:
+        raw_result = await capability["handler"](state, params)
+        if isinstance(raw_result, dict):
+            result = CapabilityResult(
+                capability_name=cap_name,
+                status="SUCCESS",
+                data=raw_result.get("data", raw_result),
+                metadata=raw_result.get("metadata", {}),
+                evidence=raw_result.get("evidence", []),
+                pending_tasks=raw_result.get("pending_tasks", [])
+            )
+        elif isinstance(raw_result, CapabilityResult):
+            result = raw_result
+            if not hasattr(result, "status"):
+                result.status = "SUCCESS"
+        elif raw_result is None:
+            result = CapabilityResult(capability_name=cap_name, status="FAILED", errors=["Returned None"])
+        else:
+            result = CapabilityResult(capability_name=cap_name, status="SUCCESS", data=raw_result)
+    except Exception as e:
+        result = CapabilityResult(capability_name=cap_name, status="FAILED", errors=[str(e)])
+        
+    result.timing_ms = (time.time() - start_time) * 1000
     return result
 
 async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
@@ -64,82 +86,68 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     
     exec_start_time = time.time()
     execution_plan = state.get("execution_plan") or []
-    collector = EvidenceCollector()
-    aggregate = TaskExecutionResult()
     
+    ctx = ExecutionContext()
     queue = list(execution_plan)
     
     MAX_PENDING_TASK_DEPTH = 20
     loops = 0
-    execution_context: dict[str, Any] = {}
-    completed_task_ids: set[str] = set()
     
-    log_section("EXECUTOR")
+    log_section("EXECUTION")
+    log_key_value("Execution ID", ctx.execution_id)
     
     while queue:
         if loops >= MAX_PENDING_TASK_DEPTH:
-            aggregate.evidence.append({
-                "type": "warning",
-                "message": "pending task depth exceeded"
-            })
+            ctx.warnings.append("pending task depth exceeded")
             break
             
         ready_task_index = next(
             (i for i, task in enumerate(queue) 
-             if not getattr(task, "depends_on", None) or all(dep in completed_task_ids for dep in task.depends_on)),
+             if not getattr(task, "depends_on", None) or all(dep in ctx.completed_task_ids for dep in task.depends_on)),
             None
         )
         
         if ready_task_index is None:
-            aggregate.evidence.append({
-                "type": "warning",
-                "message": "dependency cycle or missing dependency detected, aborting execution"
-            })
+            ctx.warnings.append("dependency cycle or missing dependency detected, aborting execution")
             log_error("Dependency cycle or missing dependency detected.")
             break
             
         task = queue.pop(ready_task_index)
         
-        cap_start = time.time()
-        result = await execute_single_task(state, task, execution_context)
-        cap_time = (time.time() - cap_start) * 1000
+        result = await execute_single_task(state, task, ctx)
         
         log_key_value("Executing", task.capability_name)
         params_dict = dict(task.parameters) if getattr(task, "parameters", None) else {}
         if getattr(task, "action", None): params_dict["action"] = task.action
         if params_dict: log_key_value("Parameters", params_dict)
         
-        if result:
+        if result.status == "SUCCESS":
             log_key_value("Result", "SUCCESS")
-            if getattr(result, "evidence", None):
+            if result.evidence:
                 log_key_value("Evidence", f"{len(result.evidence)} block(s)")
-            log_trace(f"{task.capability_name} Result", result.model_dump() if hasattr(result, "model_dump") else result)
+            log_trace(f"{task.capability_name} Result", result.model_dump() if hasattr(result, "model_dump") else result.__dict__)
         else:
             log_key_value("Result", "FAILED")
+            if result.errors:
+                log_error(str(result.errors))
             
-        log_key_value("Duration", format_duration(cap_time))
+        log_key_value("Duration", format_duration(result.timing_ms))
         
-        if getattr(task, "task_id", None):
-            completed_task_ids.add(task.task_id)
-        
-        if result:
-            aggregate.merge(result)
+        ctx.merge_result(task, result)
             
-            if getattr(task, "produces", None) and result.data is not None:
-                if isinstance(result.data, dict):
-                    for k in task.produces:
-                        if k in result.data:
-                            execution_context[k] = result.data[k]
-                elif len(task.produces) == 1:
-                    execution_context[task.produces[0]] = result.data
-            
-            if aggregate.pending_tasks:
-                queue.extend(aggregate.pending_tasks)
-                aggregate.pending_tasks = []
+        if ctx.pending_tasks:
+            queue.extend(ctx.pending_tasks)
+            ctx.pending_tasks = []
             
         loops += 1
 
-    collector.extend(aggregate.evidence)
+    ctx.finalize()
+    
+    log_key_value("Tasks Executed", f"{ctx.stats.tasks_executed}")
+    log_key_value("Evidence Collected", f"{len(ctx.evidence)} items")
+    if ctx.warnings:
+        log_key_value("Warnings", f"{len(ctx.warnings)}")
+    log_key_value("Total Duration", format_duration(ctx.stats.total_duration_ms))
     
     # Backward compatibility translation layer
     result_dict = {
@@ -153,46 +161,20 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
         "pending_tasks": [],
     }
     
-    clear_doctor_availability = False
-    unified_evidence = []
-    
-    for res in aggregate.results:
-        cap_name = res.capability_name
-        capability = get_capability(cap_name)
-        if not capability:
-            continue
-            
-        metadata = capability["metadata"]
-        
-        for target_key in getattr(metadata, "target_context_keys", []):
-            if res.data is None:
-                continue
-                
-            if isinstance(res.data, dict) and target_key in res.data:
-                result_dict[target_key] = res.data[target_key]
-            else:
-                if isinstance(res.data, dict) and isinstance(result_dict.get(target_key), dict):
-                    result_dict[target_key].update(res.data)
-                else:
-                    result_dict[target_key] = res.data
-                    
-        # Evidence is now generated entirely by the capabilities
-        if hasattr(res, "evidence") and res.evidence:
-            unified_evidence.extend(res.evidence)
-                    
-        if res.metadata.get("clear_doctor_availability"):
-            clear_doctor_availability = True
+    # Inject produced state from execution context
+    for key, value in ctx.shared_context.items():
+        result_dict[key] = value
 
-    if clear_doctor_availability:
+    if ctx.metadata.get("clear_doctor_availability"):
         result_dict["doctor_availability_context"] = []
         pmeta = dict(state.get("planner_metadata") or {})
         pmeta.pop("active_workflow", None)
         result_dict["planner_metadata"] = pmeta
         
-    result_dict["evidence"] = unified_evidence
+    result_dict["evidence"] = ctx.evidence
     
     timing = state.get("timing_metrics", {})
-    timing["executor"] = (time.time() - exec_start_time) * 1000
+    timing["executor"] = ctx.stats.total_duration_ms
     result_dict["timing_metrics"] = timing
     
     from ..memory.conversation_memory import ConversationMemoryManager

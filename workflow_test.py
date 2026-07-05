@@ -222,6 +222,10 @@ async def test_single_prompt(query: str, ws_url: str) -> tuple[str, str, int]:
                             final_response = data.get("content", "")
                             status_ok = True
                             break
+                        elif data.get("type") == "error":
+                            final_response = f"SERVER ERROR: {data.get('content', '')}"
+                            status_ok = False
+                            break
                     else:
                         final_response = msg
                         status_ok = True
