@@ -1,4 +1,5 @@
 from __future__ import annotations
+from ..core.crypto_utils import encrypt_file
 
 import asyncio
 import json
@@ -104,6 +105,23 @@ class AssetService:
         if not file_path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         return file_path, record.fileName, record.fileType
+    
+    async def get_decrypted_asset(self, user_id: str, asset_id: str) -> tuple[bytes, str, str]:
+        from ..core.crypto_utils import decrypt_file
+
+        record = await self._load_record(asset_id)
+        self._assert_access(record, user_id)
+        file_path = self._resolve_record_path(record)
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+
+        ciphertext = file_path.read_bytes()
+        if record.wrappedKey:
+            plaintext = decrypt_file(ciphertext, record.encryptionNonce, record.wrappedKey, record.keyNonce)
+        else:
+            plaintext = ciphertext
+
+        return plaintext, record.fileName, record.fileType
 
     async def delete_asset(self, user_id: str, asset_id: str) -> None:
         record = await self._load_record(asset_id)
@@ -392,6 +410,9 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
             raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Unsupported file content type")
 
         destination_path = await _relocate_asset_file(source_path, category)
+        plaintext_bytes = destination_path.read_bytes()
+        encrypted = encrypt_file(plaintext_bytes)
+        destination_path.write_bytes(encrypted.ciphertext)
         # storage_folder_path is the actual relative path under DATA_ROOT used on disk
         storage_folder_path = Path("uploads") / _category_to_folder(category)
         # logical_folder_path is the user-facing path shown in the UI
@@ -407,6 +428,9 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
                 "folderPath": storage_folder_path.as_posix() + "/",
                 "extractedText": extracted_text,
                 "processingStatus": "ANALYZED",
+                "encryptionNonce": encrypted.nonce_b64,
+                "wrappedKey": encrypted.wrapped_key_b64,
+                "keyNonce": encrypted.key_nonce_b64,
             },
         )
 

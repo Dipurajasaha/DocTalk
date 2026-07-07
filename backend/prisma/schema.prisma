@@ -212,6 +212,9 @@ model MedicalAsset {
   assetCategory    String   @default("UNCLASSIFIED")
   processingStatus  String   @default("PENDING")
   extractedText    String?  @db.Text
+  encryptionNonce   String?
+  wrappedKey        String?
+  keyNonce          String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

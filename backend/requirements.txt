@@ -1,9 +1,10 @@
 fastapi==0.118.2
 uvicorn[standard]==0.37.0
 python-multipart==0.0.20
-pydantic==2.10.6
+pydantic==2.13.4
 itsdangerous==2.2.0
 python-dotenv==1.2.2
+python-dateutil==2.9.0
 prisma==0.15.0
 PyJWT==2.13.0
 bcrypt==5.0.0

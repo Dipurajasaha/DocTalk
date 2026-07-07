@@ -4,6 +4,7 @@ import base64
 import tempfile
 from pathlib import Path
 from typing import Any
+import tempfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -162,9 +163,18 @@ async def analyze_document(
     current_user: CurrentUser = Depends(get_current_user),
     service: AssetService = Depends(_asset_service),
 ) -> dict[str, Any]:
-    file_path, file_name, mime_type = await service.get_asset_file_path(current_user.user_id, file_id)
+    plaintext, file_name, mime_type = await service.get_decrypted_asset(current_user.user_id, file_id)
+
+    suffix = Path(file_name).suffix or ""
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(plaintext)
+        temp_file_path = Path(tmp.name)
+
+    file_path = temp_file_path
+    
     if mime_type.startswith("image/"):
         analysis = await xray_analysis_service.analyze_image(file_path, language=language)
+        temp_file_path.unlink(missing_ok=True)
         return {
             "success": True,
             "reply": {
@@ -187,6 +197,7 @@ async def analyze_document(
     text = str(extracted.get("extracted_text") or "").strip()
     if not text:
         text = f"No readable text could be extracted from {file_name}."
+    temp_file_path.unlink(missing_ok=True)
     return await _analyze_text_document(text, language=language, title=file_name)
 
 

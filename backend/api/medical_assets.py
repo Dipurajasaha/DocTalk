@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 
 from ..core.security import CurrentUser, get_current_user
 from ..schemas.asset_schemas import AssetResponse, AssetUploadResponse
@@ -66,8 +66,12 @@ async def download_asset(
     current_user: CurrentUser = Depends(get_current_user),
     service: AssetService = Depends(get_asset_service),
 ):
-    path, original_name, mime = await service.get_asset_file_path(current_user.user_id, asset_id)
-    return FileResponse(path, media_type=mime or "application/octet-stream", filename=original_name)
+    plaintext, original_name, mime = await service.get_decrypted_asset(current_user.user_id, asset_id)
+    return Response(
+        content=plaintext,
+        media_type=mime or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{original_name}"'},
+    )
 
 
 @router.patch("/{asset_id}/rename", response_model=AssetResponse)
