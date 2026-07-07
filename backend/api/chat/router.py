@@ -579,24 +579,33 @@ async def _run_ai_websocket(
                 async for event in unified_chat_graph.astream_events(input_state, config=ai_config, version="v2"):
                     event_name = str(event.get("event") or "")
                     node_name = str(event.get("name") or "")
-                    data = dict(event.get("data") or {})
+                    data = event.get("data")
 
-                    # Emit status event when entering a node so the
+                    # Emit status event when entering a main workflow node so the
                     # frontend can show which stage the workflow is in.
-                    # We only emit for meaningful nodes (not START/END or
-                    # the log_entry_context bookkeeping node).
-                    if event_name == "on_chain_start" and node_name not in {"", "START", "END", "log_entry_context"}:
+                    # We use a strict whitelist map to avoid emitting internal Langchain
+                    # runnables, and map the developer node names to user-friendly text.
+                    VALID_GRAPH_NODES = {
+                        "planner": "Analyzing your request...",
+                        "task_executor": "Gathering medical records...",
+                        "recommendation_engine": "Evaluating options...",
+                        "response_composer": "Composing response...",
+                        "llm_orchestrator": "Consulting medical AI...",
+                        "guardrail": "Verifying medical safety..."
+                    }
+                    if event_name == "on_chain_start" and node_name in VALID_GRAPH_NODES:
                         try:
-                            await websocket.send_json({"type": "status", "node": node_name})
+                            user_friendly_status = VALID_GRAPH_NODES[node_name]
+                            await websocket.send_json({"type": "status", "node": user_friendly_status})
                         except Exception:
                             pass
 
-
-
-
-
-                    if event_name in {"on_chat_model_stream", "on_llm_stream"}:
-                        chunk_text = _extract_stream_chunk_text(data.get("chunk"))
+                    if event_name in {"on_chat_model_stream", "on_llm_stream"} or (event_name == "on_custom_event" and event.get("name") == "llm_stream_chunk"):
+                        if event_name == "on_custom_event":
+                            chunk_text = _extract_stream_chunk_text(data)
+                        else:
+                            chunk_text = _extract_stream_chunk_text(data.get("chunk") if isinstance(data, dict) else None)
+                            
                         if chunk_text:
                             # Feed the chunk through the metadata buffer.
                             # It will return text to emit once it can decide

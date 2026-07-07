@@ -44,6 +44,7 @@ class WorkflowState(TypedDict):
     response_sections: list[dict[str, Any]]
     timing_metrics: dict[str, float]
     conversation_memory: dict[str, Any]
+    recommendation_context: dict[str, Any]
 
 
 UnifiedChatState = WorkflowState

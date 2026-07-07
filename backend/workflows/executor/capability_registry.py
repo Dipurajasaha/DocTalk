@@ -439,7 +439,8 @@ async def handle_appointment_reschedule(state: UnifiedChatState, params: dict[st
 
 async def handle_appointment_search_slots(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
     doctor_name = params.get("doctor_name")
-    docs = await retrieve_doctor_availability(doctor_name=doctor_name)
+    specialty = params.get("specialty")
+    docs = await retrieve_doctor_availability(doctor_name=doctor_name, specialization=specialty)
     
     evidence_strings = []
     for d in docs:

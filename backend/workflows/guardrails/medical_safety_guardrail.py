@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage
@@ -8,13 +9,19 @@ from ..graph.common import message_content_text
 from ..graph.state import UnifiedChatState
 
 
-_CLINICAL_PROGNOSIS_KEYWORDS = (
-    "diagnose",
-    "suffer from",
-)
+# Direct diagnostic assertion patterns — match only when the AI is making a
+# personal diagnosis directed at the patient, NOT educational language.
+_DIAGNOSTIC_ASSERTION_PATTERNS = [
+    re.compile(r"\byou\s+(have|are\s+suffering\s+from|are\s+diagnosed\s+with|definitely\s+have)\b", re.IGNORECASE),
+    re.compile(r"\bthis\s+confirms\s+(that\s+)?you\b", re.IGNORECASE),
+    re.compile(r"\byou\s+are\s+(?:clearly|certainly|undoubtedly)\s+(?:suffering|affected)\b", re.IGNORECASE),
+    re.compile(r"\bi\s+(?:can\s+)?diagnose\s+you\b", re.IGNORECASE),
+    re.compile(r"\byour\s+diagnosis\s+is\b", re.IGNORECASE),
+]
 
 _MEDICAL_DISCLAIMER = (
-    "I cannot provide a definitive diagnosis. Please consult a licensed physician."
+    "\n\n---\n*This is general health information and not a definitive diagnosis. "
+    "Please consult a licensed physician for personalized medical advice.*"
 )
 
 
@@ -27,8 +34,9 @@ def _extract_last_ai_message(messages: list[BaseMessage] | None) -> tuple[int, A
 
 
 def _triggers_medical_safety_guardrail(text: str) -> bool:
-    normalized = text.lower()
-    return any(keyword in normalized for keyword in _CLINICAL_PROGNOSIS_KEYWORDS)
+    """Return True only if the response contains direct diagnostic assertions
+    directed at the patient, not general educational mentions of 'diagnose'."""
+    return any(pattern.search(text) for pattern in _DIAGNOSTIC_ASSERTION_PATTERNS)
 
 
 async def medical_safety_guardrail(state: UnifiedChatState) -> dict[str, Any]:
@@ -41,10 +49,30 @@ async def medical_safety_guardrail(state: UnifiedChatState) -> dict[str, Any]:
     if not response_text:
         return {}
 
+    # 1. Skip guardrail entirely for knowledge queries
+    planner_metadata = state.get("planner_metadata") or {}
+    query_type = planner_metadata.get("query_type", "")
+    
+    if query_type == "knowledge":
+        return {
+            "messages": [last_ai_message],
+            "final_response": response_text,
+            "context_payload": {
+                **dict(state.get("context_payload") or {}),
+                "medical_safety_guardrail": {
+                    "triggered": False,
+                    "skipped_reason": "knowledge_query",
+                },
+            },
+        }
+
+    # 2. For all other query types, check for direct diagnostic assertions
     triggered = _triggers_medical_safety_guardrail(response_text)
     guarded_text = response_text
+
     if triggered:
-        guarded_text = _MEDICAL_DISCLAIMER
+        # APPEND disclaimer, never replace
+        guarded_text = response_text + _MEDICAL_DISCLAIMER
         messages[last_index] = AIMessage(content=guarded_text)
 
     return {

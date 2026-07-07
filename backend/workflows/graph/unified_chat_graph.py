@@ -11,6 +11,7 @@ from ..composer.response_composer import response_composer_node
 from ..executor.task_executor import task_executor_node
 from ..guardrails.medical_safety_guardrail import medical_safety_guardrail
 from ..llm.llm_orchestrator import llm_orchestrator_node
+from ..recommendation.recommendation_engine import recommendation_engine_node
 from .state import WorkflowState
 
 
@@ -43,6 +44,9 @@ def build_unified_chat_graph() -> Any:
     # 4. Composer
     graph.add_node("response_composer", response_composer_node)
     
+    # 4.5 Recommendation
+    graph.add_node("recommendation_engine", recommendation_engine_node)
+    
     # 5. LLM Orchestrator
     graph.add_node("llm_orchestrator", llm_orchestrator_node)
     
@@ -53,7 +57,8 @@ def build_unified_chat_graph() -> Any:
     graph.add_edge(START, "log_entry_context")
     graph.add_edge("log_entry_context", "planner")
     graph.add_edge("planner", "task_executor")
-    graph.add_edge("task_executor", "response_composer")
+    graph.add_edge("task_executor", "recommendation_engine")
+    graph.add_edge("recommendation_engine", "response_composer")
     graph.add_edge("response_composer", "llm_orchestrator")
     graph.add_edge("llm_orchestrator", "guardrail")
     graph.add_edge("guardrail", END)

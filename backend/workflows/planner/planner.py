@@ -31,7 +31,7 @@ class PlanningEngine:
                 break
                 
         self.plan.metadata = {
-            "query_type": "general",
+            "query_type": previous_metadata.get("query_type", "general"),
             "detected_entities": previous_metadata.get("detected_entities", []),
             "detected_actions": [],
             "doctor_name": wf_ctx.get("doctor_name") or previous_metadata.get("doctor_name") or doc_name_from_avail,
@@ -110,12 +110,16 @@ class PlanningEngine:
                 self.plan.goals.append("check_doctor_availability")
             
         if self.intent.is_consultation or any(k in self.text for k in [
-            "previous consultation", "doctor recommend", "last consultation",
-            "what did doctor say", "last visit", "follow up", "recommend",
+            "previous consultation", "last consultation",
+            "what did doctor say", "last visit", "follow up",
         ]) or (res_ctx and res_ctx.has_reference and res_ctx.resolved_source == "consultation"):
             self.plan.goals.append("review_consultation")
             
-        if self.intent.is_history or (res_ctx and res_ctx.has_reference and res_ctx.resolved_source == "patient_history"):
+        if self.intent.is_history or any(k in self.text for k in [
+            "medicine", "medication", "prescribed", "prescribe",
+            "drug", "tablet", "capsule", "dosage",
+            "what doctor recommended", "doctor recommend",
+        ]) or (res_ctx and res_ctx.has_reference and res_ctx.resolved_source == "patient_history"):
             self.plan.goals.append("review_patient_history")
             
         if parse_document_query(self.intent.original_text) is not None or any(k in self.text for k in [
@@ -124,14 +128,30 @@ class PlanningEngine:
             "review my report", "what does my report", "cbc report",
             "hemoglobin", "hb level", "pcv level", "rbc count", "wbc count",
             "platelet", "blood test", "prescription",
+            "medicine", "medication", "prescribed",
         ]) or (res_ctx and res_ctx.has_reference and res_ctx.resolved_source == "asset_selection"):
             self.plan.goals.append("review_document")
             
         if any(k in self.text for k in ["memory", "remember", "recall"]):
             self.plan.goals.append("access_memory")
             
+        # Context-aware follow-up logic
+        prev_query_type = self.plan.metadata.get("query_type", "general")
+        if not self.plan.goals or (len(self.plan.goals) == 1 and self.plan.goals[0] == "review_consultation"):
+            # If it only detected consultation (e.g., due to "symptoms"), but previous was RAG, add review_document
+            if prev_query_type == "rag" or prev_query_type == "document":
+                if "review_document" not in self.plan.goals:
+                    self.plan.goals.append("review_document")
+                if "review_patient_history" not in self.plan.goals:
+                    self.plan.goals.append("review_patient_history")
+            
         if not self.plan.goals:
-            self.plan.goals.append("general_chat")
+            if prev_query_type == "rag":
+                self.plan.goals.extend(["review_document", "review_patient_history"])
+            elif prev_query_type == "consultation":
+                self.plan.goals.append("review_consultation")
+            else:
+                self.plan.goals.append("general_chat")
             
     def determine_required_information(self):
         meta = self.plan.metadata
@@ -479,6 +499,9 @@ async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
         plan = engine.execute()
         strategy = engine.derive_legacy_strategy()
         
+    from .plan_optimizer import PlanOptimizer
+    plan, opt_stats = PlanOptimizer.optimize(plan, local_state)
+        
     plan_time = (time.time() - start_time) * 1000
     timing = state.get("timing_metrics", {})
     timing["planner"] = plan_time
@@ -497,6 +520,13 @@ async def planner_node(state: UnifiedChatState) -> dict[str, Any]:
         log_key_value("Confidence", f"{llm_confidence:.2f}")
     
     log_key_value("Validation", "PASSED" if not validation_errors else "FAILED")
+    
+    log_section("PLANNER OPTIMIZATION")
+    log_key_value("Original Tasks", str(opt_stats["original_tasks"]))
+    log_key_value("Optimized Tasks", str(opt_stats["optimized_tasks"]))
+    log_key_value("Duplicates Removed", str(opt_stats["duplicates_removed"]))
+    log_key_value("Context Reused", str(opt_stats["context_reused"]))
+    log_key_value("Skipped Retrievals", str(opt_stats["skipped_retrievals"]))
     
     if plan.tasks:
         task_summaries = []

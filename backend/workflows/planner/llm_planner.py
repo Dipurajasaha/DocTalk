@@ -13,10 +13,10 @@ LLM_PLANNER_PROMPT = """You are the central Planning Engine for DocTalk, a patie
 Your job is to analyze the user's message, conversation history, and current context to output a JSON execution plan.
 
 AVAILABLE CAPABILITIES:
-- PATIENT_HISTORY: Fetch medical history
-- CONSULTATION: Fetch previous consultations
+- PATIENT_HISTORY: Fetch structured patient medical history including medications, prescriptions, vitals, conditions, symptoms, and diagnoses
+- CONSULTATION: Fetch previous doctor-patient consultation sessions and their messages
 - MEMORY: Fetch patient summary
-- ASSET_INDEX: Fetch assets/documents
+- ASSET_INDEX: Fetch uploaded documents including prescriptions, clinical notes, symptoms, lab reports, and medical records via RAG search
 - APPOINTMENT: List patient's existing appointments
 - APPOINTMENT_SEARCH_SLOTS: Search for available doctor slots
 - APPOINTMENT_BOOK: Confirm and book an appointment
@@ -35,6 +35,8 @@ RULES:
 9. For general greetings (e.g. "Hello", "Hi"), return NO tasks and "query_type": "general". DO NOT include workflow or appointment metadata.
 10. For general medical knowledge (e.g. "Tell me about anemia", "What is diabetes?"), return NO tasks and "query_type": "knowledge". DO NOT include workflow or appointment metadata.
 11. Always preserve the active_workflow if we are in the middle of a booking, UNLESS the query is unrelated (general or knowledge) or cancelled. For unrelated queries, omit workflow metadata entirely to prevent context pollution.
+12. If PREVIOUS PLANNER METADATA contains `recommended_specialty` and the user accepts it (e.g. "Yes", "Find one", "Book it"), use APPOINTMENT_SEARCH_SLOTS. If there is a `recommended_doctor_name`, set "doctor_name" in metadata. Otherwise set "specialty" in metadata to the `recommended_specialty`.
+13. CONTEXT-AWARE FOLLOW-UPS: If the user's message is a follow-up or ambiguous (e.g., "what are the symptoms?", "what did they say?"), look at PREVIOUS PLANNER METADATA. If the previous `query_type` was "rag" or related to a document/prescription, use ASSET_INDEX. If the previous `query_type` was "consultation" or related to a doctor visit, use CONSULTATION.
 
 OUTPUT SCHEMA (JSON ONLY):
 {
@@ -57,6 +59,7 @@ OUTPUT SCHEMA (JSON ONLY):
   },
   "metadata": {
       "doctor_name": "Doctor name if detected",
+      "specialty": "Specialty if detected",
       "booking_datetime": "Slot time if detected",
       "booking_ordinal": "e.g. 'first' if detected"
   }
@@ -86,6 +89,9 @@ OUTPUT: {"confidence":0.95,"reasoning":"Confirming booking","query_type":"workfl
 
 USER: "Cancel my appointment."
 OUTPUT: {"confidence":0.98,"reasoning":"Canceling appointment","query_type":"workflow","tasks":[{"task_id":"t1","task_type":"action","action_handler":"APPOINTMENT_CANCEL","depends_on":[]}],"metadata":{}}
+
+USER: "What medicines did the doctor prescribe?"
+OUTPUT: {"confidence":0.95,"reasoning":"Needs patient medication history and prescription documents","query_type":"rag","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"PATIENT_HISTORY","depends_on":[]},{"task_id":"t2","task_type":"retrieve","retriever":"ASSET_INDEX","depends_on":[]}],"metadata":{}}
 """
 
 class LLMPlanningEngine:

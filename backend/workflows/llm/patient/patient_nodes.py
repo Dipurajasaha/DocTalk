@@ -4,12 +4,13 @@ import json
 from typing import Any
 from fastapi.encoders import jsonable_encoder
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, AIMessage
 from pydantic import BaseModel, Field, model_validator
 
 from ...graph.common import get_workflow_model, latest_message_text, message_content_text
 from ...graph.state import UnifiedChatState
 from ...capabilities.tools.rag_tools import patient_rag_tool
+from ...utils.sanitizer import sanitize_for_llm
 
 
 class TriageEvaluation(BaseModel):
@@ -104,7 +105,8 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
     
     context_str = ""
     if evidence:
-        context_str += f"Evidence:\n{json.dumps(jsonable_encoder(evidence))}\n\n"
+        sanitized = sanitize_for_llm(evidence)
+        context_str += f"Evidence:\n{json.dumps(jsonable_encoder(sanitized))}\n\n"
         
     sys_content = (
         "You are a helpful, empathetic medical assistant. "
@@ -137,7 +139,16 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
     log_trace("Prompts", [{"type": getattr(m, "type", ""), "content": m.content} for m in messages])
     
     start_time = time.time()
-    response = await llm.ainvoke(messages)
+    
+    response_text = ""
+    from langchain_core.callbacks.manager import adispatch_custom_event
+    async for chunk in llm.astream(messages):
+        content = getattr(chunk, "content", "")
+        if content:
+            response_text += content
+            await adispatch_custom_event("llm_stream_chunk", content)
+            
+    response = AIMessage(content=response_text)
     comp_time = (time.time() - start_time) * 1000
     
     timing = state.get("timing_metrics", {})
@@ -182,7 +193,16 @@ async def patient_knowledge_llm(state: UnifiedChatState) -> dict[str, Any]:
     log_trace("Prompts", [{"type": getattr(m, "type", ""), "content": m.content} for m in messages])
     
     start_time = time.time()
-    response = await llm.ainvoke(messages)
+    
+    response_text = ""
+    from langchain_core.callbacks.manager import adispatch_custom_event
+    async for chunk in llm.astream(messages):
+        content = getattr(chunk, "content", "")
+        if content:
+            response_text += content
+            await adispatch_custom_event("llm_stream_chunk", content)
+            
+    response = AIMessage(content=response_text)
     comp_time = (time.time() - start_time) * 1000
     
     timing = state.get("timing_metrics", {})
@@ -210,12 +230,33 @@ async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
     messages_list = list(state.get("messages") or [])
     last_message = messages_list[-1] if messages_list else None
     evidence = state.get("evidence") or []
-    context_str = json.dumps(jsonable_encoder(evidence), default=str) if evidence else ""
+    if evidence:
+        sanitized = sanitize_for_llm(evidence)
+        context_str = json.dumps(jsonable_encoder(sanitized), default=str)
+    else:
+        context_str = ""
     
     sys_msg = SystemMessage(
         content=(
-            "You are a medical AI. Answer the user's query using ONLY this retrieved data: "
-            f"{context_str}. If empty, say no records exist."
+            "You are a medical report interpreter, NOT a clinician. Answer the user's query using ONLY this retrieved data: "
+            f"{context_str}. If empty, say no records exist.\n\n"
+            "REQUIREMENTS:\n"
+            "1. NEVER diagnose a condition unless the diagnosis is explicitly written in the uploaded report.\n"
+            "   - Do NOT write: 'This means you have diabetes', 'This confirms diabetes', 'This indicates anemia', 'This suggests fatty liver', 'This means kidney disease'.\n"
+            "   - Instead, explain the laboratory value and state whether it is above, below, or within the reference range.\n"
+            "2. NEVER prescribe treatment or management. Do NOT recommend medications, dosage changes, diet plans, exercise plans, weight loss, follow-up investigations, or lifestyle modifications.\n"
+            "3. If the report itself contains physician remarks or impressions, clearly attribute them under a heading exactly named '### Physician Remarks' and state they come directly from the uploaded report. Never rewrite them as your own medical opinion.\n"
+            "4. Avoid speculative statements ('likely', 'probably', 'suggests because of', 'may indicate') unless those exact words appear in the report.\n"
+            "5. For every abnormal value, you MUST use exactly this structure:\n"
+            "   [Parameter Name]\n"
+            "   Your Value: [Measured Value]\n"
+            "   Reference: [Reference Range]\n"
+            "   Status: [High/Low/Normal]\n"
+            "   What this measures: [Brief explanation of what the parameter measures]\n"
+            "   Why doctors order this test: [Brief explanation of why doctors commonly order this test]\n"
+            "6. If a 'care_recommendation' block is provided in the retrieved data, you MUST copy its content EXACTLY at the very end of your response, and then conclude with exactly this sentence:\n"
+            "   'Please discuss these findings with your healthcare provider, who can interpret them together with your symptoms, medical history, physical examination, and any additional investigations.'\n"
+            "   If no 'care_recommendation' is provided, simply conclude with the sentence above."
         )
     )
     
@@ -235,7 +276,16 @@ async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
     log_trace("Prompts", [{"type": getattr(m, "type", ""), "content": m.content} for m in messages])
     
     start_time = time.time()
-    response = await llm.ainvoke(messages)
+    
+    response_text = ""
+    from langchain_core.callbacks.manager import adispatch_custom_event
+    async for chunk in llm.astream(messages):
+        content = getattr(chunk, "content", "")
+        if content:
+            response_text += content
+            await adispatch_custom_event("llm_stream_chunk", content)
+            
+    response = AIMessage(content=response_text)
     comp_time = (time.time() - start_time) * 1000
     
     timing = state.get("timing_metrics", {})

@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, AIMessageChunk
 from openai import AsyncOpenAI, APIError, RateLimitError
 from backend.core.config import settings
 
@@ -167,6 +167,36 @@ async def complete_text(
     return _normalize_text(str(content or ""))
 
 
+from collections.abc import AsyncGenerator
+
+async def complete_text_stream(
+    messages: list[BaseMessage | dict[str, Any]],
+    *,
+    model: str | None = None,
+    temperature: float = 0.2,
+    max_output_tokens: int = DEFAULT_MAX_TOKENS,
+) -> AsyncGenerator[str, None]:
+    """Stream text via the configured OpenAI-compatible endpoint."""
+    client = get_llm_client()
+    effective_model = model or _get_model()
+
+    payload_messages = [_message_to_payload(message) for message in messages]
+    
+    stream = await client.chat.completions.create(
+        model=effective_model,
+        messages=payload_messages,
+        temperature=temperature,
+        max_tokens=max_output_tokens,
+        stream=True,
+    )
+    async for chunk in stream:
+        if chunk.choices and len(chunk.choices) > 0:
+            delta = chunk.choices[0].delta
+            content = getattr(delta, "content", None)
+            if content:
+                yield content
+
+
 async def complete_json(
     messages: list[BaseMessage | dict[str, Any]],
     *,
@@ -180,14 +210,11 @@ async def complete_json(
         model=model,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
-        response_format={"type": "json_object"},
     )
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except Exception:
-        pass
+    parsed = _extract_json(text)
+    if isinstance(parsed, dict):
+        return parsed
+    print(f"[DEBUG][LLM_CLIENT] JSON parsing failed. Raw text: {repr(text)}")
     return {}
 
 
@@ -372,7 +399,7 @@ class LLMChatModel:
     temperature: float = 0.2
     max_output_tokens: int = DEFAULT_MAX_TOKENS
 
-    async def ainvoke(self, messages: list[BaseMessage | dict[str, Any]]) -> AIMessage:
+    async def ainvoke(self, messages: list[BaseMessage | dict[str, Any]], **kwargs) -> AIMessage:
         text = await complete_text(
             messages,
             model=self.model,
@@ -381,6 +408,16 @@ class LLMChatModel:
         )
         msg = AIMessage(content=text)
         return msg
+
+    async def astream(self, messages: list[BaseMessage | dict[str, Any]], **kwargs) -> AsyncGenerator[AIMessageChunk, None]:
+        from langchain_core.runnables.config import run_in_executor
+        async for chunk_text in complete_text_stream(
+            messages,
+            model=self.model,
+            temperature=self.temperature,
+            max_output_tokens=self.max_output_tokens,
+        ):
+            yield AIMessageChunk(content=chunk_text)
 
     def with_structured_output(self, response_model: type[Any]) -> LLMStructuredResult:
         return LLMStructuredResult(

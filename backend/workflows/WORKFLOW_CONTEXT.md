@@ -114,12 +114,13 @@ The shadow pipeline is implemented as `run_shadow_pipeline()` in `unified_chat_g
 
 ### 3.1 Planner Node (`planner_node`)
 
-**File:** `planner/planner.py`
+**File:** `planner/planner.py` and `planner/llm_planner.py`
 
-1. Calls `retrieval_strategy_node` to determine the retrieval strategy via keyword matching.
-2. Calls `parse_intent()` to extract structured intent from the user's message.
-3. Iterates through ordered planner rules to generate an `ExecutionPlan` of `PlannerTask` objects.
-4. Falls back to a `general_response` task if no rules matched.
+The system uses an **LLM-driven Central Planning Engine** to orchestrate retrieval and actions:
+1. Calls the `LLMPlanningEngine` (with `LongCat` or `Gemini` via structured JSON output) to analyze the user's intent, conversation history, and active context.
+2. The LLM outputs a JSON execution plan defining multiple `PlannerTask`s mapped to available capabilities (e.g., `PATIENT_HISTORY`, `CONSULTATION`, `ASSET_INDEX`, `APPOINTMENT_BOOK`).
+3. Handles context-aware routing (e.g., if a user asks a follow-up question like "what did they say?", the planner looks at the previous `query_type` metadata to route to `ASSET_INDEX` or `CONSULTATION`).
+4. If the LLM planner fails or returns invalid JSON, it falls back to the legacy keyword-based rule planner (`planner_rule_registry.py`).
 
 **Retrieval Strategy** (`planner/retrieval_strategy.py`): Keyword-based classification into one of:
 - `DOCTOR_AVAILABILITY_QUERY` — "doctor available", "slots", "availability", etc.
@@ -317,8 +318,8 @@ class PlannerTask:
 - Authenticates via JWT token in query params.
 - Builds `WorkflowState` via `create_workflow_state()`.
 - Invokes `unified_chat_graph` via `astream_events()` for token streaming.
-- Includes a `_StreamingMetadataBuffer` that strips leading JSON metadata from streamed tokens.
-- Includes `_sanitize_ai_message()` that removes JSON fences, XML tags, and leading JSON objects.
+- **Streaming Implementation**: Listens for a custom `"llm_stream_chunk"` event manually dispatched by the LLM nodes, as the custom `LLMChatModel` uses `.astream()` under the hood.
+- **Loading UI**: Emits user-friendly node transition statuses (e.g., "Analyzing request...") using a strict whitelist dictionary to prevent internal LangChain runnables from flooding the frontend.
 - Persists messages to `AiChatMessage` table.
 
 ### 7.2 LLM Client (`backend/ai/core_services/llm_client.py`)
@@ -400,7 +401,7 @@ backend/workflows/
 
 ## 10. Key Design Decisions & Known Limitations
 
-1. **Keyword-based routing**: Both `classify_intent` and `retrieval_strategy_node` use hardcoded keyword lists. No LLM is involved in intent classification (except triage). This is fast but brittle — novel phrasings may be misrouted.
+1. **LLM-Based Planning**: Intent classification and tool orchestration are now handled by an LLM (`LLMPlanningEngine`), allowing complex multi-capability queries and contextual follow-ups. The legacy keyword routing is only a fallback.
 
 2. **Shadow pipeline runs synchronously inside a single node**: `run_shadow_pipeline()` calls `planner_node → task_executor_node (loop) → response_composer_node` in sequence as a regular Python function, not as separate LangGraph edges. This means LangGraph's checkpointing/visualization doesn't capture the shadow pipeline's internal steps.
 
@@ -410,6 +411,6 @@ backend/workflows/
 
 5. **`tools/appointment_tools.py` is unused**: These LangChain `@tool` wrappers exist but are never passed to any LLM as tools. The actual appointment booking goes through the `action_registry` instead.
 
-6. **Medical safety guardrail is regex-only**: Simple substring matching on "you have", "diagnose", "suffer from". Can produce false positives (e.g., "Do you have any questions?") and false negatives (rephrased diagnoses).
+6. **Medical safety guardrail is regex-only**: Simple substring matching on "you have", "diagnose", "suffer from". Can produce false positives (e.g., "Do you have any questions?") and false negatives (rephrased diagnoses). It only appends a disclaimer and does not block dangerous advice.
 
-7. **No true agentic behavior**: The LLM never autonomously decides which tools to call. All tool/retriever selection is pre-determined by keyword matching before the LLM is invoked.
+7. **Agentic Planning**: The LLM planner autonomously decides which tools to call via JSON plan generation before the execution pipeline runs.

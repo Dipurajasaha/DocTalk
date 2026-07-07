@@ -372,62 +372,77 @@ class AssetService:
 async def process_asset_background(asset_id: str, file_path: str, mimetype: str, db: Prisma) -> None:
     source_path = Path(file_path)
     mime_type = (mimetype or "").lower()
-    category: AssetCategory | None = None
     extracted_text = ""
 
     try:
         if not source_path.exists():
             raise FileNotFoundError(str(source_path))
 
+        asset = await db.medicalasset.find_unique(where={"id": asset_id})
+        if not asset:
+            raise ValueError(f"Asset {asset_id} not found")
+
+        from .document_analyzer import document_analyzer
+        from .asset_index_service import AssetIndexService
+
+        # 1. OCR / Extraction
         if mime_type == "application/pdf":
             extracted_text = await _extract_asset_text(source_path, mime_type)
             print("[DEBUG][OCR_TEXT_LENGTH]", len(extracted_text))
             print("[DEBUG][OCR_TEXT_SAMPLE]", repr(extracted_text[:100]))
-            category = await _classify_pdf_text(extracted_text)
+            
+            # 2. Extract structured metadata & classify via DocumentAnalyzer (Single Source of Truth)
+            index_data = await document_analyzer.analyze_document(
+                asset_id=asset_id,
+                patient_id=str(asset.userId),
+                file_name=str(asset.fileName),
+                category="UNCLASSIFIED",
+                extracted_text=extracted_text,
+                created_at=asset.createdAt
+            )
         elif mime_type.startswith("image/"):
-            category = "XRAY"
             analysis = await xray_analysis_service.analyze_image(source_path, metadata={"asset_id": asset_id, "mime_type": mime_type})
             extracted_text = str(analysis.get("findings") or analysis.get("summary") or "").strip()
+            
+            # For images, we still pass through DocumentAnalyzer with XRAY hint
+            index_data = await document_analyzer.analyze_document(
+                asset_id=asset_id,
+                patient_id=str(asset.userId),
+                file_name=str(asset.fileName),
+                category="XRAY",
+                extracted_text=extracted_text,
+                created_at=asset.createdAt
+            )
         else:
             raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Unsupported file content type")
 
+        # Extract unified classification values
+        category = index_data.pop("_fileCategory", None)
+        if category not in {"XRAY", "REPORT", "PRESCRIPTION"}:
+            category = "REPORT"
+        
+        source_type = index_data.pop("_sourceType", None)
+        if source_type not in {"xray", "report", "prescription"}:
+            source_type = "report"
+
+        # 3. File System Relocation
         destination_path = await _relocate_asset_file(source_path, category)
-        # storage_folder_path is the actual relative path under DATA_ROOT used on disk
         storage_folder_path = Path("uploads") / _category_to_folder(category)
-        # logical_folder_path is the user-facing path shown in the UI
         logical_folder_path = _folder_path_for_category(category)
         ingestion_text = extracted_text.strip() or f"{category} asset {asset_id}"
-        source_type = _category_to_source_type(category)
 
+        # 4. Update MedicalAsset record
         await db.medicalasset.update(
             where={"id": asset_id},
             data={
                 "assetCategory": category,
-                # persist the actual storage folder so disk resolution works reliably
                 "folderPath": storage_folder_path.as_posix() + "/",
                 "extractedText": extracted_text,
                 "processingStatus": "ANALYZED",
             },
         )
 
-        asset = await db.medicalasset.find_unique(
-            where={"id": asset_id}
-        )
-
-        if not asset:
-            raise ValueError(f"Asset {asset_id} not found")
-        
-        from .document_analyzer import document_analyzer
-        from .asset_index_service import AssetIndexService
-        
-        index_data = await document_analyzer.analyze_document(
-            asset_id=asset_id,
-            patient_id=str(asset.userId),
-            file_name=str(asset.fileName),
-            category=str(category),
-            extracted_text=extracted_text,
-            created_at=asset.createdAt
-        )
+        # 5. Create AssetIndex
         try:
             await AssetIndexService(db).create_index(index_data)
         except Exception as exc:
@@ -440,6 +455,7 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
         doc_type = index_data.get("documentType") if isinstance(index_data, dict) else getattr(index_data, "documentType", "")
         print("[DEBUG][DOCUMENT_CLASSIFICATION]", {"document_type": doc_type})
         
+        # 6. Extract History / Labs
         try:
             if doc_type == "lab_report":
                 print("[DEBUG][SELECTED_EXTRACTOR]", "LabResultExtractor")
@@ -467,6 +483,7 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
         except Exception as exc:
             logger.exception("PatientMedicalHistory extraction failed", extra={"asset_id": asset_id, "error": str(exc)})
         
+        # 7. RAG Vector Ingestion
         from langchain_text_splitters import RecursiveCharacterTextSplitter
         
         text_splitter = RecursiveCharacterTextSplitter(
@@ -514,24 +531,6 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
             logger.warning("Unable to mark asset processing as failed", extra={"component": "asset_processing", "asset_id": asset_id})
 
 
-async def _classify_pdf_text(extracted_text: str) -> AssetCategory:
-    prompt = (
-        "You are a fast medical document classifier. "
-        "Classify the text as exactly one of: REPORT or PRESCRIPTION. "
-        "Return JSON only with key category. "
-        "Choose REPORT for lab reports, discharge summaries, imaging reports, clinical notes, and other diagnostic documents. "
-        "Choose PRESCRIPTION for medication orders, pharmacy slips, dosage instructions, and doctor prescriptions."
-    )
-    sample_text = (extracted_text or "").strip()[:1000]
-    response = await _call_llm_json(prompt, sample_text or "No readable text was extracted from the PDF.")
-    
-    category_val = response.get("category") or response.get("assetCategory") or response.get("label")
-    if not category_val:
-        category_val = "REPORT"  # Default fallback if LLM response is empty or missing key
-        
-    return _normalize_category(category_val)
-
-
 async def _extract_asset_text(source_path: Path, mimetype: str) -> str:
     result = await ocr_service.extract_text(source_path, mime_type=mimetype)
     return str(result.get("extracted_text") or "").strip()
@@ -560,75 +559,3 @@ def _folder_path_for_category(category: AssetCategory) -> str:
         "REPORT": "/my_documents/reports/",
         "PRESCRIPTION": "/my_documents/prescriptions/",
     }[category]
-
-
-def _category_to_source_type(category: AssetCategory) -> AssetSourceType:
-    return {
-        "XRAY": "xray",
-        "REPORT": "report",
-        "PRESCRIPTION": "prescription",
-    }[category]
-
-
-def _normalize_category(value: Any) -> AssetCategory:
-    normalized = str(value or "").strip().upper()
-    if normalized in {"XRAY", "X-RAY", "X RAY"}:
-        return "XRAY"
-    if normalized == "REPORT":
-        return "REPORT"
-    if normalized == "PRESCRIPTION":
-        return "PRESCRIPTION"
-
-    if "XRAY" in normalized or "X-RAY" in normalized:
-        return "XRAY"
-    if "PRESCRIPTION" in normalized:
-        return "PRESCRIPTION"
-    if "REPORT" in normalized:
-        return "REPORT"
-
-    raise ValueError(f"Unable to classify asset category from response: {value!r}")
-
-
-async def _call_llm_json(prompt: str, payload: str) -> dict[str, Any]:
-    return await complete_json(
-        _build_llm_messages(prompt, payload),
-        temperature=0.1,
-        max_output_tokens=256,
-    )
-
-
-def _build_llm_messages(prompt: str, payload: str) -> list[dict[str, Any]]:
-    return [
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": str(payload)},
-    ]
-
-
-def _parse_llm_response(payload: Any) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        return {}
-
-    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
-    content = message.get("content") if isinstance(message, dict) else None
-    if isinstance(content, str):
-        text = content.strip()
-        if text.startswith("```"):
-            text = text.strip("`").strip()
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            return {"category": text}
-
-    response_text = payload.get("response")
-    if isinstance(response_text, str):
-        text = response_text.strip()
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            return {"category": text}
-
-    return {}

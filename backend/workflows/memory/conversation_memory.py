@@ -15,6 +15,8 @@ class ConversationMemoryManager:
             self.memory["semantic"] = {}
         if "short_term" not in self.memory:
             self.memory["short_term"] = {}
+        if "recommendation" not in self.memory:
+            self.memory["recommendation"] = {}
             
     def hydrate_planner_metadata(self) -> dict[str, Any]:
         """Reads from conversation_memory to populate planner_metadata for the next turn."""
@@ -40,6 +42,18 @@ class ConversationMemoryManager:
             metadata["booking_ordinal"] = workflow["booking_ordinal"]
             hydrated.append("booking_ordinal")
             
+        # Hydrate recommendation state
+        recommendation = self.memory.get("recommendation", {})
+        if "recommended_specialty" in recommendation:
+            metadata["recommended_specialty"] = recommendation["recommended_specialty"]
+            hydrated.append("recommended_specialty")
+        if "recommended_doctor_id" in recommendation:
+            metadata["recommended_doctor_id"] = recommendation["recommended_doctor_id"]
+            hydrated.append("recommended_doctor_id")
+        if "recommended_doctor_name" in recommendation:
+            metadata["recommended_doctor_name"] = recommendation["recommended_doctor_name"]
+            hydrated.append("recommended_doctor_name")
+            
         # Hydrate semantic state
         semantic = self.memory.get("semantic", {})
         # Note: we don't stuff doctor_availability_context into planner_metadata, 
@@ -58,6 +72,7 @@ class ConversationMemoryManager:
         
         workflow = self.memory.setdefault("workflow", {})
         semantic = self.memory.setdefault("semantic", {})
+        recommendation = self.memory.setdefault("recommendation", {})
         
         # 1. Update Workflow memory from planner_metadata (if Executor preserved it)
         pmeta = result_dict.get("planner_metadata", self.state.get("planner_metadata", {}))
@@ -72,6 +87,10 @@ class ConversationMemoryManager:
                 workflow.pop("booking_ordinal", None)
                 expired.append("active_workflow")
                 expired.append("workflow_context")
+                # Also expire recommendation if workflow finished
+                if "recommended_specialty" in recommendation:
+                    recommendation.clear()
+                    expired.append("recommendation")
             else:
                 pass # Preserve workflow memory for unrelated tangents
         elif "active_workflow" in pmeta:
@@ -99,6 +118,13 @@ class ConversationMemoryManager:
             elif "doctor_availability_context" in semantic:
                 semantic.pop("doctor_availability_context", None)
                 expired.append("doctor_availability_context")
+                
+        # 3. Update Recommendation memory
+        if "recommendation_context" in result_dict:
+            rec = result_dict["recommendation_context"]
+            if rec:
+                recommendation.update(rec)
+                updated.append("recommendation")
                 
         if updated or expired:
             log_section("MEMORY")

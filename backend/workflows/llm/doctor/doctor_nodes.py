@@ -38,8 +38,18 @@ async def doctor_general_llm(state: UnifiedChatState) -> dict[str, Any]:
     print("[DEBUG][LLM] evidence =", state.get("evidence"))
     print("[DEBUG][LLM] prompt =", messages)
     
-    response = await llm.ainvoke(messages)
-    response_text = message_content_text(response) or "Clinical reasoning guidance is unavailable at the moment."
+    response_text = ""
+    from langchain_core.callbacks.manager import adispatch_custom_event
+    from langchain_core.messages import AIMessage
+    async for chunk in llm.astream(messages):
+        content = getattr(chunk, "content", "")
+        if content:
+            response_text += content
+            await adispatch_custom_event("llm_stream_chunk", content)
+            
+    response = AIMessage(content=response_text)
+    if not response_text:
+        response_text = "Clinical reasoning guidance is unavailable at the moment."
 
     return {
         "messages": [response],
@@ -74,8 +84,18 @@ async def doctor_scoped_llm(state: UnifiedChatState) -> dict[str, Any]:
     print("[DEBUG][LLM] evidence =", state.get("evidence"))
     print("[DEBUG][LLM] prompt =", messages)
     
-    response = await llm.ainvoke(messages)
-    response_text = message_content_text(response) or "Clinical reasoning guidance is unavailable at the moment."
+    response_text = ""
+    from langchain_core.callbacks.manager import adispatch_custom_event
+    from langchain_core.messages import AIMessage
+    async for chunk in llm.astream(messages):
+        content = getattr(chunk, "content", "")
+        if content:
+            response_text += content
+            await adispatch_custom_event("llm_stream_chunk", content)
+            
+    response = AIMessage(content=response_text)
+    if not response_text:
+        response_text = "Clinical reasoning guidance is unavailable at the moment."
 
     return {
         "messages": [response],

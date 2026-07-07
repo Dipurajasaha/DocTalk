@@ -351,8 +351,6 @@ model AssetIndex {
   patientId     String
   
   fileName      String?
-  fileCategory  String?
-  sourceType    String?
   
   documentType  String?
   reportType    String?

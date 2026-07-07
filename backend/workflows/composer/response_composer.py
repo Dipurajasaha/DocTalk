@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 from ..graph.state import UnifiedChatState
 from ..models.composed_response import ComposedResponse
+from ..utils.sanitizer import sanitize_for_llm
 
 ACTION_CAPABILITIES = {"APPOINTMENT_BOOK", "APPOINTMENT_CANCEL", "APPOINTMENT_RESCHEDULE"}
 
@@ -14,12 +15,12 @@ async def response_composer_node(state: UnifiedChatState) -> dict[str, Any]:
             c_ctx = state.get("consultation_context")
             if c_ctx:
                 import json
-                ev["content"] += f"\n\nDetails:\n{json.dumps(c_ctx, default=str)}"
+                ev["content"] += f"\n\nDetails:\n{json.dumps(sanitize_for_llm(c_ctx), default=str)}"
         elif ev.get("type") == "patient_history":
             h_ctx = state.get("patient_history_context")
             if h_ctx:
                 import json
-                ev["content"] += f"\n\nDetails:\n{json.dumps(h_ctx, default=str)}"
+                ev["content"] += f"\n\nDetails:\n{json.dumps(sanitize_for_llm(h_ctx), default=str)}"
 
     response = ComposedResponse(
         evidence=evidence
