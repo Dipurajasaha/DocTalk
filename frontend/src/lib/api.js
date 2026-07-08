@@ -86,6 +86,30 @@ export const hospitalApi = {
   updateProfile: (data) => apiClient.put('/api/hospital/profile', data, { retries: 0, auth: true }),
 };
 
+export const prescriptionApi = {
+  issue: (data) => apiClient.post('/api/prescriptions', data, { retries: 0, auth: true }),
+  listMine: () => apiClient.get('/api/prescriptions/mine', { retries: 1, auth: true }),
+  listIssued: (patientUsername = '') => {
+    const query = patientUsername ? `?patient_username=${encodeURIComponent(patientUsername)}` : '';
+    return apiClient.get(`/api/prescriptions/issued${query}`, { retries: 1, auth: true });
+  },
+  get: (id) => apiClient.get(`/api/prescriptions/${encodeURIComponent(id)}`, { retries: 1, auth: true }),
+  revoke: (id, revokedReason) => apiClient.post(`/api/prescriptions/${encodeURIComponent(id)}/revoke`, { revokedReason }, { retries: 0, auth: true }),
+  supersede: (id, data) => apiClient.post(`/api/prescriptions/${encodeURIComponent(id)}/supersede`, data, { retries: 0, auth: true }),
+  getSignatureStatus: () => apiClient.get('/api/prescriptions/signature/status', { retries: 1, auth: true }),
+  saveSignature: (signatureImageBase64) => apiClient.post('/api/prescriptions/signature', { signatureImageBase64 }, { retries: 0, auth: true }),
+  verifyByQrToken: (qrToken) => apiClient.get(`/api/prescriptions/verify/${encodeURIComponent(qrToken)}`, { retries: 1 }),
+  pdfUrl: (id) => `/api/prescriptions/${encodeURIComponent(id)}/pdf`,
+  fetchPdfBlob: async (id) => {
+    const token = localStorage.getItem('doctalk_token');
+    const response = await fetch(`/api/prescriptions/${encodeURIComponent(id)}/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error(`Failed to load PDF (${response.status})`);
+    return response.blob();
+  },
+};
+
 export const doctorApi = {
   createSlots: (slots) => apiClient.post('/api/appointments/slots', slots, { retries: 0, auth: true }),
   getSlots: (doctorId) => apiClient.get(`/api/appointments/slots/${encodeURIComponent(doctorId)}`, { retries: 1, auth: true }),

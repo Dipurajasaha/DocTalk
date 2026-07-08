@@ -1294,6 +1294,7 @@ export default function DoctorDashboard() {
               {tab === 'patientchats' ? 'Patient Chats' : tab === 'sessions' ? 'Manage Sessions' : tab}
             </button>
           ))}
+          <button onClick={() => navigate('/doctor/prescriptions')}>Prescriptions</button>
         </div>
 
       </div>

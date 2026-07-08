@@ -6,6 +6,11 @@ import DoctorDashboard from './pages/DoctorDashboard';
 import HospitalDashboard from './pages/HospitalDashboard';
 import ReportView from './pages/ReportView';
 import PrescriptionView from './pages/PrescriptionView';
+import DoctorSignatureSetup from './pages/DoctorSignatureSetup';
+import DoctorPrescriptionsList from './pages/DoctorPrescriptionsList';
+import PrescriptionComposer from './pages/PrescriptionComposer';
+import PatientPrescriptionsList from './pages/PatientPrescriptionsList';
+import PublicVerify from './pages/PublicVerify';
 import { useSession } from './contexts/SessionContext';
 import { useEffect } from 'react';
 import { useNotifications } from './contexts';
@@ -86,6 +91,12 @@ function App() {
         <Route path="/hospital/dashboard" element={<RequireHospital loaded={loaded} session={session}><HospitalDashboard /></RequireHospital>} />
         <Route path="/reports/:id" element={<RequireAuth loaded={loaded} session={session}><ReportView /></RequireAuth>} />
         <Route path="/prescriptions/:id" element={<RequireAuth loaded={loaded} session={session}><PrescriptionView /></RequireAuth>} />
+        <Route path="/doctor/signature" element={<RequireDoctor loaded={loaded} session={session}><DoctorSignatureSetup /></RequireDoctor>} />
+        <Route path="/doctor/prescriptions" element={<RequireDoctor loaded={loaded} session={session}><DoctorPrescriptionsList /></RequireDoctor>} />
+        <Route path="/doctor/prescriptions/new" element={<RequireDoctor loaded={loaded} session={session}><PrescriptionComposer /></RequireDoctor>} />
+        <Route path="/doctor/prescriptions/new/:patientUsername" element={<RequireDoctor loaded={loaded} session={session}><PrescriptionComposer /></RequireDoctor>} />
+        <Route path="/patient/prescriptions" element={<RequirePatient loaded={loaded} session={session}><PatientPrescriptionsList /></RequirePatient>} />
+        <Route path="/verify/:qrToken" element={<PublicVerify />} />
       </Routes>
     </BrowserRouter>
   );

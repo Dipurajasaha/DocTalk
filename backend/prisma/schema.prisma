@@ -50,6 +50,7 @@ model Patient {
   appointments        Appointment[]
   consultations       Consultation[]
   ragDocuments        RagDocument[]
+  prescriptions       Prescription[]
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
@@ -67,6 +68,8 @@ model Doctor {
   displayName         String?
   gender              Gender?
   password            String
+  signatureImageBase64 String?
+  signatureUpdatedAt   DateTime?
   role                Role           @default(doctor)
   category            String?
   location            String?
@@ -88,6 +91,7 @@ model Doctor {
   appointments        Appointment[]
   consultations       Consultation[]
   doctorSlots         DoctorSlot[]
+  prescriptions       Prescription[]
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
@@ -155,6 +159,7 @@ model Consultation {
   doctor        Doctor         @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
   messages      Message[]
   ragDocuments  RagDocument[]
+  prescriptions Prescription[]
 
   @@index([patientUsername])
   @@index([doctorId])
@@ -296,6 +301,61 @@ model HospitalNews {
   @@index([isGlobal, publishedAt])
   @@index([category])
   @@map("hospital_news")
+}
+
+enum PrescriptionStatus {
+  ACTIVE
+  REVOKED
+  SUPERSEDED
+}
+
+model Prescription {
+  id                  String             @id @default(uuid())
+  prescriptionNumber  String             @unique
+
+  doctorId            String
+  patientUsername     String
+  consultationId      String?
+  appointmentId       String?
+
+  medicines           Json               @db.JsonB
+  sickNote            Json?              @db.JsonB
+  doctorNotes         String?
+
+  status              PrescriptionStatus @default(ACTIVE)
+  supersedesId        String?            @unique
+  supersededById      String?            @unique
+
+  contentHash         String
+  signature           String
+  signingKeyId        String
+
+  issuedAt            DateTime           @default(now())
+  revokedAt           DateTime?
+  revokedReason       String?
+
+  pdfAssetId          String?
+  pdfFileName         String?
+  pdfEncryptionNonce  String?
+  pdfWrappedKey       String?
+  pdfKeyNonce         String?
+  qrToken             String             @unique
+
+  doctor              Doctor             @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+  patient             Patient            @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  consultation        Consultation?      @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+
+  supersedes          Prescription?      @relation("PrescriptionChain", fields: [supersedesId], references: [id], onDelete: SetNull)
+  supersededBy        Prescription?      @relation("PrescriptionChain")
+
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([doctorId])
+  @@index([patientUsername])
+  @@index([status])
+  @@index([qrToken])
+  @@map("prescriptions")
 }
 
 model RagDocument {

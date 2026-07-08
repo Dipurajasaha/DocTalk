@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     rag_embedding_cache_size: int = Field(default=128, env="RAG_EMBEDDING_CACHE_SIZE")
     rag_max_memory_age_days: int = Field(default=365, env="RAG_MAX_MEMORY_AGE_DAYS")
 
+    frontend_base_url: str = Field(default="http://localhost:5173", env="FRONTEND_BASE_URL")
+
     class Config:
         env_file = str(PROJECT_ROOT / ".env")
         env_file_encoding = "utf-8"
