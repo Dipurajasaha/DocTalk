@@ -59,6 +59,10 @@ def _determine_specialty(evidence_text: str) -> str | None:
     return None
 
 async def recommendation_engine_node(state: UnifiedChatState) -> dict[str, Any]:
+    # 0. Skip recommendation engine entirely for doctors
+    if state.get("mode") in ["DOCTOR_GENERAL", "DOCTOR_PATIENT"]:
+        return {}
+
     # 1. Skip if there's an active workflow or if we already have a recommendation in context
     planner_metadata = state.get("planner_metadata") or {}
     if "active_workflow" in planner_metadata:

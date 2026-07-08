@@ -15,3 +15,4 @@ class CapabilityMetadata(BaseModel):
     description: str = Field(description="Human-readable description of what this capability does.")
     target_context_keys: list[str] = Field(default_factory=list, description="Keys in the UnifiedChatState where the result data should be merged.")
     evidence_behavior: str = Field(default="pass_through", description="How evidence is collected for this capability.")
+    allowed_roles: list[str] = Field(default_factory=list, description="Roles authorized to execute this capability.")

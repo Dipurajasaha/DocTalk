@@ -49,7 +49,7 @@ OUTPUT SCHEMA (JSON ONLY):
           "task_type": "retrieve|action",
           "retriever": "CAPABILITY_NAME (only if retrieve)",
           "action_handler": "CAPABILITY_NAME (only if action)",
-          "action": "latest (only for ASSET_INDEX if explicitly requested latest)",
+          "action": "latest|compare (only for ASSET_INDEX if explicitly requested latest or comparison)",
           "depends_on": []
       }
   ],
@@ -61,7 +61,11 @@ OUTPUT SCHEMA (JSON ONLY):
       "doctor_name": "Doctor name if detected",
       "specialty": "Specialty if detected",
       "booking_datetime": "Slot time if detected",
-      "booking_ordinal": "e.g. 'first' if detected"
+      "booking_ordinal": "e.g. 'first' if detected",
+      "document_type": "e.g. lab_report, prescription, imaging, medical_record",
+      "report_type": "e.g. blood_test, xray, prescription, general",
+      "limit": "Integer e.g. 2, 5, 10 if explicitly requested",
+      "time_range": "e.g. '2_months', '1_year', '6_months' if explicitly requested"
   }
 }
 
@@ -73,7 +77,13 @@ USER: "Tell me about anemia."
 OUTPUT: {"confidence":0.98,"reasoning":"Medical knowledge query","query_type":"knowledge","tasks":[],"metadata":{}}
 
 USER: "Explain my latest blood report."
-OUTPUT: {"confidence":0.95,"reasoning":"Needs asset and memory","query_type":"rag","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"ASSET_INDEX","action":"latest","depends_on":[]},{"task_id":"t2","task_type":"retrieve","retriever":"MEMORY","depends_on":[]}],"metadata":{}}
+OUTPUT: {"confidence":0.95,"reasoning":"Needs asset and memory","query_type":"rag","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"ASSET_INDEX","action":"latest","depends_on":[]},{"task_id":"t2","task_type":"retrieve","retriever":"MEMORY","depends_on":[]}],"metadata":{"document_type":"lab_report","report_type":"blood_test"}}
+
+USER: "Compare my last two blood reports."
+OUTPUT: {"confidence":0.95,"reasoning":"Needs multiple assets for comparison","query_type":"rag","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"ASSET_INDEX","action":"compare","depends_on":[]},{"task_id":"t2","task_type":"retrieve","retriever":"MEMORY","depends_on":[]}],"metadata":{"document_type":"lab_report","report_type":"blood_test","limit":2}}
+
+USER: "What were my blood test results over the last 6 months?"
+OUTPUT: {"confidence":0.95,"reasoning":"Needs assets within a time range","query_type":"rag","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"ASSET_INDEX","action":"compare","depends_on":[]},{"task_id":"t2","task_type":"retrieve","retriever":"MEMORY","depends_on":[]}],"metadata":{"document_type":"lab_report","report_type":"blood_test","time_range":"6_months"}}
 
 USER: "Summarize my previous consultations."
 OUTPUT: {"confidence":0.95,"reasoning":"Needs consultation history","query_type":"rag","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"CONSULTATION","depends_on":[]}],"metadata":{}}

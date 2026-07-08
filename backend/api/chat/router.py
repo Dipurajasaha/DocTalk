@@ -508,27 +508,36 @@ async def _run_ai_websocket(
 
     chat_service = get_chat_service()
     normalized_target_patient_id = str(target_patient_id or "").strip() or None
-    namespace = _build_ai_checkpoint_namespace(
-        user_id=current_user.user_id,
-        ai_session_id=ai_session_id,
-        target_patient_id=normalized_target_patient_id,
-    )
-
-    await websocket.accept()
 
     try:
-        # Determine the explicit mode based on role and target patient
-        mode = "patient_scoped" if expected_role == "doctor" and normalized_target_patient_id else "general"
+        # Determine the initial mode based on role and target patient
+        if expected_role == "patient":
+            initial_mode = "PATIENT"
+        elif normalized_target_patient_id:
+            initial_mode = "DOCTOR_PATIENT"
+        else:
+            initial_mode = "DOCTOR_GENERAL"
 
-        # Ensure the AI chat session exists in DB before running the graph,
-        # so that session metadata (userId, role, mode) is
-        # persisted even if the very first message is also the only message.
-        await chat_service.ensure_ai_session(
+        # Ensure the AI chat session exists in DB before running the graph.
+        # This will hydrate mode and target_patient_id if they exist in the DB.
+        session_info = await chat_service.ensure_ai_session(
             current_user.user_id,
             current_user.role,
             ai_session_id,
-            mode,
+            mode=initial_mode,
+            target_patient_id=normalized_target_patient_id,
         )
+        
+        mode = session_info["mode"]
+        normalized_target_patient_id = session_info["target_patient_id"]
+
+        namespace = _build_ai_checkpoint_namespace(
+            user_id=current_user.user_id,
+            ai_session_id=ai_session_id,
+            target_patient_id=normalized_target_patient_id,
+        )
+
+        await websocket.accept()
 
         db_history = await chat_service.get_ai_chat_history(ai_session_id)
         await websocket.send_json(
@@ -558,6 +567,7 @@ async def _run_ai_websocket(
             input_state = {
                 "messages": conversation_messages,
                 "role": current_user.role,
+                "mode": mode,
                 "user_id": current_user.user_id,
                 "ai_session_id": ai_session_id,
                 "target_patient_id": normalized_target_patient_id,

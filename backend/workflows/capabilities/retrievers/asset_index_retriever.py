@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from typing import Any
+from datetime import datetime
 
 from backend.core.database import prisma
 
 
-async def get_latest_document(patient_id: str) -> dict[str, Any] | None:
+async def get_latest_document(patient_id: str, document_type: str | None = None) -> dict[str, Any] | None:
+    where_clause = {"patientId": patient_id}
+    if document_type and document_type != "medical_record":
+        where_clause["documentType"] = document_type
+        
     docs = await prisma.assetindex.find_many(
-        where={"patientId": patient_id},
+        where=where_clause,
         order={"documentDate": "desc"},
         take=1
     )
@@ -16,21 +21,29 @@ async def get_latest_document(patient_id: str) -> dict[str, Any] | None:
     return dict(docs[0])
 
 
-async def get_documents_by_type(patient_id: str, doc_type: str, limit: int = 5) -> list[dict[str, Any]]:
+async def get_documents_by_type(patient_id: str, doc_type: str, limit: int = 5, start_date: datetime | None = None) -> list[dict[str, Any]]:
+    where_clause = {
+        "patientId": patient_id,
+        "documentType": doc_type
+    }
+    if start_date:
+        where_clause["documentDate"] = {"gte": start_date}
+        
     docs = await prisma.assetindex.find_many(
-        where={
-            "patientId": patient_id,
-            "documentType": doc_type
-        },
+        where=where_clause,
         order={"documentDate": "desc"},
         take=limit
     )
     return [dict(d) for d in docs]
 
 
-async def get_recent_documents(patient_id: str, limit: int = 5) -> list[dict[str, Any]]:
+async def get_recent_documents(patient_id: str, limit: int = 5, start_date: datetime | None = None) -> list[dict[str, Any]]:
+    where_clause = {"patientId": patient_id}
+    if start_date:
+        where_clause["documentDate"] = {"gte": start_date}
+        
     docs = await prisma.assetindex.find_many(
-        where={"patientId": patient_id},
+        where=where_clause,
         order={"documentDate": "desc"},
         take=limit
     )
@@ -46,12 +59,16 @@ async def get_document_by_asset_id(asset_id: str) -> dict[str, Any] | None:
     return dict(doc)
 
 
-async def get_reports_by_report_type(patient_id: str, report_type: str, limit: int = 5) -> list[dict[str, Any]]:
+async def get_reports_by_report_type(patient_id: str, report_type: str, limit: int = 5, start_date: datetime | None = None) -> list[dict[str, Any]]:
+    where_clause = {
+        "patientId": patient_id,
+        "reportType": report_type
+    }
+    if start_date:
+        where_clause["documentDate"] = {"gte": start_date}
+        
     docs = await prisma.assetindex.find_many(
-        where={
-            "patientId": patient_id,
-            "reportType": report_type
-        },
+        where=where_clause,
         order={"documentDate": "desc"},
         take=limit
     )

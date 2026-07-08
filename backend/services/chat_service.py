@@ -254,12 +254,13 @@ class ChatService:
         user_id: str,
         role: str,
         ai_session_id: str,
-        mode: str = "general",
-    ) -> str:
-        """Create the AiChatSession row if it doesn't exist yet.
+        mode: str = "PATIENT",
+        target_patient_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create or update the AiChatSession row.
 
-        Returns the database id of the session so callers can reference it.
-        Session metadata (userId, role, mode) is persisted
+        Returns a dict containing the session ID, mode, and target_patient_id.
+        Session metadata (userId, role, mode, targetPatientId) is persisted
         up-front, before any graph execution or message exchange.
         """
         normalized_role = str(role or "").strip().lower()
@@ -270,10 +271,24 @@ class ChatService:
             )
 
         normalized_user_id = str(user_id or "").strip()
+        normalized_target_patient = str(target_patient_id or "").strip() or None
 
         existing = await self.client.aichatsession.find_unique(where={"id": ai_session_id})
+        
         if existing is not None:
-            return existing.id
+            # If the client passed a new explicit patient, update the session
+            if normalized_target_patient and existing.targetPatientId != normalized_target_patient:
+                updated = await self.client.aichatsession.update(
+                    where={"id": ai_session_id},
+                    data={
+                        "targetPatientId": normalized_target_patient,
+                        "mode": "DOCTOR_PATIENT" if normalized_role == "doctor" else mode
+                    }
+                )
+                return {"id": updated.id, "mode": updated.mode, "target_patient_id": updated.targetPatientId}
+            
+            # Return the existing session state
+            return {"id": existing.id, "mode": existing.mode, "target_patient_id": existing.targetPatientId}
 
         created = await self.client.aichatsession.create(
             data={
@@ -281,9 +296,10 @@ class ChatService:
                 "userId": normalized_user_id,
                 "role": normalized_role,
                 "mode": mode,
+                "targetPatientId": normalized_target_patient,
             },
         )
-        return created.id
+        return {"id": created.id, "mode": created.mode, "target_patient_id": created.targetPatientId}
 
     async def get_ai_chat_history(self, ai_session_id: str) -> list[dict[str, Any]]:
         messages = await self.client.aichatmessage.find_many(

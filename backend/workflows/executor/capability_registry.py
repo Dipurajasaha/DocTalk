@@ -15,9 +15,8 @@ from ..models.capability_metadata import CapabilityMetadata
 class Capability(TypedDict):
     name: str
     handler: Callable[[UnifiedChatState, dict[str, Any]], Awaitable[CapabilityResult]]
-    requires_patient: bool
-    requires_doctor: bool
     metadata: CapabilityMetadata
+
 
 from ..capabilities.retrievers import retrieve_conversation_memory, retrieve_consultations
 from ..capabilities.retrievers.asset_index_retriever import get_latest_document, get_latest_report_by_type, get_reports_by_report_type
@@ -144,14 +143,37 @@ async def handle_asset_index_retrieve(state: UnifiedChatState, params: dict[str,
     
     p_id = user_id if role == "patient" else str(target_patient_id) if target_patient_id else None
         
+    limit_val = p_metadata.get("limit")
+    limit = int(limit_val) if limit_val is not None else 5
+    
+    time_range = p_metadata.get("time_range")
+    start_date = None
+    if time_range:
+        time_range = str(time_range).lower()
+        now = datetime.now(timezone.utc)
+        import re
+        from dateutil.relativedelta import relativedelta
+        m = re.search(r'(\d+)_([a-z]+)', time_range)
+        if m:
+            val = int(m.group(1))
+            unit = m.group(2)
+            if "month" in unit:
+                start_date = now - relativedelta(months=val)
+            elif "year" in unit:
+                start_date = now - relativedelta(years=val)
+            elif "week" in unit:
+                start_date = now - relativedelta(weeks=val)
+            elif "day" in unit:
+                start_date = now - relativedelta(days=val)
+                
     asset_ids = []
     if p_id:
         if action == "latest":
-            doc = await get_latest_document(p_id) if report_type == "general" else await get_latest_report_by_type(p_id, report_type)
+            doc = await get_latest_document(p_id, document_type=document_type) if report_type == "general" else await get_latest_report_by_type(p_id, report_type)
             if doc:
                 asset_ids.append(doc.get("assetId"))
         elif action == "compare":
-            docs = await get_reports_by_report_type(p_id, report_type)
+            docs = await get_reports_by_report_type(p_id, report_type, limit=limit, start_date=start_date)
             for d in docs:
                 asset_ids.append(d.get("assetId"))
                 
@@ -184,14 +206,20 @@ async def handle_asset_index_retrieve(state: UnifiedChatState, params: dict[str,
                 
         reason = asset_selection_context.get("selection_reason", "relevant")
         rtype = asset_selection_context.get("report_type", "document").replace("_", " ")
+        
+        # Context Injection
+        selected_docs = await prisma.assetindex.find_many(where={"assetId": {"in": asset_ids}})
+        docs_context = "Selected Documents Context:\n"
+        for idx, d in enumerate(selected_docs):
+            date_str = d.documentDate.strftime("%Y-%m-%d") if d.documentDate else "Unknown Date"
+            docs_context += f"{idx+1}. [{date_str}] {d.title} (Type: {d.reportType}): {d.summary}\n"
+
         if rag_evidence:
-            msg = f"Your {reason} {rtype} was located.\nRetrieved Findings:"
+            msg = f"Your {reason} {rtype} was located.\n\n{docs_context}\nRetrieved Findings from these documents:"
             for e in rag_evidence:
                 msg += f"\n* {e.get('content')}"
         else:
-            msg = f"Your {reason} {rtype} was located.\nSelected documents:"
-            for aid in asset_ids:
-                msg += f"\n* {rtype.title()} ({aid})"
+            msg = f"Your {reason} {rtype} was located.\n\n{docs_context}"
                 
         evidence.append({
             "source": "ASSET_INDEX",
@@ -470,8 +498,6 @@ REGISTRY: dict[str, Capability] = {
     "MEMORY": {
         "name": "MEMORY",
         "handler": handle_memory_retrieve,
-        "requires_patient": False,
-        "requires_doctor": False,
         "metadata": CapabilityMetadata(
             capability_name="MEMORY",
             capability_type="retriever",
@@ -482,14 +508,13 @@ REGISTRY: dict[str, Capability] = {
             supports_parallel_execution=True,
             description="Retrieves the conversational memory context for the active AI session.",
             target_context_keys=["memory_context"],
-            evidence_behavior="pass_through"
+            evidence_behavior="pass_through",
+            allowed_roles=["patient", "doctor"]
         )
     },
     "CONSULTATION": {
         "name": "CONSULTATION",
         "handler": handle_consultation_retrieve,
-        "requires_patient": False,
-        "requires_doctor": False,
         "metadata": CapabilityMetadata(
             capability_name="CONSULTATION",
             capability_type="retriever",
@@ -500,14 +525,13 @@ REGISTRY: dict[str, Capability] = {
             supports_parallel_execution=True,
             description="Retrieves the recent consultations for the user or target patient.",
             target_context_keys=["consultation_context"],
-            evidence_behavior="pass_through"
+            evidence_behavior="pass_through",
+            allowed_roles=["patient", "doctor"]
         )
     },
     "PATIENT_HISTORY": {
         "name": "PATIENT_HISTORY",
         "handler": handle_patient_history_retrieve,
-        "requires_patient": True,
-        "requires_doctor": False,
         "metadata": CapabilityMetadata(
             capability_name="PATIENT_HISTORY",
             capability_type="retriever",
@@ -518,14 +542,13 @@ REGISTRY: dict[str, Capability] = {
             supports_parallel_execution=True,
             description="Retrieves structured patient history like vitals and conditions.",
             target_context_keys=["patient_history_context"],
-            evidence_behavior="pass_through"
+            evidence_behavior="pass_through",
+            allowed_roles=["patient", "doctor"]
         )
     },
     "ASSET_INDEX": {
         "name": "ASSET_INDEX",
         "handler": handle_asset_index_retrieve,
-        "requires_patient": True,
-        "requires_doctor": False,
         "metadata": CapabilityMetadata(
             capability_name="ASSET_INDEX",
             capability_type="retriever",
@@ -536,14 +559,13 @@ REGISTRY: dict[str, Capability] = {
             supports_parallel_execution=True,
             description="Retrieves documents or reports for the patient.",
             target_context_keys=["asset_selection_context", "rag_scope"],
-            evidence_behavior="pass_through"
+            evidence_behavior="pass_through",
+            allowed_roles=["patient", "doctor"]
         )
     },
     "APPOINTMENT": {
         "name": "APPOINTMENT",
         "handler": handle_appointment_retrieve,
-        "requires_patient": False,
-        "requires_doctor": False,
         "metadata": CapabilityMetadata(
             capability_name="APPOINTMENT",
             capability_type="retriever",
@@ -554,14 +576,13 @@ REGISTRY: dict[str, Capability] = {
             supports_parallel_execution=True,
             description="Retrieves the list of upcoming or past appointments.",
             target_context_keys=["appointment_context"],
-            evidence_behavior="pass_through"
+            evidence_behavior="pass_through",
+            allowed_roles=["patient", "doctor"]
         )
     },
     "DOCTOR_AVAILABILITY": {
         "name": "DOCTOR_AVAILABILITY",
         "handler": handle_doctor_availability_retrieve,
-        "requires_patient": False,
-        "requires_doctor": False,
         "metadata": CapabilityMetadata(
             capability_name="DOCTOR_AVAILABILITY",
             capability_type="retriever",
@@ -572,15 +593,14 @@ REGISTRY: dict[str, Capability] = {
             supports_parallel_execution=True,
             description="Retrieves available slots for doctors.",
             target_context_keys=["doctor_availability_context"],
-            evidence_behavior="pass_through"
+            evidence_behavior="pass_through",
+            allowed_roles=["doctor"]
         )
     },
     # Actions
     "APPOINTMENT_BOOK": {
         "name": "APPOINTMENT_BOOK",
         "handler": handle_appointment_book,
-        "requires_patient": False,
-        "requires_doctor": False,
         "metadata": CapabilityMetadata(
             capability_name="APPOINTMENT_BOOK",
             capability_type="action",
@@ -591,14 +611,13 @@ REGISTRY: dict[str, Capability] = {
             supports_parallel_execution=False,
             description="Books an appointment.",
             target_context_keys=["appointment_context"],
-            evidence_behavior="pass_through"
+            evidence_behavior="pass_through",
+            allowed_roles=["patient"]
         )
     },
     "APPOINTMENT_CANCEL": {
         "name": "APPOINTMENT_CANCEL",
         "handler": handle_appointment_cancel,
-        "requires_patient": False,
-        "requires_doctor": False,
         "metadata": CapabilityMetadata(
             capability_name="APPOINTMENT_CANCEL",
             capability_type="action",
@@ -609,14 +628,13 @@ REGISTRY: dict[str, Capability] = {
             supports_parallel_execution=False,
             description="Cancels an upcoming appointment.",
             target_context_keys=["appointment_context"],
-            evidence_behavior="pass_through"
+            evidence_behavior="pass_through",
+            allowed_roles=["patient"]
         )
     },
     "APPOINTMENT_RESCHEDULE": {
         "name": "APPOINTMENT_RESCHEDULE",
         "handler": handle_appointment_reschedule,
-        "requires_patient": False,
-        "requires_doctor": False,
         "metadata": CapabilityMetadata(
             capability_name="APPOINTMENT_RESCHEDULE",
             capability_type="action",
@@ -627,14 +645,13 @@ REGISTRY: dict[str, Capability] = {
             supports_parallel_execution=False,
             description="Reschedules an appointment.",
             target_context_keys=["appointment_context"],
-            evidence_behavior="pass_through"
+            evidence_behavior="pass_through",
+            allowed_roles=["patient"]
         )
     },
     "APPOINTMENT_SEARCH_SLOTS": {
         "name": "APPOINTMENT_SEARCH_SLOTS",
         "handler": handle_appointment_search_slots,
-        "requires_patient": False,
-        "requires_doctor": False,
         "metadata": CapabilityMetadata(
             capability_name="APPOINTMENT_SEARCH_SLOTS",
             capability_type="action",
@@ -645,7 +662,8 @@ REGISTRY: dict[str, Capability] = {
             supports_parallel_execution=True,
             description="Searches for available appointment slots.",
             target_context_keys=["doctor_availability_context"],
-            evidence_behavior="pass_through"
+            evidence_behavior="pass_through",
+            allowed_roles=["patient"]
         )
     }
 }

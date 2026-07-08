@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from ..planner.planner import planner_node
 from ..composer.response_composer import response_composer_node
 from ..executor.task_executor import task_executor_node
+from ..auth.authorization import authorization_node
 from ..guardrails.medical_safety_guardrail import medical_safety_guardrail
 from ..llm.llm_orchestrator import llm_orchestrator_node
 from ..recommendation.recommendation_engine import recommendation_engine_node
@@ -38,6 +39,9 @@ def build_unified_chat_graph() -> Any:
     # 2. Planner
     graph.add_node("planner", planner_node)
     
+    # 2.5 Authorization
+    graph.add_node("authorization", authorization_node)
+    
     # 3. Executor
     graph.add_node("task_executor", task_executor_node)
     
@@ -56,7 +60,8 @@ def build_unified_chat_graph() -> Any:
     # Define linear orchestration pipeline
     graph.add_edge(START, "log_entry_context")
     graph.add_edge("log_entry_context", "planner")
-    graph.add_edge("planner", "task_executor")
+    graph.add_edge("planner", "authorization")
+    graph.add_edge("authorization", "task_executor")
     graph.add_edge("task_executor", "recommendation_engine")
     graph.add_edge("recommendation_engine", "response_composer")
     graph.add_edge("response_composer", "llm_orchestrator")

@@ -29,7 +29,7 @@ async def llm_orchestrator_node(state: WorkflowState) -> dict[str, Any]:
     
     if role == "doctor":
         mode = str(state.get("mode") or "").strip()
-        if mode == "patient_scoped":
+        if mode == "DOCTOR_PATIENT":
             return await doctor_scoped_llm(state)
         else:
             return await doctor_general_llm(state)

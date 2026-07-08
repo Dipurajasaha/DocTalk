@@ -9,7 +9,7 @@ from ..models.planner_task import PlannerTask
 
 
 ChatRole = Literal["patient", "doctor"]
-ChatMode = Literal["general", "patient_scoped"]
+ChatMode = Literal["PATIENT", "DOCTOR_GENERAL", "DOCTOR_PATIENT"]
 ChatRoute = Literal["patient_general", "patient_rag", "doctor_rag", "emergency"]
 
 
@@ -56,7 +56,7 @@ def create_workflow_state(
     role: ChatRole,
     user_id: str,
     ai_session_id: str,
-    mode: ChatMode = "general",
+    mode: ChatMode = "PATIENT",
     target_patient_id: str | None = None,
     context_payload: dict[str, Any] | None = None,
     triage_level: str = "routine",
@@ -105,7 +105,7 @@ def create_unified_chat_state(
     role: ChatRole,
     user_id: str,
     ai_session_id: str,
-    mode: ChatMode = "general",
+    mode: ChatMode = "PATIENT",
     target_patient_id: str | None = None,
     context_payload: dict[str, Any] | None = None,
     triage_level: str = "routine",

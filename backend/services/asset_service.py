@@ -404,15 +404,20 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
             analysis = await xray_analysis_service.analyze_image(source_path, metadata={"asset_id": asset_id, "mime_type": mime_type})
             extracted_text = str(analysis.get("findings") or analysis.get("summary") or "").strip()
             
-            # For images, we still pass through DocumentAnalyzer with XRAY hint
-            index_data = await document_analyzer.analyze_document(
-                asset_id=asset_id,
-                patient_id=str(asset.userId),
-                file_name=str(asset.fileName),
-                category="XRAY",
-                extracted_text=extracted_text,
-                created_at=asset.createdAt
-            )
+            # Hardcode classification for images instead of using the LLM
+            index_data = {
+                "assetId": asset_id,
+                "patientId": str(asset.userId),
+                "fileName": str(asset.fileName),
+                "_fileCategory": "XRAY",
+                "_sourceType": "xray",
+                "documentType": "imaging",
+                "reportType": "xray",
+                "documentDate": asset.createdAt,
+                "title": str(asset.fileName),
+                "summary": extracted_text[:200] + ("..." if len(extracted_text) > 200 else "") if extracted_text else f"X-Ray Image {asset_id}",
+                "keywords": ["xray", "imaging"],
+            }
         else:
             raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Unsupported file content type")
 

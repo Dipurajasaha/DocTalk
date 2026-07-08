@@ -22,19 +22,7 @@ async def execute_single_task(state: UnifiedChatState, task_info: PlannerTask, c
         log_warning(f"Capability not found: {cap_name}")
         return CapabilityResult(capability_name=cap_name, status="FAILED", errors=[f"Capability not found: {cap_name}"])
         
-    role = str(state.get("role") or "")
-    has_patient = bool(state.get("user_id") if role == "patient" else state.get("target_patient_id"))
-    has_doctor = role == "doctor"
-    
-    if capability.get("requires_patient") and not has_patient:
-        from ..utils.logger import log_warning
-        log_warning(f"Capability {cap_name} requires patient but none found.")
-        return CapabilityResult(capability_name=cap_name, status="FAILED", errors=["Requires patient context"])
-    if capability.get("requires_doctor") and not has_doctor:
-        from ..utils.logger import log_warning
-        log_warning(f"Capability {cap_name} requires doctor but none found.")
-        return CapabilityResult(capability_name=cap_name, status="FAILED", errors=["Requires doctor context"])
-        
+
     params = dict(task_info.parameters)
     if task_info.action:
         params["action"] = task_info.action
