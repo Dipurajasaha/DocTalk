@@ -24,14 +24,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    AIMessageChunk,
+)
 from openai import AsyncOpenAI, APIError, RateLimitError
 from backend.core.config import settings
-
 
 # ---------------------------------------------------------------------------
 # Single LLM client — reads OPENAI_API_KEY / OPENAI_BASE_URL
 # ---------------------------------------------------------------------------
+
 
 @lru_cache(maxsize=1)
 def get_llm_client() -> AsyncOpenAI:
@@ -58,6 +64,7 @@ def _get_model() -> str:
 # ---------------------------------------------------------------------------
 # Message payload helpers
 # ---------------------------------------------------------------------------
+
 
 def _message_to_payload(message: BaseMessage | dict[str, Any]) -> dict[str, Any]:
     if isinstance(message, dict):
@@ -86,18 +93,22 @@ def _normalize_text(value: str) -> str:
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`").strip()
     # Remove leading "json" language marker that Gemini sometimes prefixes
-    if cleaned.startswith("json") and len(cleaned) > 4 and cleaned[4:5] in ("\n", "\r", " ", "{"):
+    if (
+        cleaned.startswith("json")
+        and len(cleaned) > 4
+        and cleaned[4:5] in ("\n", "\r", " ", "{")
+    ):
         cleaned = cleaned[4:].strip()
     return cleaned
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
     """Try to extract and parse a JSON object from text.
-    
+
     Handles Gemini's tendency to prefix responses with ```json, json, etc.
     """
     cleaned = _normalize_text(text)
-    
+
     # Try direct parse first
     try:
         parsed = json.loads(cleaned)
@@ -105,19 +116,19 @@ def _extract_json(text: str) -> dict[str, Any] | None:
             return parsed
     except Exception:
         pass
-    
+
     # Find the first '{' and last '}' to extract JSON object
     start = cleaned.find("{")
     end = cleaned.rfind("}")
     if start != -1 and end != -1 and end > start:
-        json_str = cleaned[start:end + 1]
+        json_str = cleaned[start : end + 1]
         try:
             parsed = json.loads(json_str)
             if isinstance(parsed, dict):
                 return parsed
         except Exception:
             pass
-    
+
     return None
 
 
@@ -125,33 +136,84 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 # Core completion helpers
 # ---------------------------------------------------------------------------
 
+# Default max tokens for generation, raised to accommodate reasoning models
+DEFAULT_MAX_TOKENS = 16384
+
+
 async def complete_text(
     messages: list[BaseMessage | dict[str, Any]],
     *,
     model: str | None = None,
     temperature: float = 0.2,
-    max_output_tokens: int = 1024,
+    max_output_tokens: int = DEFAULT_MAX_TOKENS,
     response_format: dict[str, Any] | None = None,
 ) -> str:
     """Complete text via the configured OpenAI-compatible endpoint."""
     client = get_llm_client()
     effective_model = model or _get_model()
 
-    completion = await client.chat.completions.create(
-        model=effective_model,
-        messages=[_message_to_payload(message) for message in messages],
-        temperature=temperature,
-        max_tokens=max_output_tokens,
-        response_format=response_format,
+    payload_messages = [_message_to_payload(message) for message in messages]
+
+    print(
+        "=================== LLM INVOCATION PIPELINE (complete_text) ==================="
     )
+    print(f"1. input model name: {effective_model}")
+    print(f"2. provider: {client.base_url}")
+    print(f"3. temperature: {temperature}")
+    print(f"4. max tokens: {max_output_tokens}")
+    print(f"5. messages being passed: {json.dumps(payload_messages, indent=2)}")
+
+    create_kwargs: dict[str, Any] = {
+        "model": effective_model,
+        "messages": payload_messages,
+        "temperature": temperature,
+        "max_tokens": max_output_tokens,
+    }
+    if response_format is not None:
+        create_kwargs["response_format"] = response_format
+
+    completion = await client.chat.completions.create(**create_kwargs)
+
     choice = completion.choices[0] if completion.choices else None
     content = getattr(getattr(choice, "message", None), "content", "") if choice else ""
     if isinstance(content, list):
         return "".join(
             str(item.get("text") or item.get("content") or "")
-            for item in content if isinstance(item, dict)
+            for item in content
+            if isinstance(item, dict)
         )
     return _normalize_text(str(content or ""))
+
+
+from collections.abc import AsyncGenerator
+
+
+async def complete_text_stream(
+    messages: list[BaseMessage | dict[str, Any]],
+    *,
+    model: str | None = None,
+    temperature: float = 0.2,
+    max_output_tokens: int = DEFAULT_MAX_TOKENS,
+) -> AsyncGenerator[str, None]:
+    """Stream text via the configured OpenAI-compatible endpoint."""
+    client = get_llm_client()
+    effective_model = model or _get_model()
+
+    payload_messages = [_message_to_payload(message) for message in messages]
+
+    stream = await client.chat.completions.create(
+        model=effective_model,
+        messages=payload_messages,
+        temperature=temperature,
+        max_tokens=max_output_tokens,
+        stream=True,
+    )
+    async for chunk in stream:
+        if chunk.choices and len(chunk.choices) > 0:
+            delta = chunk.choices[0].delta
+            content = getattr(delta, "content", None)
+            if content:
+                yield content
 
 
 async def complete_json(
@@ -159,7 +221,8 @@ async def complete_json(
     *,
     model: str | None = None,
     temperature: float = 0.2,
-    max_output_tokens: int = 1024,
+    max_output_tokens: int = DEFAULT_MAX_TOKENS,
+    response_format: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Complete JSON via the configured OpenAI-compatible endpoint."""
     text = await complete_text(
@@ -167,14 +230,12 @@ async def complete_json(
         model=model,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
-        response_format={"type": "json_object"},
+        response_format=response_format,
     )
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except Exception:
-        pass
+    parsed = _extract_json(text)
+    if isinstance(parsed, dict):
+        return parsed
+    print(f"[DEBUG][LLM_CLIENT] JSON parsing failed. Raw text: {repr(text)}")
     return {}
 
 
@@ -185,7 +246,7 @@ async def complete_image_json(
     context_text: str | None = None,
     model: str | None = None,
     temperature: float = 0.2,
-    max_output_tokens: int = 1024,
+    max_output_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> dict[str, Any]:
     """Analyse an image using the vision endpoint configured by VISION_ENDPOINT.
 
@@ -215,7 +276,7 @@ async def _vision_gemini(
     context_text: str | None = None,
     model: str | None = None,
     temperature: float = 0.2,
-    max_output_tokens: int = 1024,
+    max_output_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> dict[str, Any]:
     """Vision analysis using the native Google GenAI SDK (google-genai)."""
     import asyncio
@@ -224,10 +285,14 @@ async def _vision_gemini(
     from google.genai import types as genai_types
 
     gemini_api_key = str(settings.gemini_api_key or "").strip()
-    gemini_model = model or str(settings.gemini_model or "").strip() or "gemini-2.0-flash"
+    gemini_model = (
+        model or str(settings.gemini_model or "").strip() or "gemini-2.5-flash-lite"
+    )
 
     if not gemini_api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set — required for vision (VISION_ENDPOINT=gemini)")
+        raise RuntimeError(
+            "GEMINI_API_KEY is not set — required for vision (VISION_ENDPOINT=gemini)"
+        )
 
     client = genai_sdk.Client(api_key=gemini_api_key)
 
@@ -288,31 +353,39 @@ async def _vision_imagga(image_path: str | Path) -> dict[str, Any]:
     import httpx
 
     api_key = str(settings.imgaga_api_key or "").strip()
-    api_url = str(settings.imgaga_api_url or "https://api.imagga.com/v2").strip().rstrip("/")
+    api_url = (
+        str(settings.imgaga_api_url or "https://api.imagga.com/v2").strip().rstrip("/")
+    )
 
     if not api_key:
-        raise RuntimeError("IMGAGA_API_KEY is not set — required for vision (VISION_ENDPOINT=imagga)")
+        raise RuntimeError(
+            "IMGAGA_API_KEY is not set — required for vision (VISION_ENDPOINT=imagga)"
+        )
 
     path = Path(image_path)
     image_bytes = path.read_bytes()
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         files = {"image": ("image.jpg", image_bytes, "image/jpeg")}
-        upload_resp = await client.post(f"{api_url}/uploads", auth=(api_key, api_key), files=files)
+        upload_resp = await client.post(
+            f"{api_url}/uploads", auth=(api_key, api_key), files=files
+        )
         upload_resp.raise_for_status()
         upload_id = (upload_resp.json().get("result", {}) or {}).get("upload_id")
         if not upload_id:
             raise RuntimeError("Imagga upload did not return an upload_id")
 
         tags_resp = await client.get(
-            f"{api_url}/tags", auth=(api_key, api_key),
+            f"{api_url}/tags",
+            auth=(api_key, api_key),
             params={"image_upload_id": upload_id, "limit": 20},
         )
         tags_resp.raise_for_status()
         tags = tags_resp.json().get("result", {}).get("tags", [])
 
         categories_resp = await client.get(
-            f"{api_url}/categories", auth=(api_key, api_key),
+            f"{api_url}/categories",
+            auth=(api_key, api_key),
             params={"image_upload_id": upload_id},
         )
         categories_resp.raise_for_status()
@@ -320,12 +393,20 @@ async def _vision_imagga(image_path: str | Path) -> dict[str, Any]:
 
     return {
         "tags": [
-            {"tag": t.get("tag", {}).get("en", ""), "confidence": t.get("confidence", 0.0)}
-            for t in tags if t.get("tag", {}).get("en")
+            {
+                "tag": t.get("tag", {}).get("en", ""),
+                "confidence": t.get("confidence", 0.0),
+            }
+            for t in tags
+            if t.get("tag", {}).get("en")
         ],
         "categories": [
-            {"name": c.get("name", {}).get("en", ""), "confidence": c.get("confidence", 0.0)}
-            for c in categories if c.get("name", {}).get("en")
+            {
+                "name": c.get("name", {}).get("en", ""),
+                "confidence": c.get("confidence", 0.0),
+            }
+            for c in categories
+            if c.get("name", {}).get("en")
         ],
     }
 
@@ -338,7 +419,7 @@ class LLMStructuredResult:
     response_model: type[Any]
     model: str | None = None
     temperature: float = 0.2
-    max_output_tokens: int = 1024
+    max_output_tokens: int = DEFAULT_MAX_TOKENS
 
     async def ainvoke(self, messages: list[BaseMessage | dict[str, Any]]) -> Any:
         payload = await complete_json(
@@ -357,16 +438,32 @@ class LLMStructuredResult:
 class LLMChatModel:
     model: str | None = None
     temperature: float = 0.2
-    max_output_tokens: int = 1024
+    max_output_tokens: int = DEFAULT_MAX_TOKENS
 
-    async def ainvoke(self, messages: list[BaseMessage | dict[str, Any]]) -> AIMessage:
+    async def ainvoke(
+        self, messages: list[BaseMessage | dict[str, Any]], **kwargs
+    ) -> AIMessage:
         text = await complete_text(
             messages,
             model=self.model,
             temperature=self.temperature,
             max_output_tokens=self.max_output_tokens,
         )
-        return AIMessage(content=text)
+        msg = AIMessage(content=text)
+        return msg
+
+    async def astream(
+        self, messages: list[BaseMessage | dict[str, Any]], **kwargs
+    ) -> AsyncGenerator[AIMessageChunk, None]:
+        from langchain_core.runnables.config import run_in_executor
+
+        async for chunk_text in complete_text_stream(
+            messages,
+            model=self.model,
+            temperature=self.temperature,
+            max_output_tokens=self.max_output_tokens,
+        ):
+            yield AIMessageChunk(content=chunk_text)
 
     def with_structured_output(self, response_model: type[Any]) -> LLMStructuredResult:
         return LLMStructuredResult(
@@ -377,13 +474,16 @@ class LLMChatModel:
         )
 
 
-def get_chat_model(temperature: float = 0.2, *, model: str | None = None) -> LLMChatModel:
+def get_chat_model(
+    temperature: float = 0.2, *, model: str | None = None
+) -> LLMChatModel:
     return LLMChatModel(model=model, temperature=temperature)
 
 
 # ---------------------------------------------------------------------------
 # Embedding — uses GEMINI_* credentials (separate from text model)
 # ---------------------------------------------------------------------------
+
 
 async def embed_text(
     text: str,
@@ -404,9 +504,14 @@ async def embed_text(
 
     gemini_client = AsyncOpenAI(api_key=gemini_api_key, base_url=gemini_base_url)
 
-    resolved_model = model or str(
-        getattr(settings, "gemini_embed_model", "") or os.getenv("GEMINI_EMBED_MODEL") or ""
-    ).strip()
+    resolved_model = (
+        model
+        or str(
+            getattr(settings, "gemini_embed_model", "")
+            or os.getenv("GEMINI_EMBED_MODEL")
+            or ""
+        ).strip()
+    )
     if not resolved_model:
         raise RuntimeError("GEMINI_EMBED_MODEL is not set in .env")
 
@@ -430,6 +535,7 @@ async def embed_text(
 # Reasoning model (e.g. o1-mini, o3-mini, deepseek-reasoner)
 # ---------------------------------------------------------------------------
 
+
 async def reasoning_complete(
     messages: list[BaseMessage | dict[str, Any]],
     *,
@@ -450,10 +556,12 @@ async def reasoning_complete(
     for msg in messages:
         payload = _message_to_payload(msg)
         if payload["role"] == "system":
-            reasoning_messages.append({
-                "role": "user",
-                "content": f"[System Instruction]: {payload['content']}",
-            })
+            reasoning_messages.append(
+                {
+                    "role": "user",
+                    "content": f"[System Instruction]: {payload['content']}",
+                }
+            )
         else:
             reasoning_messages.append(payload)
 
@@ -478,6 +586,7 @@ async def reasoning_complete(
     if isinstance(content, list):
         return "".join(
             str(item.get("text") or item.get("content") or "")
-            for item in content if isinstance(item, dict)
+            for item in content
+            if isinstance(item, dict)
         )
     return _normalize_text(str(content or ""))

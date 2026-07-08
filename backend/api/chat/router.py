@@ -508,27 +508,36 @@ async def _run_ai_websocket(
 
     chat_service = get_chat_service()
     normalized_target_patient_id = str(target_patient_id or "").strip() or None
-    namespace = _build_ai_checkpoint_namespace(
-        user_id=current_user.user_id,
-        ai_session_id=ai_session_id,
-        target_patient_id=normalized_target_patient_id,
-    )
-
-    await websocket.accept()
 
     try:
-        # Determine the explicit mode based on role and target patient
-        mode = "patient_scoped" if expected_role == "doctor" and normalized_target_patient_id else "general"
+        # Determine the initial mode based on role and target patient
+        if expected_role == "patient":
+            initial_mode = "PATIENT"
+        elif normalized_target_patient_id:
+            initial_mode = "DOCTOR_PATIENT"
+        else:
+            initial_mode = "DOCTOR_GENERAL"
 
-        # Ensure the AI chat session exists in DB before running the graph,
-        # so that session metadata (userId, role, mode) is
-        # persisted even if the very first message is also the only message.
-        await chat_service.ensure_ai_session(
+        # Ensure the AI chat session exists in DB before running the graph.
+        # This will hydrate mode and target_patient_id if they exist in the DB.
+        session_info = await chat_service.ensure_ai_session(
             current_user.user_id,
             current_user.role,
             ai_session_id,
-            mode,
+            mode=initial_mode,
+            target_patient_id=normalized_target_patient_id,
         )
+        
+        mode = session_info["mode"]
+        normalized_target_patient_id = session_info["target_patient_id"]
+
+        namespace = _build_ai_checkpoint_namespace(
+            user_id=current_user.user_id,
+            ai_session_id=ai_session_id,
+            target_patient_id=normalized_target_patient_id,
+        )
+
+        await websocket.accept()
 
         db_history = await chat_service.get_ai_chat_history(ai_session_id)
         await websocket.send_json(
@@ -542,23 +551,37 @@ async def _run_ai_websocket(
             user_text = (await websocket.receive_text()).strip()
             if not user_text:
                 continue
+                
+            import time
+            from ...workflows.utils.logger import log_section, log_key_value, format_duration
+            
+            request_start_time = time.time()
+            log_section("REQUEST")
+            log_key_value("User", user_text)
+            log_key_value("Role", current_user.role.upper())
+            log_key_value("Session", ai_session_id)
 
             conversation_messages = _langchain_messages_from_db_history(db_history)
             conversation_messages.append(HumanMessage(content=user_text))
 
-            workflow_state = create_workflow_state(
-                messages=conversation_messages,
-                role=current_user.role,  # type: ignore[arg-type]
-                user_id=current_user.user_id,
-                ai_session_id=ai_session_id,
-                target_patient_id=normalized_target_patient_id,
-                context_payload={
+            input_state = {
+                "messages": conversation_messages,
+                "role": current_user.role,
+                "mode": mode,
+                "user_id": current_user.user_id,
+                "ai_session_id": ai_session_id,
+                "target_patient_id": normalized_target_patient_id,
+                "context_payload": {
                     "ai_session_id": ai_session_id,
                     "user_id": current_user.user_id,
                     "target_patient_id": normalized_target_patient_id,
                     "role": current_user.role,
                 },
-            )
+                "final_response": "",
+                "session_risk_score": 0,
+                "input_guardrail_context": {},
+                "output_guardrail_context": {},
+            }
 
             final_response = ""
             streamed_token = False
@@ -566,42 +589,36 @@ async def _run_ai_websocket(
             metadata_buffer = _StreamingMetadataBuffer()
 
             try:
-                async for event in unified_chat_graph.astream_events(workflow_state, config=ai_config, version="v2"):
+                async for event in unified_chat_graph.astream_events(input_state, config=ai_config, version="v2"):
                     event_name = str(event.get("event") or "")
                     node_name = str(event.get("name") or "")
-                    data = dict(event.get("data") or {})
+                    data = event.get("data")
 
-                    # Emit status event when entering a node so the
+                    # Emit status event when entering a main workflow node so the
                     # frontend can show which stage the workflow is in.
-                    # We only emit for meaningful nodes (not START/END or
-                    # the log_entry_context bookkeeping node).
-                    if event_name == "on_chain_start" and node_name not in {"", "START", "END", "log_entry_context"}:
+                    # We use a strict whitelist map to avoid emitting internal Langchain
+                    # runnables, and map the developer node names to user-friendly text.
+                    VALID_GRAPH_NODES = {
+                        "planner": "Analyzing your request...",
+                        "task_executor": "Gathering medical records...",
+                        "recommendation_engine": "Evaluating options...",
+                        "response_composer": "Composing response...",
+                        "llm_orchestrator": "Consulting medical AI...",
+                        "guardrail": "Verifying medical safety..."
+                    }
+                    if event_name == "on_chain_start" and node_name in VALID_GRAPH_NODES:
                         try:
-                            await websocket.send_json({"type": "status", "node": node_name})
+                            user_friendly_status = VALID_GRAPH_NODES[node_name]
+                            await websocket.send_json({"type": "status", "node": user_friendly_status})
                         except Exception:
                             pass
 
-
-
-                    if event_name == "on_chain_end" and node_name in {
-                        "patient_assistant_llm",
-                        "patient_general_llm",
-                        "doctor_general_llm",
-                        "doctor_scoped_llm",
-                    }:
-                        output = data.get("output")
-                        chunk = _extract_message_text(output)
-                        if chunk:
-                            final_response = _sanitize_ai_message(chunk)
-                            try:
-                                await websocket.send_text(final_response)
-                            except Exception:
-                                raise
-                            streamed_token = True
-                        continue
-
-                    if event_name in {"on_chat_model_stream", "on_llm_stream"}:
-                        chunk_text = _extract_stream_chunk_text(data.get("chunk"))
+                    if event_name in {"on_chat_model_stream", "on_llm_stream"} or (event_name == "on_custom_event" and event.get("name") == "llm_stream_chunk"):
+                        if event_name == "on_custom_event":
+                            chunk_text = _extract_stream_chunk_text(data)
+                        else:
+                            chunk_text = _extract_stream_chunk_text(data.get("chunk") if isinstance(data, dict) else None)
+                            
                         if chunk_text:
                             # Feed the chunk through the metadata buffer.
                             # It will return text to emit once it can decide
@@ -617,20 +634,14 @@ async def _run_ai_websocket(
                                 streamed_token = True
 
                 final_state = unified_chat_graph.get_state(ai_config).values
-                print("[DEBUG][FINAL_RESPONSE]", bool(final_response))
                 if not final_response:
-                    print("[DEBUG][ROUTER] graph result =", final_state)
                     final_response = str(final_state.get("final_response") or "").strip()
                 if not final_response:
                     final_response = _role_scaffold_message(current_user.role)
 
                 final_response = _sanitize_ai_message(final_response)
 
-                if final_response and not streamed_token:
-                    try:
-                        await websocket.send_text(final_response)
-                    except Exception:
-                        raise
+
 
                 db_history = await chat_service.append_ai_chat_exchange(
                     ai_session_id=ai_session_id,
@@ -646,9 +657,18 @@ async def _run_ai_websocket(
                         "target_patient_id": normalized_target_patient_id,
                         "content": final_response,
                     }
-                    print("[DEBUG][ROUTER] outgoing message =", payload)
-                    print("[DEBUG][PATIENT_HISTORY_LEN]", len(final_state.get("patient_history_context") or []))
                     await websocket.send_json(payload)
+                    
+                    total_time = (time.time() - request_start_time) * 1000
+                    timing = final_state.get("timing_metrics") or {}
+                    
+                    log_section("TOTAL")
+                    log_key_value("Planning", format_duration(timing.get("planner", 0)))
+                    log_key_value("Execution", format_duration(timing.get("executor", 0)))
+                    log_key_value("Composition", format_duration(timing.get("composer", 0)))
+                    log_key_value("Total", format_duration(total_time))
+                    
+
                 except Exception:
                     raise
             except WebSocketDisconnect:

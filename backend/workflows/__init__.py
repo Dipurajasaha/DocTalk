@@ -1,1 +1,1 @@
-"""Unified workflow package for DocTalk chat orchestration."""
+"""DocTalk Workflows package for AI chat orchestration."""
