@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..core.security import CurrentUser, get_current_user
 from ..schemas.user_schemas import CurrentUserProfileResponse, LoginRequest, TokenResponse, UserRegistrationRequest
+from ..schemas.admin_schemas import AdminInviteAcceptRequest, AdminLoginRequest
 from ..services.auth_service import AuthResult, AuthService
 from ..services.user_service import UserService
 
@@ -81,6 +82,31 @@ async def doctor_signup(payload: UserRegistrationRequest, auth_service: AuthServ
             address=payload.address,
             bio=payload.bio,
             experience=payload.experience,
+        )
+    )
+
+
+@router.post("/admin/login", response_model=TokenResponse)
+async def admin_login(payload: AdminLoginRequest, auth_service: AuthService = Depends(get_auth_service)) -> TokenResponse:
+    if payload.mfa_code:
+        result = await auth_service.login_admin_with_mfa(payload.admin_id, payload.password, payload.mfa_code)
+    else:
+        result = await auth_service.login_admin(payload.admin_id, payload.password)
+    return _token_response(result)
+
+
+@router.post("/admin/invite-accept", response_model=TokenResponse)
+async def admin_invite_accept(payload: AdminInviteAcceptRequest, auth_service: AuthService = Depends(get_auth_service)) -> TokenResponse:
+    return _token_response(
+        await auth_service.accept_admin_invite(
+            payload.invite_token,
+            payload.admin_id,
+            payload.name,
+            payload.password,
+            email=payload.email,
+            bio=payload.bio,
+            profile_pic=payload.profile_pic,
+            display_name=payload.display_name,
         )
     )
 

@@ -14,6 +14,7 @@ datasource db {
 enum Role {
   patient
   doctor
+  admin
   hospital
 }
 
@@ -51,11 +52,11 @@ model Patient {
   consultations       Consultation[]
   ragDocuments        RagDocument[]
   prescriptions       Prescription[]
+  registeredByHospitalId String?
+  registeredByHospital   Hospital?      @relation("HospitalPatients", fields: [registeredByHospitalId], references: [hospitalId], onDelete: SetNull)
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
-  registeredByHospitalId String?
-  registeredByHospital   Hospital?      @relation("HospitalPatients", fields: [registeredByHospitalId], references: [hospitalId], onDelete: SetNull)
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
 
@@ -88,6 +89,9 @@ model Doctor {
   payments            Json?          @db.JsonB
   patientChats        Json?          @db.JsonB
   closedChats         Json?          @db.JsonB
+  isBanned           Boolean        @default(false)
+  bannedAt           DateTime?
+  banReason          String?
   appointments        Appointment[]
   consultations       Consultation[]
   doctorSlots         DoctorSlot[]
@@ -99,6 +103,63 @@ model Doctor {
   updatedAt           DateTime       @updatedAt
 
   @@map("doctors")
+}
+
+model Admin {
+  adminId         String   @id
+  name            String
+  displayName     String?
+  email           String?
+  password        String
+  profilePic      String?
+  bio             String?
+  isSuperAdmin    Boolean  @default(false)
+  mfaEnabled      Boolean  @default(false)
+  mfaSecret       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  invitesCreated  AdminInvite[] @relation("AdminInvitesCreated")
+  auditLogs       AdminAuditLog[]
+
+  @@map("admins")
+}
+
+model AdminInvite {
+  id               String   @id @default(uuid())
+  tokenHash        String   @unique
+  createdByAdminId String
+  inviteeEmail     String?
+  note             String?
+  expiresAt        DateTime
+  usedAt           DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  createdByAdmin Admin @relation("AdminInvitesCreated", fields: [createdByAdminId], references: [adminId], onDelete: Cascade)
+
+  @@index([createdByAdminId])
+  @@index([expiresAt])
+  @@map("admin_invites")
+}
+
+model AdminAuditLog {
+  id         String   @id @default(uuid())
+  identifier String
+  adminId    String?
+  eventType  String
+  success    Boolean  @default(false)
+  ipAddress  String?
+  userAgent  String?
+  detail     String?
+  createdAt  DateTime @default(now())
+
+  admin Admin? @relation(fields: [adminId], references: [adminId], onDelete: SetNull)
+
+  @@index([identifier, eventType, createdAt])
+  @@index([adminId, eventType, createdAt])
+  @@index([createdAt])
+  @@map("admin_audit_logs")
 }
 
 model DoctorSlot {

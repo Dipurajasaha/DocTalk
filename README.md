@@ -153,6 +153,12 @@ JWT_SECRET_KEY=your-secret-key
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=60
 
+# Admin security
+ADMIN_ID=first-admin
+ADMIN_NAME=Platform Owner
+ADMIN_PASSWORD=choose-a-strong-password
+ADMIN_EMAIL=admin@example.com
+
 # LLM (any OpenAI-compatible endpoint)
 OPENAI_API_KEY=your-api-key
 OPENAI_MODEL=gpt-4o              # or any compatible model
@@ -189,6 +195,20 @@ This will:
 - ✅ Launch the backend on `http://127.0.0.1:8000`
 - ✅ Launch the frontend on Vite's default port (`http://localhost:5173`)
 
+### Admin onboarding
+
+Admin accounts are not self-registered anymore. The first admin must be created with the one-time bootstrap script:
+
+```powershell
+cd DocTalk
+$env:ADMIN_ID='first-admin'
+$env:ADMIN_NAME='Platform Owner'
+$env:ADMIN_PASSWORD='choose-a-strong-password'
+python -m backend.scripts.bootstrap_admin
+```
+
+After that, existing admins can create one-time invite tokens from the admin dashboard or the `/api/admin/invites` endpoint, and new admins must join through the invite acceptance flow.
+
 ### 3. Manual Setup (Cross-Platform)
 
 If you're not on Windows or prefer manual control:
@@ -196,8 +216,8 @@ If you're not on Windows or prefer manual control:
 ```bash
 # Backend
 python -m venv .venv
-source .venv/bin/activate          # Linux/macOS
-# .venv\Scripts\activate           # Windows
+# source .venv/bin/activate          # Linux/macOS
+.venv\Scripts\activate           # Windows
 pip install -r backend/requirements.txt
 python -m prisma generate --schema=backend/prisma/schema.prisma
 uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000

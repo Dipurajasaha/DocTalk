@@ -14,10 +14,11 @@ async def public_stats() -> dict[str, int]:
     """Return real aggregate counts for the landing page stats band."""
     patients = await prisma.patient.count()
     doctors = await prisma.doctor.count()
-    hospitals = await prisma.hospital.count()
+    admins = await prisma.admin.count()
 
     return {
         "patients": patients,
         "doctors": doctors,
-        "hospitals": hospitals,
+        "admins": admins,
+        "hospitals": 0,
     }

@@ -20,7 +20,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user_id: str
-    role: Literal["patient", "doctor"]
+    role: Literal["patient", "doctor", "admin"]
 
     class Config:
         extra = "forbid"
@@ -105,9 +105,10 @@ class CurrentUserProfileResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     user_id: str
-    role: Literal["patient", "doctor"]
+    role: Literal["patient", "doctor", "admin"]
     patient_id: str | None = None
     doctor_id: str | None = None
+    admin_id: str | None = None
     name: str
     display_name: str | None = None
     gender: Gender | None = None
@@ -126,6 +127,10 @@ class CurrentUserProfileResponse(BaseModel):
     specialization: str | None = None
     bio: str | None = None
     experience: str | None = None
+    is_banned: bool | None = None
+    banned_at: datetime | None = None
+    ban_reason: str | None = None
+    is_super_admin: bool | None = None
 
 
 class UserProfileUpdateRequest(BaseModel):

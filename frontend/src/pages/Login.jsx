@@ -116,6 +116,7 @@ export default function Login() {
     const fd = new FormData(e.target);
     const username = fd.get('username').trim();
     const password = fd.get('password');
+    const mfaCode = fd.get('mfa_code')?.trim() || '';
     let errs = {};
     if (!username) {
       errs.lu = 'Username is required.';
@@ -133,19 +134,18 @@ export default function Login() {
       let data;
       if (category === 'doctor') {
         data = await authApi.loginDoctor(username, password);
-      } else if (category === 'hospital') {
-        const { hospitalApi } = await import('../lib/api');
-        data = await hospitalApi.login(username, password);
+      } else if (category === 'admin') {
+        data = await authApi.loginAdmin(username, password, mfaCode);
       } else {
         data = await authApi.loginPatient(username, password);
       }
       if (data?.access_token) {
         const token = data.access_token;
-        const uid = data.hospital_id || data.user_id || username;
+        const uid = data.admin_id || data.hospital_id || data.user_id || username;
         const sess = { role: data.role || category, user_id: uid };
         try { localStorage.setItem('doctalk_token', token); localStorage.setItem('doctalk_session', JSON.stringify(sess)); } catch (_) {}
         if (login) await login({ token, sessionHint: sess });
-        if (category === 'hospital') navigate('/hospital/dashboard');
+        if (category === 'admin') navigate('/admin/dashboard');
         else if (data.role === 'patient' || category === 'patient') navigate('/patient/dashboard');
         else navigate('/doctor/dashboard');
       } else {
@@ -190,11 +190,9 @@ export default function Login() {
       if (email && !isValidEmail(email)) errs.email = 'Enter a valid email address.';
     }
 
-    if (cat === 'hospital') {
-      const regNo = fd.get('registration_number')?.trim() || '';
-      if (regNo && !isValidRegNo(regNo)) errs.registration_number = 'Registration number: 3\u201320 alphanumeric chars.';
-      const phone = fd.get('phone')?.trim() || '';
-      if (phone && !isValidPhone(phone)) errs.phone = 'Enter a valid phone number.';
+    if (cat === 'admin') {
+      const inviteToken = fd.get('invite_token')?.trim() || '';
+      if (!inviteToken) errs.invite_token = 'Invite token is required for admin access.';
       const email = fd.get('email')?.trim() || '';
       if (email && !isValidEmail(email)) errs.email = 'Enter a valid email address.';
     }
@@ -216,13 +214,12 @@ export default function Login() {
       const password = fd.get('password');
       let data;
 
-      if (category === 'hospital') {
-        const { hospitalApi } = await import('../lib/api');
-        const payload = { hospital_id: username, name, password };
-        ['address','city','state','registration_number','phone','email','website'].forEach(k => {
-          const v = fd.get(k); if (v) payload[k] = v;
+      if (category === 'admin') {
+        const extraFields = {};
+        ['display_name','email','bio','profile_pic','invite_token'].forEach(k => {
+          const v = fd.get(k); if (v) extraFields[k] = v;
         });
-        data = await hospitalApi.signup(payload);
+        data = await authApi.acceptAdminInvite(extraFields.invite_token, username, name, password, extraFields);
       } else if (category === 'patient') {
         data = await authApi.signupPatient(username, name, password);
       } else {
@@ -237,10 +234,10 @@ export default function Login() {
       if (data?.access_token) {
         const token = data.access_token;
         try { localStorage.setItem('doctalk_token', token); localStorage.setItem('doctalk_session', JSON.stringify({ role: data.role })); } catch (_) {}
-        if (login) await login({ token, sessionHint: { role: data.role, user_id: data.user_id || data.hospital_id } });
+        if (login) await login({ token, sessionHint: { role: data.role, user_id: data.user_id || data.admin_id || data.hospital_id } });
         setView('login'); setErrorMsg(null);
         alert('Registration successful! You are logged in.');
-        if (category === 'hospital') navigate('/hospital/dashboard');
+        if (category === 'admin') navigate('/admin/dashboard');
         else if (data.role === 'patient') navigate('/patient/dashboard');
         else navigate('/doctor/dashboard');
       } else {
@@ -308,7 +305,7 @@ export default function Login() {
             ) : (
               <form onSubmit={handleForgotSubmit} className="single-column-form">
                 <div className="category-btns" style={{ marginBottom:'16px' }}>
-                  {['patient','doctor','hospital'].map(c => (
+                  {['patient','doctor','admin'].map(c => (
                     <button key={c} type="button" className={`toggle-tab ${category === c ? 'active' : ''}`} onClick={() => setCategory(c)}>
                       {c.charAt(0).toUpperCase() + c.slice(1)}
                     </button>
@@ -345,7 +342,7 @@ export default function Login() {
             </div>
 
             <div className="category-btns">
-              {['patient','doctor','hospital'].map(c => (
+              {['patient','doctor','admin'].map(c => (
                 <button key={c} className={`toggle-tab ${category === c ? 'active' : ''}`} onClick={() => { setCategory(c); setFieldErrors({}); setErrorMsg(null); }}>
                   {c.charAt(0).toUpperCase() + c.slice(1)}
                 </button>
@@ -372,6 +369,12 @@ export default function Login() {
                         style={fieldErrors.lp ? { borderColor:'#ef4444' } : {}} />
                       <FieldError msg={fieldErrors.lp} />
                     </div>
+                    {category === 'admin' && (
+                      <div className="input-field">
+                        <label>MFA Code</label>
+                        <input type="text" name="mfa_code" placeholder="6-digit code if MFA is enabled" inputMode="numeric" />
+                      </div>
+                    )}
 
                     {/* Forgot Password link */}
                     <div style={{ textAlign:'right', marginTop:'-8px' }}>
@@ -383,7 +386,7 @@ export default function Login() {
                     </div>
 
                     <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'8px' }}>
-                      Login as {category === 'patient' ? 'Patient' : category === 'doctor' ? 'Doctor' : 'Hospital'}
+                      Login as {category === 'patient' ? 'Patient' : category === 'doctor' ? 'Doctor' : 'Admin'}
                     </button>
                   </form>
                 </div>
@@ -527,19 +530,19 @@ export default function Login() {
                 </form>
               )}
 
-              {/* ── Hospital Register ── */}
-              {view === 'register' && category === 'hospital' && (
+              {/* ── Admin Register ── */}
+              {view === 'register' && category === 'admin' && (
                 <form onSubmit={handleRegisterSubmit}>
                   <div className="form-grid">
                     <div className="input-field full-width">
-                      <label>Hospital Name<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
-                      <input type="text" name="name" placeholder="Full official hospital name" required
-                        onChange={() => clearFE('name')}
-                        style={fieldErrors.name ? { borderColor:'#ef4444' } : {}} />
-                      <FieldError msg={fieldErrors.name} />
+                      <label>Invite Token<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="text" name="invite_token" placeholder="Paste your one-time invite token" required
+                        onChange={() => clearFE('invite_token')}
+                        style={fieldErrors.invite_token ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.invite_token} />
                     </div>
                     <div className="input-field">
-                      <label>Hospital ID<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <label>Admin ID<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
                       <input type="text" name="username" placeholder="Unique login ID (4–20 chars)" required
                         onChange={() => clearFE('username')}
                         style={fieldErrors.username ? { borderColor:'#ef4444' } : {}} />
@@ -554,24 +557,11 @@ export default function Login() {
                       <FieldError msg={fieldErrors.password} />
                     </div>
                     <div className="input-field full-width">
-                      <label>Address</label>
-                      <input type="text" name="address" placeholder="Building, Street, Area" />
-                    </div>
-                    <FormField label="City" name="city" placeholder="e.g. Kolkata" fieldErrors={fieldErrors} clearFE={clearFE} />
-                    <FormField label="State" name="state" placeholder="e.g. West Bengal" fieldErrors={fieldErrors} clearFE={clearFE} />
-                    <div className="input-field">
-                      <label>Registration Number</label>
-                      <input type="text" name="registration_number" placeholder="e.g. WBMC-2024-001"
-                        onChange={() => clearFE('registration_number')}
-                        style={fieldErrors.registration_number ? { borderColor:'#ef4444' } : {}} />
-                      <FieldError msg={fieldErrors.registration_number} />
-                    </div>
-                    <div className="input-field">
-                      <label>Phone</label>
-                      <input type="tel" name="phone" placeholder="+91 33 2222 1111"
-                        onChange={() => clearFE('phone')}
-                        style={fieldErrors.phone ? { borderColor:'#ef4444' } : {}} />
-                      <FieldError msg={fieldErrors.phone} />
+                      <label>Admin Name<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="text" name="name" placeholder="Full admin name" required
+                        onChange={() => clearFE('name')}
+                        style={fieldErrors.name ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.name} />
                     </div>
                     <div className="input-field">
                       <label>Email</label>
@@ -580,9 +570,14 @@ export default function Login() {
                         style={fieldErrors.email ? { borderColor:'#ef4444' } : {}} />
                       <FieldError msg={fieldErrors.email} />
                     </div>
-                    <FormField label="Website" name="website" type="url" placeholder="https://hospital.com" fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <FormField label="Display Name" name="display_name" placeholder="Shown on the admin profile" fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <FormField label="Profile Picture URL" name="profile_pic" type="url" placeholder="https://..." fieldErrors={fieldErrors} clearFE={clearFE} />
                     <div className="input-field full-width">
-                      <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'10px' }}>Register as Hospital</button>
+                      <label>Bio</label>
+                      <textarea name="bio" placeholder="Short admin bio or role description" rows="4" />
+                    </div>
+                    <div className="input-field full-width">
+                      <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'10px' }}>Accept Admin Invite</button>
                     </div>
                   </div>
                 </form>
