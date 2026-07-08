@@ -3,7 +3,7 @@ import Home from './pages/Home';
 import Login from './pages/Login';
 import PatientDashboard from './pages/PatientDashboard';
 import DoctorDashboard from './pages/DoctorDashboard';
-import HospitalDashboard from './pages/HospitalDashboard';
+import AdminDashboard from './pages/AdminDashboard';
 import ReportView from './pages/ReportView';
 import PrescriptionView from './pages/PrescriptionView';
 import { useSession } from './contexts/SessionContext';
@@ -25,10 +25,10 @@ function RequireDoctor({ children, loaded, session }) {
   return children;
 }
 
-function RequireHospital({ children, loaded, session }) {
+function RequireAdmin({ children, loaded, session }) {
   if (!loaded) return null;
   if (!session) return <Navigate to="/login" replace />;
-  if (session.role !== 'hospital') return <Navigate to="/login" replace />;
+  if (session.role !== 'admin') return <Navigate to="/login" replace />;
   return children;
 }
 
@@ -83,7 +83,7 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/patient/dashboard" element={<RequirePatient loaded={loaded} session={session}><PatientDashboard /></RequirePatient>} />
         <Route path="/doctor/dashboard" element={<RequireDoctor loaded={loaded} session={session}><DoctorDashboard /></RequireDoctor>} />
-        <Route path="/hospital/dashboard" element={<RequireHospital loaded={loaded} session={session}><HospitalDashboard /></RequireHospital>} />
+        <Route path="/admin/dashboard" element={<RequireAdmin loaded={loaded} session={session}><AdminDashboard /></RequireAdmin>} />
         <Route path="/reports/:id" element={<RequireAuth loaded={loaded} session={session}><ReportView /></RequireAuth>} />
         <Route path="/prescriptions/:id" element={<RequireAuth loaded={loaded} session={session}><PrescriptionView /></RequireAuth>} />
       </Routes>

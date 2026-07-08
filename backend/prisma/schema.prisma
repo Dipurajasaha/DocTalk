@@ -14,7 +14,7 @@ datasource db {
 enum Role {
   patient
   doctor
-  hospital
+  admin
 }
 
 enum Gender {
@@ -53,8 +53,6 @@ model Patient {
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
-  registeredByHospitalId String?
-  registeredByHospital   Hospital?      @relation("HospitalPatients", fields: [registeredByHospitalId], references: [hospitalId], onDelete: SetNull)
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
 
@@ -85,6 +83,9 @@ model Doctor {
   payments            Json?          @db.JsonB
   patientChats        Json?          @db.JsonB
   closedChats         Json?          @db.JsonB
+  isBanned           Boolean        @default(false)
+  bannedAt           DateTime?
+  banReason          String?
   appointments        Appointment[]
   consultations       Consultation[]
   doctorSlots         DoctorSlot[]
@@ -95,6 +96,63 @@ model Doctor {
   updatedAt           DateTime       @updatedAt
 
   @@map("doctors")
+}
+
+model Admin {
+  adminId         String   @id
+  name            String
+  displayName     String?
+  email           String?
+  password        String
+  profilePic      String?
+  bio             String?
+  isSuperAdmin    Boolean  @default(false)
+  mfaEnabled      Boolean  @default(false)
+  mfaSecret       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  invitesCreated  AdminInvite[] @relation("AdminInvitesCreated")
+  auditLogs       AdminAuditLog[]
+
+  @@map("admins")
+}
+
+model AdminInvite {
+  id               String   @id @default(uuid())
+  tokenHash        String   @unique
+  createdByAdminId String
+  inviteeEmail     String?
+  note             String?
+  expiresAt        DateTime
+  usedAt           DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  createdByAdmin Admin @relation("AdminInvitesCreated", fields: [createdByAdminId], references: [adminId], onDelete: Cascade)
+
+  @@index([createdByAdminId])
+  @@index([expiresAt])
+  @@map("admin_invites")
+}
+
+model AdminAuditLog {
+  id         String   @id @default(uuid())
+  identifier String
+  adminId    String?
+  eventType  String
+  success    Boolean  @default(false)
+  ipAddress  String?
+  userAgent  String?
+  detail     String?
+  createdAt  DateTime @default(now())
+
+  admin Admin? @relation(fields: [adminId], references: [adminId], onDelete: SetNull)
+
+  @@index([identifier, eventType, createdAt])
+  @@index([adminId, eventType, createdAt])
+  @@index([createdAt])
+  @@map("admin_audit_logs")
 }
 
 model DoctorSlot {
@@ -222,80 +280,6 @@ model MedicalAsset {
 
   @@index([userId])
   @@map("medical_assets")
-}
-
-model Hospital {
-  hospitalId    String         @id
-  name          String
-  displayName   String?
-  address       String?
-  city          String?
-  state         String?
-  registrationNumber String?
-  phone         String?
-  email         String?
-  website       String?
-  password      String
-  role          Role           @default(hospital)
-  profilePic    String?
-  isVerified    Boolean        @default(false)
-  totalBeds     Int?
-  availableBeds Int?
-  specialties   Json?          @db.JsonB
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-
-  symptomReports SymptomReport[]
-  hospitalNews   HospitalNews[]
-  registeredPatients Patient[]      @relation("HospitalPatients")
-
-  @@map("hospitals")
-}
-
-model SymptomReport {
-  id              String          @id @default(uuid())
-  hospitalId      String
-  patientName     String?
-  patientAge      Int?
-  patientGender   Gender?
-  diseaseName     String
-  symptoms        Json            @db.JsonB
-  newSymptoms     Json?           @db.JsonB
-  severity        SymptomSeverity @default(moderate)
-  status          String          @default("admitted")
-  onsetDate       DateTime?
-  reportedDate    DateTime        @default(now())
-  additionalNotes String?
-  isAnonymous     Boolean         @default(false)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-
-  hospital Hospital @relation(fields: [hospitalId], references: [hospitalId], onDelete: Cascade)
-
-  @@index([hospitalId])
-  @@index([diseaseName])
-  @@index([reportedDate])
-  @@map("symptom_reports")
-}
-
-model HospitalNews {
-  id         String   @id @default(uuid())
-  hospitalId String
-  title      String
-  content    String   @db.Text
-  category   String   @default("general")
-  isGlobal   Boolean  @default(false)
-  priority   Int      @default(0)
-  publishedAt DateTime @default(now())
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  hospital Hospital @relation(fields: [hospitalId], references: [hospitalId], onDelete: Cascade)
-
-  @@index([hospitalId])
-  @@index([isGlobal, publishedAt])
-  @@index([category])
-  @@map("hospital_news")
 }
 
 model RagDocument {

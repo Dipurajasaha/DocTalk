@@ -71,15 +71,8 @@ const Home = () => {
   }, []);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const { hospitalApi } = await import('../lib/api');
-        const data = await hospitalApi.getGlobalNews(6);
-        setNews(data || []);
-      } catch (_) { setNews([]); }
-      finally { setNewsLoading(false); }
-    };
-    load();
+    setNews([]);
+    setNewsLoading(false);
   }, []);
 
   useEffect(() => {
@@ -212,10 +205,10 @@ const Home = () => {
         {/* ══════════════════════════════════ NEWS ══════════════════════════════════ */}
         <section id="news" className="news-section">
           <div className="section-header-center">
-            <div className="section-eyebrow">Hospital Network</div>
-            <h2 className="section-title">Latest Health Updates</h2>
+            <div className="section-eyebrow">Platform Updates</div>
+            <h2 className="section-title">Latest Product Updates</h2>
             <p className="section-body" style={{ maxWidth: '520px', margin: '0 auto' }}>
-              Real-time announcements and health advisories from hospitals in our network.
+              The latest notes from the DocTalk team while the platform evolves.
             </p>
           </div>
 
@@ -226,8 +219,8 @@ const Home = () => {
           ) : news.length === 0 ? (
             <div className="news-empty">
               <div style={{ fontSize: '48px', marginBottom: '12px' }}>📰</div>
-              <p>No updates yet. Hospitals post announcements after joining the network.</p>
-              <button onClick={() => navigate('/login')} className="btn-primary-hero" style={{ marginTop: '16px' }}>Join the Network</button>
+              <p>No platform updates yet. Check back after the next release.</p>
+              <button onClick={() => navigate('/login')} className="btn-primary-hero" style={{ marginTop: '16px' }}>Open the App</button>
             </div>
           ) : (
             <div className="news-grid">
@@ -246,7 +239,7 @@ const Home = () => {
                       {item.content?.length > 110 ? item.content.slice(0, 110) + '…' : item.content}
                     </p>
                     <div className="news-card-footer">
-                      <span>{item.hospital_name || 'Hospital Network'}</span>
+                      <span>{item.hospital_name || 'DocTalk Team'}</span>
                       <span>{new Date(item.published_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
                     </div>
                   </div>
@@ -262,7 +255,7 @@ const Home = () => {
           <div className="stats-divider" />
           <StatItem value={stats?.doctors || 850} suffix="+" label="Doctors Registered" startCount={statsInView} />
           <div className="stats-divider" />
-          <StatItem value={stats?.hospitals || 120} suffix="+" label="Hospitals Connected" startCount={statsInView} />
+          <StatItem value={stats?.admins || 12} suffix="+" label="Admins Registered" startCount={statsInView} />
           <div className="stats-divider" />
           <StatItem value={98} suffix="%" label="Satisfaction Rate" startCount={statsInView} />
         </div>

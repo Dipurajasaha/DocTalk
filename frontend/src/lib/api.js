@@ -5,8 +5,10 @@ export const buildAssetDownloadUrl = (assetId) => `/api/assets/${encodeURICompon
 export const authApi = {
   loginPatient: (username, password) => apiClient.post('/api/auth/patient/login', { username, password }, { retries: 0 }),
   loginDoctor: (doctorId, password) => apiClient.post('/api/auth/doctor/login', { doctor_id: doctorId, password }, { retries: 0 }),
+  loginAdmin: (adminId, password, mfaCode = '') => apiClient.post('/api/auth/admin/login', { admin_id: adminId, password, mfa_code: mfaCode || undefined }, { retries: 0 }),
   signupPatient: (username, name, password) => apiClient.post('/api/auth/patient/signup', { username, name, password }, { retries: 0 }),
   signupDoctor: (doctorId, name, password, extra = {}) => apiClient.post('/api/auth/doctor/signup', { doctor_id: doctorId, name, password, ...extra }, { retries: 0 }),
+  acceptAdminInvite: (inviteToken, adminId, name, password, extra = {}) => apiClient.post('/api/auth/admin/invite-accept', { invite_token: inviteToken, admin_id: adminId, name, password, ...extra }, { retries: 0 }),
   me: (token) => apiClient.get('/api/me', { auth: true, token, retries: 0 }),
 };
 
@@ -139,4 +141,19 @@ export const doctorApi = {
     return apiClient.get(`/api/doctor/copilot/patients/${encodeURIComponent(patientId)}${query}`, { retries: 1, auth: true });
   },
   getCopilotForConsultation: (consultationId) => apiClient.get(`/api/doctor/copilot/consultations/${encodeURIComponent(consultationId)}`, { retries: 1, auth: true }),
+};
+
+export const adminApi = {
+  login: (adminId, password, mfaCode = '') => authApi.loginAdmin(adminId, password, mfaCode),
+  acceptInvite: (data) => authApi.acceptAdminInvite(data.invite_token || data.inviteToken, data.admin_id || data.adminId, data.name, data.password, data),
+  dashboard: () => apiClient.get('/api/admin/dashboard', { retries: 1, auth: true }),
+  getProfile: () => apiClient.get('/api/admin/profile', { retries: 1, auth: true }),
+  updateProfile: (data) => apiClient.put('/api/admin/profile', data, { retries: 0, auth: true }),
+  listPatients: () => apiClient.get('/api/admin/patients', { retries: 1, auth: true }),
+  listDoctors: () => apiClient.get('/api/admin/doctors', { retries: 1, auth: true }),
+  deletePatient: (username) => apiClient.delete(`/api/admin/patients/${encodeURIComponent(username)}`, { retries: 0, auth: true }),
+  banDoctor: (doctorId, reason = '') => apiClient.patch(`/api/admin/doctors/${encodeURIComponent(doctorId)}/ban`, { reason }, { retries: 0, auth: true }),
+  createInvite: (data) => apiClient.post('/api/admin/invites', data, { retries: 0, auth: true }),
+  setupMfa: () => apiClient.post('/api/admin/mfa/setup', {}, { retries: 0, auth: true }),
+  confirmMfa: (code) => apiClient.post('/api/admin/mfa/confirm', { code }, { retries: 0, auth: true }),
 };

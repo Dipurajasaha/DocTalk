@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="HS256", env="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(default=60, env="ACCESS_TOKEN_EXPIRE_MINUTES")
 
+    admin_login_max_attempts: int = Field(default=5, env="ADMIN_LOGIN_MAX_ATTEMPTS")
+    admin_login_window_seconds: int = Field(default=300, env="ADMIN_LOGIN_WINDOW_SECONDS")
+    admin_login_lockout_seconds: int = Field(default=900, env="ADMIN_LOGIN_LOCKOUT_SECONDS")
+    admin_invite_token_bytes: int = Field(default=24, env="ADMIN_INVITE_TOKEN_BYTES")
+    admin_mfa_issuer: str = Field(default="DocTalk", env="ADMIN_MFA_ISSUER")
+
     # Supabase / PostgreSQL (Prisma)
     database_url: str = Field(default="", env="DATABASE_URL")
     direct_url: str = Field(default="", env="DIRECT_URL")
