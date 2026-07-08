@@ -578,6 +578,9 @@ async def _run_ai_websocket(
                     "role": current_user.role,
                 },
                 "final_response": "",
+                "session_risk_score": 0,
+                "input_guardrail_context": {},
+                "output_guardrail_context": {},
             }
 
             final_response = ""

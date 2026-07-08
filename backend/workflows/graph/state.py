@@ -45,6 +45,9 @@ class WorkflowState(TypedDict):
     timing_metrics: dict[str, float]
     conversation_memory: dict[str, Any]
     recommendation_context: dict[str, Any]
+    session_risk_score: int
+    input_guardrail_context: dict[str, Any]
+    output_guardrail_context: dict[str, Any]
 
 
 UnifiedChatState = WorkflowState
@@ -96,6 +99,10 @@ def create_workflow_state(
         response_sections=[],
         timing_metrics={},
         conversation_memory={},
+        recommendation_context={},
+        session_risk_score=0,
+        input_guardrail_context={},
+        output_guardrail_context={},
     )
 
 
@@ -109,6 +116,7 @@ def create_unified_chat_state(
     target_patient_id: str | None = None,
     context_payload: dict[str, Any] | None = None,
     triage_level: str = "routine",
+    final_response: str = "",
 ) -> WorkflowState:
     return create_workflow_state(
         messages=messages,
@@ -119,4 +127,5 @@ def create_unified_chat_state(
         target_patient_id=target_patient_id,
         context_payload=context_payload,
         triage_level=triage_level,
+        final_response=final_response,
     )

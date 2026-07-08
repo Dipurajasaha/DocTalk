@@ -273,33 +273,24 @@ class ChatService:
         normalized_user_id = str(user_id or "").strip()
         normalized_target_patient = str(target_patient_id or "").strip() or None
 
-        existing = await self.client.aichatsession.find_unique(where={"id": ai_session_id})
-        
-        if existing is not None:
-            # If the client passed a new explicit patient, update the session
-            if normalized_target_patient and existing.targetPatientId != normalized_target_patient:
-                updated = await self.client.aichatsession.update(
-                    where={"id": ai_session_id},
-                    data={
-                        "targetPatientId": normalized_target_patient,
-                        "mode": "DOCTOR_PATIENT" if normalized_role == "doctor" else mode
-                    }
-                )
-                return {"id": updated.id, "mode": updated.mode, "target_patient_id": updated.targetPatientId}
-            
-            # Return the existing session state
-            return {"id": existing.id, "mode": existing.mode, "target_patient_id": existing.targetPatientId}
-
-        created = await self.client.aichatsession.create(
+        # Use upsert to guarantee the session exists and prevent WAL read-committed race conditions
+        session = await self.client.aichatsession.upsert(
+            where={"id": ai_session_id},
             data={
-                "id": ai_session_id,
-                "userId": normalized_user_id,
-                "role": normalized_role,
-                "mode": mode,
-                "targetPatientId": normalized_target_patient,
-            },
+                "create": {
+                    "id": ai_session_id,
+                    "userId": normalized_user_id,
+                    "role": normalized_role,
+                    "mode": mode,
+                    "targetPatientId": normalized_target_patient,
+                },
+                "update": {
+                    "targetPatientId": normalized_target_patient,
+                    "mode": "DOCTOR_PATIENT" if normalized_role == "doctor" and normalized_target_patient else mode
+                }
+            }
         )
-        return {"id": created.id, "mode": created.mode, "target_patient_id": created.targetPatientId}
+        return {"id": session.id, "mode": session.mode, "target_patient_id": session.targetPatientId}
 
     async def get_ai_chat_history(self, ai_session_id: str) -> list[dict[str, Any]]:
         messages = await self.client.aichatmessage.find_many(
