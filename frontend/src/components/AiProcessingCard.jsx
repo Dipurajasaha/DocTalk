@@ -28,7 +28,7 @@ const STATUS_LABELS = {
 
 function resolveStatusLabel(status) {
   if (!status) return 'Processing...';
-  return STATUS_LABELS[status] || 'Processing...';
+  return STATUS_LABELS[status] || status;
 }
 
 export default function AiProcessingCard({ active, status, timeoutMs = 30000 }) {

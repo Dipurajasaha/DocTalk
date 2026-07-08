@@ -8,8 +8,6 @@ class AssetIndexCreate(BaseModel):
     assetId: str
     patientId: str
     fileName: str | None = None
-    fileCategory: str | None = None
-    sourceType: str | None = None
     documentType: str | None = None
     reportType: str | None = None
     documentDate: datetime | None = None
@@ -20,8 +18,6 @@ class AssetIndexCreate(BaseModel):
 
 class AssetIndexUpdate(BaseModel):
     fileName: str | None = None
-    fileCategory: str | None = None
-    sourceType: str | None = None
     documentType: str | None = None
     reportType: str | None = None
     documentDate: datetime | None = None
@@ -35,8 +31,6 @@ class AssetIndexResponse(BaseModel):
     assetId: str
     patientId: str
     fileName: str | None
-    fileCategory: str | None
-    sourceType: str | None
     documentType: str | None
     reportType: str | None
     documentDate: datetime | None

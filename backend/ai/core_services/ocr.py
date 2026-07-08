@@ -94,14 +94,18 @@ class OCRService:
 
                 if not text:
                     warnings.append("No embedded text found in PDF; using OCR fallback.")
-                    for page in doc:
-                        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-                        with Image.open(BytesIO(pixmap.tobytes("png"))) as image:
-                            image = ImageOps.exif_transpose(image).convert("RGB")
-                            page_text = pytesseract.image_to_string(image, lang=language).strip()
-                            if page_text:
-                                page_texts.append(page_text)
-                    text = "\n".join(page_texts).strip()
+                    try:
+                        for page in doc:
+                            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                            with Image.open(BytesIO(pixmap.tobytes("png"))) as image:
+                                image = ImageOps.exif_transpose(image).convert("RGB")
+                                page_text = pytesseract.image_to_string(image, lang=language).strip()
+                                if page_text:
+                                    page_texts.append(page_text)
+                        text = "\n".join(page_texts).strip()
+                    except Exception as ocr_err:
+                        logger.warning("OCR fallback skipped due to error: %s", ocr_err)
+                        warnings.append("OCR fallback skipped (Tesseract might be missing).")
             finally:
                 doc.close()
 
@@ -141,7 +145,11 @@ class OCRService:
 
             with image:
                 prepared = ImageOps.exif_transpose(image).convert("RGB")
-                extracted_text = pytesseract.image_to_string(prepared, lang=language).strip()
+                try:
+                    extracted_text = pytesseract.image_to_string(prepared, lang=language).strip()
+                except Exception as ocr_err:
+                    logger.warning("Image OCR failed: %s", ocr_err)
+                    extracted_text = ""
                 warnings: list[str] = []
                 if not extracted_text:
                     warnings.append("No readable text was found in the image.")

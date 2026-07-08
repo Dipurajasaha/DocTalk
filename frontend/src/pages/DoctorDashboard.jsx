@@ -381,11 +381,9 @@ export default function DoctorDashboard() {
     };
 
     loadDashboard();
-    const refreshTimer = setInterval(loadDashboard, 15000);
 
     return () => {
       cancelled = true;
-      clearInterval(refreshTimer);
     };
   }, [user, activeTab, currentDoctorId]);
 

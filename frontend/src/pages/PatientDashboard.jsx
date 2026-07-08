@@ -341,10 +341,6 @@ export default function PatientDashboard() {
           return;
         }
         setUser(data);
-        try { loadChatHistory(); } catch (e) { console.error(e); }
-        try { loadAppointments(); } catch (e) { console.error(e); }
-        try { loadDoctors(); } catch (e) { console.error(e); }
-        try { loadConsultations(); } catch (e) { console.error(e); }
       })
       .catch((err) => {
         console.error('Session fetch failed:', err);
@@ -398,6 +394,10 @@ export default function PatientDashboard() {
     }
     if (activePanel === 'appointments') {
       loadAppointments();
+      loadDoctors();
+    }
+    if (activePanel === 'docchat') {
+      loadConsultations();
       loadDoctors();
     }
   }, [activePanel]);

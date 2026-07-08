@@ -1,0 +1,103 @@
+import re
+from dataclasses import dataclass, field
+from ..planner_rule_config import APPOINTMENT_RULE_CONFIG, CONSULTATION_RULE_CONFIG, PATIENT_HISTORY_RULE_CONFIG
+
+@dataclass
+class ParsedIntent:
+    original_text: str = ""
+    intent_type: str | None = None
+    entities: list[str] = field(default_factory=list)
+    actions: list[str] = field(default_factory=list)
+    report_type: str | None = None
+    history_type: str | None = None
+    comparison_requested: bool = False
+    latest_requested: bool = False
+    is_appointment: bool = False
+    is_consultation: bool = False
+    is_history: bool = False
+    doctor_name: str | None = None
+    booking_datetime: str | None = None
+    booking_ordinal: str | None = None
+
+def parse_intent(text: str) -> ParsedIntent:
+    intent = ParsedIntent(original_text=text)
+    
+    # Helper to check if a word/phrase exists with word boundaries
+    def has_word(word: str, target: str) -> bool:
+        return bool(re.search(r'\b' + re.escape(word) + r'\b', target, re.IGNORECASE))
+
+    # Appointment extraction
+    has_appointment_entity = any(has_word(entity, text) for entity in APPOINTMENT_RULE_CONFIG["entities"])
+    has_appointment_action = False
+    
+    for action_key, action_aliases in APPOINTMENT_RULE_CONFIG["appointment_actions"].items():
+        if any(has_word(a, text) for a in action_aliases):
+            has_appointment_action = True
+            if action_key not in intent.actions:
+                intent.actions.append(action_key)
+                
+    if has_appointment_entity and has_appointment_action:
+        intent.is_appointment = True
+        intent.intent_type = "appointment"
+        intent.entities.extend([e for e in APPOINTMENT_RULE_CONFIG["entities"] if has_word(e, text)])
+        
+    # Consultation extraction
+    if any(has_word(entity, text) for entity in CONSULTATION_RULE_CONFIG["entities"]):
+        intent.is_consultation = True
+        intent.intent_type = "symptom"
+        intent.entities.extend([e for e in CONSULTATION_RULE_CONFIG["entities"] if has_word(e, text)])
+    elif any(has_word(trigger, text) for trigger in CONSULTATION_RULE_CONFIG["consultation_triggers"]):
+        intent.is_consultation = True
+        intent.intent_type = "consultation"
+        
+    for action_key, action_aliases in CONSULTATION_RULE_CONFIG.get("consultation_actions", {}).items():
+        if any(has_word(a, text) for a in action_aliases):
+            if action_key not in intent.actions:
+                intent.actions.append(action_key)
+
+    # Patient History extraction
+    if any(kw in text for kw in PATIENT_HISTORY_RULE_CONFIG["trigger_phrases"]):
+        intent.is_history = True
+        intent.intent_type = "patient_history"
+        
+        for htype in PATIENT_HISTORY_RULE_CONFIG["history_types"]:
+            if htype in text or htype + "s" in text or (htype == "condition" and "diagnosed" in text):
+                intent.history_type = htype
+                break
+
+    # Extract doctor name using regex – try multiple common patterns
+    lowered = text.lower()
+    doc_match = None
+
+    # Pattern 1: "doctor X" or "dr. X"
+    doc_match = re.search(
+        r"(?:doctor|dr\.?)\s+([a-z0-9_]+)",
+        lowered,
+    )
+
+    # Pattern 2: "with X"
+    if not doc_match:
+        doc_match = re.search(
+            r"\bwith\s+([a-z0-9_]+)(?:\s+(?:for|on|at|today|tomorrow|slot|please|thanks|$))",
+            lowered,
+        )
+
+    if doc_match:
+        extracted = doc_match.group(1).strip()
+        if extracted not in ["me", "you", "a", "the", "this"]:
+            intent.doctor_name = extracted
+
+    # Extract booking slots if booking intent is detected
+    if "book" in intent.actions:
+        ordinal_match = re.search(r"(first|second|third|fourth|fifth|last)\s+(?:slot|appointment|one)", text.lower())
+        if ordinal_match:
+            intent.booking_ordinal = ordinal_match.group(1)
+        else:
+            # Extract whatever comes after 'slot ' or 'appointment ' if any
+            slot_match = re.search(r"(?:slot|appointment)\s+(?:on\s+|for\s+)?([a-z0-9\s,:]+?)(?:$|please|thanks)", text.lower())
+            if slot_match:
+                extracted = slot_match.group(1).strip()
+                if extracted and extracted not in ["this", "that"]:
+                    intent.booking_datetime = extracted
+
+    return intent
