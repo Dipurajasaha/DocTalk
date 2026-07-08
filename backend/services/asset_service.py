@@ -450,9 +450,6 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
 
         # 3. File System Relocation
         destination_path = await _relocate_asset_file(source_path, category)
-        plaintext_bytes = destination_path.read_bytes()
-        encrypted = encrypt_file(plaintext_bytes)
-        destination_path.write_bytes(encrypted.ciphertext)
         
         # storage_folder_path is the actual relative path under DATA_ROOT used on disk
         storage_folder_path = Path("uploads") / _category_to_folder(category)
@@ -467,9 +464,6 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
                 "folderPath": storage_folder_path.as_posix() + "/",
                 "extractedText": extracted_text,
                 "processingStatus": "ANALYZED",
-                "encryptionNonce": encrypted.nonce_b64,
-                "wrappedKey": encrypted.wrapped_key_b64,
-                "keyNonce": encrypted.key_nonce_b64,
             },
         )
 
@@ -550,6 +544,21 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
             )
             
         print(f"[DEBUG][RAG_STORAGE] Successfully stored asset {asset_id} in RAG ({chunk_count} chunk{'s' if chunk_count != 1 else ''})")
+        
+        # 8. File Encryption (Final Security Layer)
+        plaintext_bytes = destination_path.read_bytes()
+        encrypted = encrypt_file(plaintext_bytes)
+        destination_path.write_bytes(encrypted.ciphertext)
+        
+        await db.medicalasset.update(
+            where={"id": asset_id},
+            data={
+                "encryptionNonce": encrypted.nonce_b64,
+                "wrappedKey": encrypted.wrapped_key_b64,
+                "keyNonce": encrypted.key_nonce_b64,
+            },
+        )
+        print(f"[DEBUG][ENCRYPTION] Successfully encrypted asset {asset_id}")
     except Exception as exc:
         print(f"[DEBUG][RAG_STORAGE] Rejected/Failed storing asset {asset_id} in RAG. Error: {exc}")
         logger.exception("Asset background processing failed", extra={"component": "asset_processing", "asset_id": asset_id, "error": str(exc)})
