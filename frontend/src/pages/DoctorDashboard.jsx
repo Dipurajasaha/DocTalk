@@ -2,12 +2,14 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSession } from '../contexts/SessionContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { authApi, doctorApi, patientApi, paymentApi } from '../lib/api';
+import { authApi, doctorApi, patientApi } from '../lib/api';
 import { createRealTimeClient } from '../lib/realTimeClient';
 import '../styles/doctor.css';
 import '../styles/chat.css';
 import CopilotPanel from '../components/CopilotPanel';
 import { useNotifications } from '../contexts';
+import DoctorPrescriptionsList from './DoctorPrescriptionsList';
+import PrescriptionComposer from './PrescriptionComposer';
 
 const timeSlots = [];
 for (let h = 0; h < 24; h++) {
@@ -186,15 +188,13 @@ export default function DoctorDashboard() {
   const [activeTab, setActiveTab] = useState(() => {
     try {
       const tab = new URLSearchParams(window.location.search).get('tab');
-      if (['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].includes(tab)) return tab;
+      if (['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings', 'prescriptions'].includes(tab)) return tab;
       return localStorage.getItem('doctalk_doctor_active_tab') || 'dashboard';
     } catch (e) {
       return 'dashboard';
     }
   });
   const [dashboardData, setDashboardData] = useState(null);
-  const [paymentsData, setPaymentsData] = useState([]);
-  const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [manageSessionTab, setManageSessionTab] = useState(() => {
     try {
       return localStorage.getItem('doctalk_doctor_manage_session_tab') || 'upcoming';
@@ -248,19 +248,25 @@ export default function DoctorDashboard() {
   }, [dashboardData?.appointments]);
 
   const setActiveTabFromNav = (tab) => {
-    const nextTab = ['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].includes(tab) ? tab : 'dashboard';
+    const nextTab = ['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings', 'prescriptions'].includes(tab) ? tab : 'dashboard';
     setActiveTab(nextTab);
+    if (nextTab === 'prescriptions') setPrescriptionView('list');
     navigate(`/doctor/dashboard?tab=${encodeURIComponent(nextTab)}`);
   };
 
   useEffect(() => {
     try {
       const tab = new URLSearchParams(location.search).get('tab');
-      if (['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].includes(tab)) {
+      if (['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings', 'prescriptions'].includes(tab)) {
         setActiveTab((current) => (current === tab ? current : tab));
       }
     } catch (e) {}
   }, [location.search]);
+
+  useEffect(() => {
+    if (activeTab !== 'prescriptions') return;
+    setPrescriptionView((current) => current || 'list');
+  }, [activeTab]);
 
   // Patient Chat States
   const [patientChatList, setPatientChatList] = useState([]);
@@ -271,6 +277,7 @@ export default function DoctorDashboard() {
   const [patientMsgInput, setPatientMsgInput] = useState('');
   const [patientInputFocused, setPatientInputFocused] = useState(false);
   const [chatDisabled, setChatDisabled] = useState(false);
+  const [prescriptionView, setPrescriptionView] = useState('list');
   const patientChatEndRef = useRef(null);
   const patientAutoScrollRef = useRef(false);
   const patientChatRealtimeRef = useRef(null);
@@ -388,16 +395,6 @@ export default function DoctorDashboard() {
       cancelled = true;
     };
   }, [user, activeTab, currentDoctorId]);
-
-  // Load payments when the payments tab becomes active
-  useEffect(() => {
-    if (activeTab !== 'payments') return;
-    setPaymentsLoading(true);
-    paymentApi.listMyPayments()
-      .then(data => setPaymentsData(Array.isArray(data) ? data : []))
-      .catch(err => console.error('Failed loading payments:', err))
-      .finally(() => setPaymentsLoading(false));
-  }, [activeTab]);
 
   function normalizeChatMessage(item) {
     return {
@@ -1117,68 +1114,51 @@ export default function DoctorDashboard() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <h1 className="doc-h1">Earnings & Payments</h1>
           <div className="doc-section" style={{ display: 'flex', flexDirection: 'column' }}>
-
-          {/* ── Summary card ── */}
-          <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '20px', display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
-            <div>
-              <div style={{ fontSize: '14px', color: '#6B6B6B' }}>Total Earnings</div>
-              <div style={{ fontSize: '32px', fontWeight: '700', color: '#0C0C0C' }}>
-                ₹{paymentsLoading ? '…' : (paymentsData.filter(p => p.status === 'PAID').reduce((s, p) => s + (p.amount_inr || 0), 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: '14px', color: '#6B6B6B' }}>Paid Transactions</div>
-              <div style={{ fontSize: '32px', fontWeight: '700', color: '#16a34a' }}>
-                {paymentsLoading ? '…' : paymentsData.filter(p => p.status === 'PAID').length}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: '14px', color: '#6B6B6B' }}>Pending</div>
-              <div style={{ fontSize: '32px', fontWeight: '700', color: '#d97706' }}>
-                {paymentsLoading ? '…' : paymentsData.filter(p => p.status === 'CREATED').length}
-              </div>
-            </div>
+          
+          <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
+            <div style={{ fontSize: '14px', color: '#6B6B6B' }}>Total Earnings</div>
+            <div style={{ fontSize: '32px', fontWeight: '700', color: '#0C0C0C' }}>$1,250.00</div>
           </div>
-
-          {paymentsLoading ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>Loading payments…</div>
-          ) : paymentsData.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '48px', background: '#F8FAFC', borderRadius: '16px', border: '1px dashed #CBD5E1', color: '#94a3b8' }}>
-              <div style={{ fontSize: '32px', marginBottom: '10px' }}>💳</div>
-              <div style={{ fontWeight: '600' }}>No payment records yet</div>
-              <div style={{ fontSize: '13px', marginTop: '6px' }}>Payments will appear here once patients complete checkout via Razorpay.</div>
-            </div>
-          ) : (
-            <table className="doc-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Patient</th>
-                  <th>Razorpay ID</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paymentsData.map(p => (
-                  <tr key={p.id}>
-                    <td>{p.created_at ? new Date(p.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</td>
-                    <td>{p.patient_display || p.patient_username || '—'}</td>
-                    <td style={{ fontFamily: 'monospace', fontSize: '11px', color: '#64748b' }}>{p.razorpay_payment_id || p.razorpay_order_id || '—'}</td>
-                    <td style={{ fontWeight: '600' }}>₹{(p.amount_inr || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                    <td>
-                      <span className={`doc-badge ${p.status === 'PAID' ? 'success' : p.status === 'FAILED' ? 'danger' : 'warning'}`}>
-                        {p.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          </div>
+          <table className="doc-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Patient</th>
+                <th>Amount</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>2024-03-28</td>
+                <td>Dip Saha</td>
+                <td>$150.00</td>
+                <td><span className="doc-badge success">Completed</span></td>
+              </tr>
+              <tr>
+                <td>2024-03-27</td>
+                <td>John Doe</td>
+                <td>$150.00</td>
+                <td><span className="doc-badge success">Completed</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         </div>
       );
+      case 'prescriptions':
+        return prescriptionView === 'new' ? (
+          <PrescriptionComposer
+            embedded
+            onBack={() => setPrescriptionView('list')}
+            onDone={() => setPrescriptionView('list')}
+          />
+        ) : (
+          <DoctorPrescriptionsList
+            embedded
+            onCreateNew={() => setPrescriptionView('new')}
+          />
+        );
       case 'settings': {
         const specs = ['General Medicine','Cardiology','Neurology','Orthopedics','Dermatology','Pediatrics','Gynecology','Oncology','Ophthalmology','ENT','Psychiatry','Radiology','Anesthesiology','Urology','Endocrinology','Nephrology','Gastroenterology','Pulmonology','Rheumatology','Other'];
         return (
@@ -1324,14 +1304,14 @@ export default function DoctorDashboard() {
         <div className="doc-name">{user.display_name}</div>
         
         <div className="doc-nav">
-          {['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].map(tab => (
+          {['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings', 'prescriptions'].map(tab => (
             <button 
               key={tab} 
               onClick={() => setActiveTabFromNav(tab)}
               className={activeTab === tab ? 'active' : ''}
               style={tab === 'sessions' ? {textTransform: 'capitalize'} : {}}
             >
-              {tab === 'patientchats' ? 'Patient Chats' : tab === 'sessions' ? 'Manage Sessions' : tab}
+              {tab === 'patientchats' ? 'Patient Chats' : tab === 'sessions' ? 'Manage Sessions' : tab === 'prescriptions' ? 'Prescriptions' : tab}
             </button>
           ))}
         </div>

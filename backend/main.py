@@ -15,10 +15,7 @@ from .api.admin import router as admin_router
 from .api.users import doctor_router as user_doctor_router, router as users_router
 from .api.image_analysis import router as image_analysis_router
 from .api.stats import router as stats_router
-from .api.payments import router as payments_router
-from .api.password_reset import router as password_reset_router
-from .api.hospital import router as hospital_router, public_router as hospital_public_router
-from .api.medical_news import router as medical_news_router
+from .api.prescriptions import router as prescriptions_router
 from .core.database import connect_prisma, disconnect_prisma, ensure_connected, ping_database
 
 
@@ -79,11 +76,7 @@ app.include_router(assets_router, prefix="/api/assets", tags=["assets"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 app.include_router(image_analysis_router, prefix="/api", tags=["images"])
 app.include_router(stats_router, prefix="/api/public", tags=["public"])
-app.include_router(payments_router, prefix="/api/payments", tags=["payments"])
-app.include_router(password_reset_router, prefix="/api/auth", tags=["auth"])
-app.include_router(hospital_router, prefix="/api/hospital", tags=["hospital"])
-app.include_router(hospital_public_router, prefix="/api/hospital/public", tags=["hospital"])
-app.include_router(medical_news_router, prefix="/api/medical-news", tags=["medical-news"])
+app.include_router(prescriptions_router, prefix="/api/prescriptions", tags=["prescriptions"])
 
 
 @app.get("/health", tags=["system"])

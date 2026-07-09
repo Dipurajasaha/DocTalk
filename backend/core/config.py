@@ -55,30 +55,14 @@ class Settings(BaseSettings):
     imgaga_api_key: str = Field(default="", env="IMGAGA_API_KEY")
     imgaga_api_url: str = Field(default="", env="IMGAGA_API_URL")
 
-    # --- Razorpay ---
-    razorpay_key_id: str = Field(default="", env="RAZORPAY_KEY_ID")
-    razorpay_key_secret: str = Field(default="", env="RAZORPAY_KEY_SECRET")
-    razorpay_currency: str = Field(default="INR", env="RAZORPAY_CURRENCY")
-    razorpay_webhook_secret: str = Field(default="", env="RAZORPAY_WEBHOOK_SECRET")
-
-    # --- Email (for password reset) ---
-    smtp_host: str = Field(default="", env="SMTP_HOST")
-    smtp_port: int = Field(default=587, env="SMTP_PORT")
-    smtp_user: str = Field(default="", env="SMTP_USER")
-    smtp_password: str = Field(default="", env="SMTP_PASSWORD")
-    smtp_from_email: str = Field(default="noreply@doctalk.app", env="SMTP_FROM_EMAIL")
-    smtp_from_name: str = Field(default="DocTalk", env="SMTP_FROM_NAME")
-    frontend_url: str = Field(default="http://localhost:5173", env="FRONTEND_URL")
-
-    # --- Medical News ---
-    news_api_key: str = Field(default="", env="NEWS_API_KEY")
-
     ai_request_timeout_seconds: float = Field(default=45.0, env="AI_REQUEST_TIMEOUT_SECONDS")
     xray_analysis_timeout_seconds: float = Field(default=300.0, env="XRAY_ANALYSIS_TIMEOUT_SECONDS")
     rag_embedding_timeout_seconds: float = Field(default=120.0, env="RAG_EMBEDDING_TIMEOUT_SECONDS")
     rag_embedding_dimension: int = Field(default=768, env="RAG_EMBEDDING_DIMENSION")
     rag_embedding_cache_size: int = Field(default=128, env="RAG_EMBEDDING_CACHE_SIZE")
     rag_max_memory_age_days: int = Field(default=365, env="RAG_MAX_MEMORY_AGE_DAYS")
+
+    frontend_base_url: str = Field(default="http://localhost:5173", env="FRONTEND_BASE_URL")
 
     class Config:
         env_file = str(PROJECT_ROOT / ".env")

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSession } from '../contexts/SessionContext';
 import { useNotifications, useAssetCache } from '../contexts';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { authApi, patientApi, paymentApi, buildAssetDownloadUrl } from '../lib/api';
+import { authApi, patientApi, buildAssetDownloadUrl } from '../lib/api';
 import { buildAiChatWebSocketUrl, createRealTimeClient } from '../lib/realTimeClient';
 import '../styles/patient.css';
 import XrayAnalyzerPanel from '../components/XrayAnalyzerPanel';
@@ -13,113 +13,6 @@ import StructuredReply from '../components/StructuredReply';
 
 const GENERAL_UPLOADS_FOLDER_PATH = '/my_documents/general_uploads/';
 const LEGACY_UNCLASSIFIED_FOLDER_PATH = '/my_documents/unclassified/';
-
-// ─── Reusable profile pic picker with preview ─────────────────────────────────
-function ProfilePicPicker({ name, currentUrl }) {
-  const [preview, setPreview] = useState(currentUrl || null);
-  const [fileName, setFileName] = useState('');
-  const inputRef = useRef(null);
-
-  const handleChange = (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    setFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (ev) => setPreview(ev.target.result);
-    reader.readAsDataURL(file);
-  };
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-      <div
-        onClick={() => inputRef.current?.click()}
-        style={{
-          width: '64px', height: '64px', borderRadius: '50%',
-          background: preview ? 'transparent' : '#E2E8F0',
-          border: '2px dashed #CBD5E1', cursor: 'pointer',
-          overflow: 'hidden', flexShrink: 0,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: '22px',
-        }}
-        title="Click to choose photo"
-      >
-        {preview
-          ? <img src={preview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : '📷'}
-      </div>
-      <div style={{ flex: 1 }}>
-        <label
-          htmlFor="profile-pic-input"
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: '6px',
-            padding: '8px 14px', borderRadius: '8px', cursor: 'pointer',
-            border: '1px solid #CBD5E1', background: '#F8FAFC',
-            fontSize: '12px', fontWeight: '600', color: '#475569',
-          }}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          Choose Photo
-        </label>
-        <input
-          id="profile-pic-input"
-          ref={inputRef}
-          type="file"
-          name={name}
-          accept="image/*"
-          onChange={handleChange}
-          style={{ display: 'none' }}
-        />
-        {fileName
-          ? <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#6C5CE7', fontWeight: '600' }}>📎 {fileName}</p>
-          : <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#94a3b8' }}>PNG, JPG, WEBP — max 5 MB</p>
-        }
-      </div>
-    </div>
-  );
-}
-
-// ─── Inline doc-chat attachment picker ────────────────────────────────────────
-function AttachmentPicker({ onChange, file, onClear }) {
-  const inputRef = useRef(null);
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".pdf,.png,.jpg,.jpeg,.gif,.webp"
-        style={{ display: 'none' }}
-        onChange={onChange}
-      />
-      {file ? (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '6px',
-          padding: '4px 10px', borderRadius: '50px',
-          background: '#EDE9FE', border: '1px solid #C4B5FD',
-          fontSize: '11px', color: '#5B21B6', fontWeight: '600', maxWidth: '160px',
-        }}>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📎 {file.name}</span>
-          <button
-            type="button"
-            onClick={onClear}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#7C3AED', padding: 0, fontSize: '13px', lineHeight: 1, flexShrink: 0 }}
-          >×</button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          title="Attach file"
-          style={{
-            width: '36px', height: '36px', borderRadius: '50%',
-            border: '1px solid #E2E8F0', background: '#F8FAFC',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '15px', color: '#64748b', flexShrink: 0,
-          }}
-        >📎</button>
-      )}
-    </div>
-  );
-}
 
 const isJsonLike = (text) => {
   if (!text) return false;
@@ -288,8 +181,6 @@ export default function PatientDashboard() {
   const [selectedSlotId, setSelectedSlotId] = useState('');
   const [slotLoading, setSlotLoading] = useState(false);
   const [bookingInProgress, setBookingInProgress] = useState(false);
-  const [consultationFee, setConsultationFee] = useState(500); // Default ₹500
-  const [paymentInProgress, setPaymentInProgress] = useState(false);
 
   const [activeDocChat, setActiveDocChat] = useState(null);
   const [consultations, setConsultations] = useState([]);
@@ -512,45 +403,42 @@ export default function PatientDashboard() {
   }, [activePanel]);
 
   const handleUploadAssetV2 = (e) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
 
     const maxSize = 15 * 1024 * 1024;
     const allowedTypes = ['application/pdf', 'image/png', 'image/jpg', 'image/jpeg', 'image/webp', 'image/gif'];
+    if (file.size > maxSize) { try { addNotification({ type: 'error', message: 'File too large. Max 15MB allowed.' }); } catch (e) {} e.target.value = null; return; }
+    if (!allowedTypes.includes(file.type) && !file.name.toLowerCase().endsWith('.pdf')) { try { addNotification({ type: 'error', message: 'Unsupported file type. Use PDF or images.' }); } catch (e) {} e.target.value = null; return; }
 
-    files.forEach((file) => {
-      if (file.size > maxSize) {
-        try { addNotification({ type: 'error', message: `${file.name}: File too large. Max 15MB.` }); } catch (_) {}
-        return;
-      }
-      if (!allowedTypes.includes(file.type) && !file.name.toLowerCase().endsWith('.pdf')) {
-        try { addNotification({ type: 'error', message: `${file.name}: Unsupported type. Use PDF or images.` }); } catch (_) {}
-        return;
-      }
-
-      const uploadId = 'u-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-      setUploadQueue(prev => [...prev, { id: uploadId, name: file.name, status: 'uploading' }]);
-
-      patientApi.uploadAsset(file)
-        .then((data) => {
-          if (data && (data.success || data.id)) {
-            setUploadQueue(prev => prev.map(u => u.id === uploadId ? { ...u, status: 'done' } : u));
-            try { addNotification({ type: 'success', message: `✅ ${file.name} uploaded` }); } catch (_) {}
-            try { removeAsset && removeAsset('assets_files'); } catch (_) {}
-            loadAssets({ forceRefresh: true });
-          } else {
-            setUploadQueue(prev => prev.map(u => u.id === uploadId ? { ...u, status: 'error' } : u));
-            try { addNotification({ type: 'error', message: `❌ ${file.name}: Upload failed` }); } catch (_) {}
-          }
-          window.setTimeout(() => setUploadQueue(prev => prev.filter(u => u.id !== uploadId)), 5000);
-        })
-        .catch((err) => {
+    const uploadId = 'u-' + Date.now();
+    setUploadQueue(prev => [...prev, { id: uploadId, name: file.name, progress: 0, status: 'uploading' }]);
+    patientApi.uploadAsset(file)
+      .then((data) => {
+        if (data && (data.success || data.id)) {
+          setUploadQueue(prev => prev.map(u => u.id === uploadId ? { ...u, progress: 100, status: 'done' } : u));
+          try { addNotification({ type: 'success', message: 'File uploaded successfully' }); } catch (e) {}
+          try { removeAsset && removeAsset('assets_files'); } catch (e) {}
+          loadAssets({ forceRefresh: true });
+          window.setTimeout(() => {
+            setUploadQueue(prev => prev.filter((item) => item.id !== uploadId));
+          }, 5000);
+        } else {
           setUploadQueue(prev => prev.map(u => u.id === uploadId ? { ...u, status: 'error' } : u));
-          try { addNotification({ type: 'error', message: `❌ ${file.name}: ${err?.message || 'Upload failed'}` }); } catch (_) {}
-          window.setTimeout(() => setUploadQueue(prev => prev.filter(u => u.id !== uploadId)), 5000);
-        });
-    });
-
+          try { addNotification({ type: 'error', message: 'Upload failed' }); } catch (e) {}
+          window.setTimeout(() => {
+            setUploadQueue(prev => prev.filter((item) => item.id !== uploadId));
+          }, 5000);
+        }
+      })
+      .catch((err) => {
+        console.error('Upload error', err);
+        setUploadQueue(prev => prev.map(u => u.id === uploadId ? { ...u, status: 'error' } : u));
+        try { addNotification({ type: 'error', message: 'Upload failed: ' + (err?.message || 'unknown') }); } catch (e) {}
+        window.setTimeout(() => {
+          setUploadQueue(prev => prev.filter((item) => item.id !== uploadId));
+        }, 5000);
+      });
     if (e.target) e.target.value = null;
   };
 
@@ -1000,20 +888,10 @@ export default function PatientDashboard() {
     }
   };
 
-  // Load Razorpay checkout script on demand
-  const loadRazorpayScript = () => new Promise((resolve) => {
-    if (window.Razorpay) { resolve(true); return; }
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-
   const handleCreateAppointment = async (e) => {
     e.preventDefault();
 
-    if (bookingInProgress || paymentInProgress) return;
+    if (bookingInProgress) return;
 
     const doctorId = String(appointmentDraft.doctor_id || '').trim();
     const reason = String(appointmentDraft.reason || '').trim();
@@ -1028,104 +906,36 @@ export default function PatientDashboard() {
       return;
     }
 
-    // ── Razorpay Payment Flow ──────────────────────────────────────────────
-    setPaymentInProgress(true);
-    let orderData = null;
+    setBookingInProgress(true);
     try {
-      const doctorDisplay = doctors.find(d => String(d.doctor_id || d.id) === doctorId)?.name || doctorId;
-      orderData = await paymentApi.createOrder(
-        consultationFee,
-        `Consultation with Dr. ${doctorDisplay}`,
-        null, // appointment_id — linked after booking
-      );
+      const data = bookingMode === 'direct'
+        ? await patientApi.bookDirectAppointment(selectedSlotId, reason, appointmentDraft.note.trim())
+        : await patientApi.bookOpenAppointment(doctorId, reason, appointmentDraft.note.trim());
+
+      if (data && (data.id || data.success)) {
+        try { addNotification({ type: 'success', message: bookingMode === 'direct' ? 'Appointment booked successfully' : 'Open request sent successfully' }); } catch (e) {}
+        await refreshAvailableSlotsForDoctor(doctorId);
+        setAppointmentDraft(prev => ({
+          ...prev,
+          reason: 'General consultation',
+          note: '',
+        }));
+        loadAppointments();
+      } else {
+        try { addNotification({ type: 'error', message: 'Error creating appointment: ' + (data && (data.error || data.detail) || 'unknown') }); } catch (e) {}
+      }
     } catch (err) {
-      setPaymentInProgress(false);
-      try { addNotification({ type: 'error', message: 'Could not initiate payment: ' + (err?.message || 'server error') }); } catch (e) {}
-      return;
+      console.error('create appointment failed', err);
+      if (err?.status === 409) {
+        await refreshAvailableSlotsForDoctor(doctorId);
+        try { window.alert('That slot was just booked by someone else. Please choose another available slot.'); } catch (e) {}
+        try { addNotification({ type: 'error', message: 'That slot was just booked by someone else. Please choose another available slot.' }); } catch (e) {}
+      } else {
+        try { addNotification({ type: 'error', message: 'Error creating appointment: ' + (err?.message || 'server error') }); } catch (e) {}
+      }
+    } finally {
+      setBookingInProgress(false);
     }
-
-    // Open Razorpay checkout
-    const rzpLoaded = await loadRazorpayScript();
-    if (!rzpLoaded) {
-      setPaymentInProgress(false);
-      try { addNotification({ type: 'error', message: 'Failed to load payment gateway. Please check your internet connection.' }); } catch (e) {}
-      return;
-    }
-
-    await new Promise((resolve) => {
-      const options = {
-        key: orderData.razorpay_key_id,
-        amount: orderData.amount,
-        currency: orderData.currency,
-        name: 'DocTalk',
-        description: orderData.description,
-        order_id: orderData.razorpay_order_id,
-        theme: { color: '#6C5CE7' },
-        handler: async (response) => {
-          // Verify payment with backend
-          try {
-            await paymentApi.verifyPayment(
-              response.razorpay_order_id,
-              response.razorpay_payment_id,
-              response.razorpay_signature,
-            );
-          } catch (verifyErr) {
-            try { addNotification({ type: 'error', message: 'Payment verification failed: ' + (verifyErr?.message || 'server error') }); } catch (e) {}
-            setPaymentInProgress(false);
-            resolve();
-            return;
-          }
-
-          // Payment verified → proceed to book appointment
-          setBookingInProgress(true);
-          try {
-            const data = bookingMode === 'direct'
-              ? await patientApi.bookDirectAppointment(selectedSlotId, reason, appointmentDraft.note.trim())
-              : await patientApi.bookOpenAppointment(doctorId, reason, appointmentDraft.note.trim());
-
-            if (data && (data.id || data.success)) {
-              try { addNotification({ type: 'success', message: '✅ Payment successful! ' + (bookingMode === 'direct' ? 'Appointment booked.' : 'Open request sent.') }); } catch (e) {}
-              await refreshAvailableSlotsForDoctor(doctorId);
-              setAppointmentDraft(prev => ({ ...prev, reason: 'General consultation', note: '' }));
-              loadAppointments();
-            } else {
-              try { addNotification({ type: 'error', message: 'Payment successful but booking failed: ' + (data && (data.error || data.detail) || 'unknown') }); } catch (e) {}
-            }
-          } catch (bookErr) {
-            if (bookErr?.status === 409) {
-              await refreshAvailableSlotsForDoctor(doctorId);
-              try { window.alert('That slot was just taken. Your payment was received — please contact support or choose another slot.'); } catch (e) {}
-            } else {
-              try { addNotification({ type: 'error', message: 'Booking failed after payment: ' + (bookErr?.message || 'server error') }); } catch (e) {}
-            }
-          } finally {
-            setBookingInProgress(false);
-            setPaymentInProgress(false);
-          }
-          resolve();
-        },
-        modal: {
-          ondismiss: () => {
-            try { addNotification({ type: 'error', message: 'Payment was cancelled. Your appointment was not booked.' }); } catch (e) {}
-            setPaymentInProgress(false);
-            resolve();
-          },
-        },
-        prefill: {
-          name: user?.name || '',
-          email: user?.email || '',
-          contact: user?.mobile || user?.phone || '',
-        },
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.on('payment.failed', () => {
-        try { addNotification({ type: 'error', message: 'Payment failed. Please try again.' }); } catch (e) {}
-        setPaymentInProgress(false);
-        resolve();
-      });
-      rzp.open();
-    });
   };
 
   useEffect(() => {
@@ -1350,32 +1160,19 @@ export default function PatientDashboard() {
   };
 
   const handleAddExplainFile = (e) => {
-    const file = e.target.files && e.target.files[0];
+    const file = e.target.files[0];
     if (!file) return;
 
-    const maxSize = 15 * 1024 * 1024;
-    const allowed = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
-    if (file.size > maxSize) {
-      try { addNotification({ type: 'error', message: `${file.name}: File too large. Max 15 MB.` }); } catch (_) {}
-      if (e.target) e.target.value = null;
-      return;
-    }
-    if (!allowed.includes(file.type) && !file.name.toLowerCase().endsWith('.pdf')) {
-      try { addNotification({ type: 'error', message: `${file.name}: Unsupported type. Use PDF or images.` }); } catch (_) {}
-      if (e.target) e.target.value = null;
-      return;
-    }
-
     setUploadedFiles(prev => [...prev, {
-      id: Math.random().toString(36).slice(2),
-      file,
+      id: Math.random(),
+      file: file,
       name: file.name,
-      type: file.type,
-      sizeLabel: (file.size / 1024 / 1024).toFixed(2) + ' MB',
+      type: file.type
     }]);
 
-    if (explainUploadInputRef.current) explainUploadInputRef.current.value = '';
-    if (e.target) e.target.value = null;
+    if (explainUploadInputRef.current) {
+      explainUploadInputRef.current.value = '';
+    }
   };
 
   const handleRemoveExplainFile = (id) => {
@@ -2270,14 +2067,14 @@ export default function PatientDashboard() {
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B' }}>Profile Picture</label>
-                    <ProfilePicPicker name="profile_pic" currentUrl={user?.profile_pic} />
+                    <input type="file" name="profile_pic" accept="image/*" style={{ padding: '12px 16px', borderRadius: '8px', border: '1px solid #E2E8F0', outline: 'none', fontSize: '14px', background: '#F8FAFC' }} />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B' }}>New Password (leave blank to keep current)</label>
                     <input type="password" name="password" placeholder="Enter new password..." style={{ padding: '12px 16px', borderRadius: '8px', border: '1px solid #E2E8F0', outline: 'none', fontSize: '14px', background: '#F8FAFC' }} />
                   </div>
                   <button type="submit" disabled={isUploadingProfile} style={{ marginTop: '12px', padding: '14px', borderRadius: '50px', background: 'linear-gradient(to right, #D67CFF, #6B5CE7)', color: '#FFF', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', transition: 'all 0.3s', opacity: isUploadingProfile ? 0.7 : 1, boxShadow: '0 4px 12px rgba(107, 92, 231, 0.3)' }}>
-                    {isUploadingProfile ? '⏫ Saving…' : 'Save Profile Changes'}
+                    {isUploadingProfile ? 'Saving...' : 'Save Profile Changes'}
                   </button>
                 </form>
               </div>
@@ -2548,54 +2345,10 @@ export default function PatientDashboard() {
                     </span>
                   )}
                 </div>
-                <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
-                  <input
-                    type="file"
-                    id="upload-doc-v2"
-                    style={{ display: 'none' }}
-                    accept=".pdf,.jpg,.jpeg,.png,.webp,.gif"
-                    multiple
-                    onChange={handleUploadAssetV2}
-                  />
-                  <label
-                    htmlFor="upload-doc-v2"
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: '6px',
-                      background: '#6C5CE7', color: '#fff', border: 'none',
-                      padding: '8px 16px', borderRadius: '8px', cursor: 'pointer',
-                      fontSize: '12px', fontWeight: '600', userSelect: 'none',
-                    }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
-                      <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
-                    </svg>
-                    Upload Files
-                  </label>
+                <div style={{display: 'flex', gap: '8px'}}>
+                  <input type="file" id="upload-doc-v2" style={{display: 'none'}} onChange={handleUploadAssetV2} />
+                  <button onClick={() => document.getElementById('upload-doc-v2').click()} style={{ background: '#6C5CE7', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Upload Files</button>
                 </div>
-
-                {/* Upload queue indicator */}
-                {uploadQueue.length > 0 && (
-                  <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {uploadQueue.map(item => (
-                      <div key={item.id} style={{
-                        display: 'flex', alignItems: 'center', gap: '10px',
-                        padding: '8px 12px', borderRadius: '8px',
-                        background: item.status === 'error' ? '#fef2f2' : item.status === 'done' ? '#f0fdf4' : '#f8fafc',
-                        border: `1px solid ${item.status === 'error' ? '#fecaca' : item.status === 'done' ? '#bbf7d0' : '#e2e8f0'}`,
-                        fontSize: '11px',
-                      }}>
-                        <span style={{ fontSize: '14px' }}>
-                          {item.status === 'error' ? '❌' : item.status === 'done' ? '✅' : '⏫'}
-                        </span>
-                        <span style={{ flex: 1, fontWeight: '500', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
-                        <span style={{ color: item.status === 'error' ? '#ef4444' : item.status === 'done' ? '#16a34a' : '#6C5CE7', fontWeight: '600', fontSize: '10px' }}>
-                          {item.status === 'uploading' ? 'Uploading…' : item.status === 'done' ? 'Done' : 'Failed'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
 
               <div className="documents-container" style={{ display: 'flex', flexDirection: 'column', flex: 1, background: '#FFF', borderRadius: '16px', padding: '32px', overflowY: 'auto', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', minHeight: 0, boxSizing: 'border-box' }}>
@@ -2790,9 +2543,9 @@ export default function PatientDashboard() {
                       <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
                         <button
                           type="submit"
-                          disabled={bookingInProgress || paymentInProgress || (bookingMode === 'direct' && (!selectedSlotId || slotLoading))}
-                          style={{ padding: '12px 18px', borderRadius: '999px', border: 'none', background: bookingInProgress || paymentInProgress || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? '#C4B5FD' : '#8B7EFF', color: '#FFF', fontSize: '11px', fontWeight: '700', cursor: bookingInProgress || paymentInProgress || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? 'not-allowed' : 'pointer', boxShadow: '0 8px 18px rgba(139,126,255,0.28)' }}>
-                          {paymentInProgress ? 'Processing payment…' : bookingInProgress ? 'Booking…' : `Pay ₹${consultationFee} & ${bookingMode === 'direct' ? 'Book Slot' : 'Send Request'}`}
+                          disabled={bookingInProgress || (bookingMode === 'direct' && (!selectedSlotId || slotLoading))}
+                          style={{ padding: '12px 18px', borderRadius: '999px', border: 'none', background: bookingInProgress || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? '#C4B5FD' : '#8B7EFF', color: '#FFF', fontSize: '11px', fontWeight: '700', cursor: bookingInProgress || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? 'not-allowed' : 'pointer', boxShadow: '0 8px 18px rgba(139,126,255,0.28)' }}>
+                          {bookingInProgress ? 'Booking...' : bookingMode === 'direct' ? 'Book Slot' : 'Send Request'}
                         </button>
                       </div>
                     </form>
@@ -2901,15 +2654,19 @@ export default function PatientDashboard() {
                     </div>
 
                     <div style={{ padding: '12px 32px 32px 32px', background: 'transparent', flexShrink: 0 }}>
-                      <form onSubmit={handleDocChatSubmit} className="rich-input-row" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 8px 8px 16px', background: '#F1F5F9', borderRadius: '50px', border: `1px solid ${docInputFocused ? 'rgba(139, 126, 255, 0.45)' : '#E2E8F0'}`, boxShadow: docInputFocused ? '0 0 0 3px rgba(139, 126, 255, 0.10), 0 8px 24px rgba(0,0,0,0.06)' : '0 8px 24px rgba(0,0,0,0.06)', transition: 'border-color 0.18s ease, box-shadow 0.18s ease' }}>
-                        <AttachmentPicker
-                          file={docAttachmentFile}
-                          onChange={handleDocAttachChange}
-                          onClear={() => setDocAttachmentFile(null)}
-                        />
+                      <form onSubmit={handleDocChatSubmit} className="rich-input-row" style={{ display: 'flex', alignItems: 'center', padding: '8px 8px 8px 24px', background: '#F1F5F9', borderRadius: '50px', border: `1px solid ${docInputFocused ? 'rgba(139, 126, 255, 0.45)' : '#E2E8F0'}`, boxShadow: docInputFocused ? '0 0 0 3px rgba(139, 126, 255, 0.10), 0 8px 24px rgba(0,0,0,0.06)' : '0 8px 24px rgba(0,0,0,0.06)', transition: 'border-color 0.18s ease, box-shadow 0.18s ease' }}>
+                        <label title="Attach media" style={{ color: '#64748B', fontWeight: '300', fontSize: '18px', marginRight: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif" onChange={handleDocAttachChange} style={{ display: 'none' }} />
+                          +
+                        </label>
+                        <div style={{ display: 'flex', flexDirection: 'column', marginRight: '12px' }}>
+                          {docAttachmentFile && (
+                            <div style={{ fontSize: '11px', color: '#475569', background: '#FFF', padding: '6px 8px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>{docAttachmentFile.name}</div>
+                          )}
+                        </div>
                         <input type="text" value={docMsgInput} onChange={e=>setDocMsgInput(e.target.value)} onFocus={() => setDocInputFocused(true)} onBlur={() => setDocInputFocused(false)} disabled={docChatDisabled || docSending} placeholder={docChatDisabled ? 'Chat disabled' : 'Type a secure message...'} style={{flex: 1, padding: '10px 0', border: 'none', background: 'transparent', outline: 'none', boxShadow: 'none', fontSize: '14px', lineHeight: '1.5', color: '#0F172A', caretColor: '#8B7EFF', borderRadius: '12px'}} />
-                        <button disabled={docChatDisabled || docSending || !activeDocChat || !docMsgInput.trim()} type="submit" style={{ marginLeft: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '42px', height: '42px', borderRadius: '50%', background: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? '#E2E8F0' : '#8B7EFF', color: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? '#94A3B8' : '#FFF', border: 'none', cursor: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? 'default' : 'pointer', fontWeight: '700', fontSize: '11px', transition: 'all 0.2s', boxShadow: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? 'none' : '0 4px 12px rgba(139, 126, 255, 0.3)', flexShrink: 0 }}>
-                          {docSending ? '…' : (
+                        <button disabled={docChatDisabled || docSending || !activeDocChat || !docMsgInput.trim()} type="submit" style={{ marginLeft: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '42px', height: '42px', borderRadius: '50%', background: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? '#E2E8F0' : '#8B7EFF', color: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? '#94A3B8' : '#FFF', border: 'none', cursor: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? 'default' : 'pointer', fontWeight: '700', fontSize: '11px', transition: 'all 0.2s', boxShadow: docChatDisabled || !activeDocChat || !docMsgInput.trim() ? 'none' : '0 4px 12px rgba(139, 126, 255, 0.3)' }}>
+                          {docSending ? '...' : (
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
                           )}
                         </button>

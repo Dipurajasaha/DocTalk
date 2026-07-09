@@ -10,8 +10,6 @@ export const authApi = {
   signupDoctor: (doctorId, name, password, extra = {}) => apiClient.post('/api/auth/doctor/signup', { doctor_id: doctorId, name, password, ...extra }, { retries: 0 }),
   acceptAdminInvite: (inviteToken, adminId, name, password, extra = {}) => apiClient.post('/api/auth/admin/invite-accept', { invite_token: inviteToken, admin_id: adminId, name, password, ...extra }, { retries: 0 }),
   me: (token) => apiClient.get('/api/me', { auth: true, token, retries: 0 }),
-  forgotPassword: (email, role) => apiClient.post('/api/auth/forgot-password', { email, role }, { retries: 0 }),
-  resetPassword: (token, newPassword, role) => apiClient.post('/api/auth/reset-password', { token, new_password: newPassword, role }, { retries: 0 }),
 };
 
 export const patientApi = {
@@ -90,9 +88,35 @@ export const hospitalApi = {
   updateProfile: (data) => apiClient.put('/api/hospital/profile', data, { retries: 0, auth: true }),
 };
 
+export const prescriptionApi = {
+  issue: (data) => apiClient.post('/api/prescriptions', data, { retries: 0, auth: true }),
+  listMine: () => apiClient.get('/api/prescriptions/mine', { retries: 1, auth: true }),
+  listIssued: (patientUsername = '') => {
+    const query = patientUsername ? `?patient_username=${encodeURIComponent(patientUsername)}` : '';
+    return apiClient.get(`/api/prescriptions/issued${query}`, { retries: 1, auth: true });
+  },
+  get: (id) => apiClient.get(`/api/prescriptions/${encodeURIComponent(id)}`, { retries: 1, auth: true }),
+  revoke: (id, revokedReason) => apiClient.post(`/api/prescriptions/${encodeURIComponent(id)}/revoke`, { revokedReason }, { retries: 0, auth: true }),
+  supersede: (id, data) => apiClient.post(`/api/prescriptions/${encodeURIComponent(id)}/supersede`, data, { retries: 0, auth: true }),
+  getSignatureStatus: () => apiClient.get('/api/prescriptions/signature/status', { retries: 1, auth: true }),
+  saveSignature: (signatureImageBase64) => apiClient.post('/api/prescriptions/signature', { signatureImageBase64 }, { retries: 0, auth: true }),
+  verifyByQrToken: (qrToken) => apiClient.get(`/api/prescriptions/verify/${encodeURIComponent(qrToken)}`, { retries: 1 }),
+  pdfUrl: (id) => `/api/prescriptions/${encodeURIComponent(id)}/pdf`,
+  fetchPdfBlob: async (id) => {
+    const token = localStorage.getItem('doctalk_token');
+    const response = await fetch(`/api/prescriptions/${encodeURIComponent(id)}/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error(`Failed to load PDF (${response.status})`);
+    return response.blob();
+  },
+};
+
 export const doctorApi = {
   createSlots: (slots) => apiClient.post('/api/appointments/slots', slots, { retries: 0, auth: true }),
   getSlots: (doctorId) => apiClient.get(`/api/appointments/slots/${encodeURIComponent(doctorId)}`, { retries: 1, auth: true }),
+  listConsultations: () => apiClient.get('/api/chat/consultations', { retries: 1, auth: true }),
+  getPatientProfile: (patientUsername) => apiClient.get(`/api/doctor/patients/${encodeURIComponent(patientUsername)}`, { retries: 1, auth: true }),
   respondToAppointment: (appointmentId, body) => apiClient.put(`/api/appointments/${encodeURIComponent(appointmentId)}/action`, body, { retries: 0, auth: true }),
   cancelAppointment: (appointmentId) => apiClient.patch(`/api/appointments/${encodeURIComponent(appointmentId)}/cancel`, {}, { retries: 0, auth: true }),
   dashboardData: async (doctorId) => {
@@ -145,28 +169,8 @@ export const doctorApi = {
   getCopilotForConsultation: (consultationId) => apiClient.get(`/api/doctor/copilot/consultations/${encodeURIComponent(consultationId)}`, { retries: 1, auth: true }),
 };
 
-export const paymentApi = {
-  createOrder: (amount, description, appointmentId = null) =>
-    apiClient.post('/api/payments/create-order', { amount, description, appointment_id: appointmentId }, { retries: 0, auth: true }),
-  verifyPayment: (razorpayOrderId, razorpayPaymentId, razorpaySignature) =>
-    apiClient.post('/api/payments/verify', {
-      razorpay_order_id: razorpayOrderId,
-      razorpay_payment_id: razorpayPaymentId,
-      razorpay_signature: razorpaySignature,
-    }, { retries: 0, auth: true }),
-  listMyPayments: () => apiClient.get('/api/payments/my-payments', { retries: 1, auth: true }),
-};
-
-export const medicalNewsApi = {
-  getFeed: (limit = 20, category = null) => {
-    const params = new URLSearchParams({ limit });
-    if (category) params.set('category', category);
-    return apiClient.get(`/api/medical-news/feed?${params}`);
-  },
-  refresh: () => apiClient.post('/api/medical-news/refresh', {}),
-};
-
 export const adminApi = {
+  login: (adminId, password, mfaCode = '') => authApi.loginAdmin(adminId, password, mfaCode),
   acceptInvite: (data) => authApi.acceptAdminInvite(data.invite_token || data.inviteToken, data.admin_id || data.adminId, data.name, data.password, data),
   dashboard: () => apiClient.get('/api/admin/dashboard', { retries: 1, auth: true }),
   getProfile: () => apiClient.get('/api/admin/profile', { retries: 1, auth: true }),

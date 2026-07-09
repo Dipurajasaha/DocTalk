@@ -95,40 +95,14 @@ function FormField({ label, name, type = 'text', placeholder = '', required = fa
 }
 
 export default function Login() {
-  const [view, setView] = useState(() => {
-    // Support landing on /login?view=reset-password&token=...&role=...
-    try {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('token') && params.get('role')) return 'reset';
-    } catch (_) {}
-    return 'login';
-  });
-  const [category, setCategory] = useState(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const role = params.get('role');
-      if (role === 'doctor' || role === 'admin') return role;
-    } catch (_) {}
-    return 'patient';
-  });
+  const [view, setView] = useState('login');       // 'login' | 'register' | 'forgot'
+  const [category, setCategory] = useState('patient');
   const [errorMsg, setErrorMsg] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
   const [pwValue, setPwValue] = useState('');
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotSent, setForgotSent] = useState(false);
-  const [forgotLoading, setForgotLoading] = useState(false);
-  const [devResetUrl, setDevResetUrl] = useState(null);
-  // Reset-password view state
-  const [resetToken] = useState(() => {
-    try { return new URLSearchParams(window.location.search).get('token') || ''; } catch (_) { return ''; }
-  });
-  const [resetRole] = useState(() => {
-    try { return new URLSearchParams(window.location.search).get('role') || 'patient'; } catch (_) { return 'patient'; }
-  });
-  const [resetNewPw, setResetNewPw] = useState('');
-  const [resetConfirmPw, setResetConfirmPw] = useState('');
-  const [resetLoading, setResetLoading] = useState(false);
   const navigate = useNavigate();
   const { login } = useSession();
 
@@ -279,54 +253,12 @@ export default function Login() {
     e.preventDefault();
     setErrorMsg(null);
     if (!isValidEmail(forgotEmail)) { setErrorMsg('Please enter a valid email address.'); return; }
-    setForgotLoading(true);
+    // In a real app this would call an API endpoint. For now we simulate it.
     try {
-      const data = await authApi.forgotPassword(forgotEmail, category);
+      // await authApi.forgotPassword(forgotEmail, category);
       setForgotSent(true);
-      if (data?.dev_reset_url) {
-        setDevResetUrl(data.dev_reset_url);
-      }
     } catch (err) {
-      // Still show "sent" to prevent enumeration, but surface real connection errors
-      if (err?.status >= 500 || err?.message?.includes('connection')) {
-        setErrorMsg(err?.message || 'Failed to send reset email. Please try again.');
-      } else {
-        setForgotSent(true); // Anti-enumeration: always show success on 4xx
-      }
-    } finally {
-      setForgotLoading(false);
-    }
-  };
-
-  // ─── Reset Password (from email link) ────────────────────────────────────
-  const handleResetSubmit = async (e) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    if (!isValidPassword(resetNewPw)) {
-      setErrorMsg('Password must be 8+ chars with at least 1 uppercase and 1 number.');
-      return;
-    }
-    if (resetNewPw !== resetConfirmPw) {
-      setErrorMsg('Passwords do not match.');
-      return;
-    }
-    if (!resetToken) {
-      setErrorMsg('Invalid or missing reset token. Please request a new reset link.');
-      return;
-    }
-    setResetLoading(true);
-    try {
-      const data = await authApi.resetPassword(resetToken, resetNewPw, resetRole);
-      if (data?.success) {
-        setSuccessMsg('Password reset successful! You can now log in.');
-        setTimeout(() => { setView('login'); setSuccessMsg(null); }, 2500);
-      } else {
-        setErrorMsg(data?.detail || data?.message || 'Password reset failed. The link may have expired.');
-      }
-    } catch (err) {
-      setErrorMsg(err?.message || 'Password reset failed. The link may have expired.');
-    } finally {
-      setResetLoading(false);
+      setErrorMsg(err?.message || 'Failed to send reset email.');
     }
   };
 
@@ -336,7 +268,7 @@ export default function Login() {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
         Back to Home
       </button>
-      <div className={`container ${['login', 'forgot', 'reset'].includes(view) ? 'login-view' : 'register-view'}`}>
+      <div className={`container ${view === 'login' || view === 'forgot' ? 'login-view' : 'register-view'}`}>
         <div className="logo-container">
           <div className="text-logo">DocTalk<span className="logo-sup">AI</span></div>
         </div>
@@ -363,24 +295,17 @@ export default function Login() {
               <div style={{ textAlign:'center', padding:'20px' }}>
                 <div style={{ fontSize:'40px', marginBottom:'12px' }}>📧</div>
                 <p style={{ color:'#2e7d32', fontWeight:'600', marginBottom:'8px' }}>Reset link sent!</p>
-                <p style={{ color:'#6B6B6B', fontSize:'13px', marginBottom:'16px' }}>
+                <p style={{ color:'#6B6B6B', fontSize:'13px', marginBottom:'20px' }}>
                   Check your inbox at <strong>{forgotEmail}</strong> for the password reset link.
                 </p>
-                {devResetUrl && (
-                  <div style={{ background:'#fff3cd', border:'1px solid #ffc107', borderRadius:'8px', padding:'12px', marginBottom:'16px', textAlign:'left' }}>
-                    <div style={{ fontSize:'11px', fontWeight:'700', color:'#856404', marginBottom:'6px' }}>🔧 Dev Mode — SMTP not configured</div>
-                    <div style={{ fontSize:'11px', color:'#533f03', marginBottom:'8px' }}>Use this link to test the reset flow:</div>
-                    <a href={devResetUrl} style={{ fontSize:'11px', color:'#007bff', wordBreak:'break-all' }}>{devResetUrl}</a>
-                  </div>
-                )}
-                <button className="action-btn" style={{ width:'100%' }} onClick={() => { setView('login'); setForgotSent(false); setForgotEmail(''); setDevResetUrl(null); }}>
+                <button className="action-btn" style={{ width:'100%' }} onClick={() => { setView('login'); setForgotSent(false); setForgotEmail(''); }}>
                   Back to Login
                 </button>
               </div>
             ) : (
               <form onSubmit={handleForgotSubmit} className="single-column-form">
                 <div className="category-btns" style={{ marginBottom:'16px' }}>
-                  {['patient','doctor'].map(c => (
+                  {['patient','doctor','admin'].map(c => (
                     <button key={c} type="button" className={`toggle-tab ${category === c ? 'active' : ''}`} onClick={() => setCategory(c)}>
                       {c.charAt(0).toUpperCase() + c.slice(1)}
                     </button>
@@ -396,8 +321,8 @@ export default function Login() {
                     required
                   />
                 </div>
-                <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'10px' }} disabled={forgotLoading}>
-                  {forgotLoading ? 'Sending…' : 'Send Reset Link'}
+                <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'10px' }}>
+                  Send Reset Link
                 </button>
                 <button type="button" onClick={() => { setView('login'); setErrorMsg(null); }}
                   style={{ background:'none', border:'none', color:'#8B7EFF', cursor:'pointer', fontSize:'13px', fontWeight:'600', textAlign:'center', marginTop:'4px' }}>
@@ -408,51 +333,8 @@ export default function Login() {
           </div>
         )}
 
-        {/* ── Reset Password View (from email link) ── */}
-        {view === 'reset' && (
-          <div className="fade-in">
-            <h3 style={{ textAlign:'center', marginBottom:'6px', color:'#2D3748', fontSize:'16px' }}>Set New Password</h3>
-            <p style={{ textAlign:'center', fontSize:'13px', color:'#6B6B6B', marginBottom:'20px' }}>
-              Choose a strong new password for your <strong>{resetRole}</strong> account.
-            </p>
-            <form onSubmit={handleResetSubmit} className="single-column-form">
-              <div className="input-field">
-                <label>New Password<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
-                <input
-                  type="password"
-                  placeholder="Min 8 chars, 1 uppercase, 1 number"
-                  value={resetNewPw}
-                  onChange={e => setResetNewPw(e.target.value)}
-                  required
-                />
-                <PasswordStrength value={resetNewPw} />
-              </div>
-              <div className="input-field">
-                <label>Confirm Password<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
-                <input
-                  type="password"
-                  placeholder="Re-enter your new password"
-                  value={resetConfirmPw}
-                  onChange={e => setResetConfirmPw(e.target.value)}
-                  required
-                />
-                {resetConfirmPw && resetNewPw !== resetConfirmPw && (
-                  <span style={{ color:'#c62828', fontSize:'11px', marginTop:'3px', display:'block' }}>Passwords do not match</span>
-                )}
-              </div>
-              <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'10px' }} disabled={resetLoading}>
-                {resetLoading ? 'Resetting…' : 'Reset Password'}
-              </button>
-              <button type="button" onClick={() => { setView('login'); setErrorMsg(null); }}
-                style={{ background:'none', border:'none', color:'#8B7EFF', cursor:'pointer', fontSize:'13px', fontWeight:'600', textAlign:'center', marginTop:'4px' }}>
-                ← Back to Login
-              </button>
-            </form>
-          </div>
-        )}
-
         {/* ── Login / Register View ── */}
-        {view !== 'forgot' && view !== 'reset' && (
+        {view !== 'forgot' && (
           <>
             <div className="btn-group">
               <button className={`toggle-tab ${view === 'login' ? 'active' : ''}`} onClick={() => { setView('login'); setErrorMsg(null); setFieldErrors({}); }}>Login</button>

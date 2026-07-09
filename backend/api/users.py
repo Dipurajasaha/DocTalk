@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ..core.security import CurrentUser, get_current_user
 from ..schemas.user_schemas import CurrentUserProfileResponse, UserProfileUpdateRequest
@@ -45,3 +45,26 @@ async def list_doctors(
 ) -> list[CurrentUserProfileResponse]:
     doctors = await user_service.list_doctors(specialization=specialization, category=category)
     return [CurrentUserProfileResponse.model_validate(item) for item in doctors]
+
+
+@doctor_router.get("/patients/{patient_username}", response_model=CurrentUserProfileResponse)
+async def get_patient_profile_for_doctor(
+    patient_username: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    user_service: UserService = Depends(get_user_service),
+) -> CurrentUserProfileResponse:
+    if current_user.role != "doctor":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only doctors can access patient profiles")
+
+    consultation = await user_service.client.consultation.find_first(
+        where={"doctorId": current_user.user_id, "patientUsername": patient_username}
+    )
+    if consultation is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view patients you have consulted",
+        )
+
+    return CurrentUserProfileResponse.model_validate(
+        await user_service.get_patient_profile(patient_username)
+    )

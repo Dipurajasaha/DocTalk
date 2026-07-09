@@ -6,6 +6,10 @@ import DoctorDashboard from './pages/DoctorDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import ReportView from './pages/ReportView';
 import PrescriptionView from './pages/PrescriptionView';
+import DoctorSignatureSetup from './pages/DoctorSignatureSetup';
+import DoctorPrescriptionsList from './pages/DoctorPrescriptionsList';
+import PrescriptionComposer from './pages/PrescriptionComposer';
+import PublicVerify from './pages/PublicVerify';
 import { useSession } from './contexts/SessionContext';
 import { useEffect } from 'react';
 import { useNotifications } from './contexts';
@@ -81,12 +85,17 @@ function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/reset-password" element={<Login />} />
         <Route path="/patient/dashboard" element={<RequirePatient loaded={loaded} session={session}><PatientDashboard /></RequirePatient>} />
         <Route path="/doctor/dashboard" element={<RequireDoctor loaded={loaded} session={session}><DoctorDashboard /></RequireDoctor>} />
         <Route path="/admin/dashboard" element={<RequireAdmin loaded={loaded} session={session}><AdminDashboard /></RequireAdmin>} />
         <Route path="/reports/:id" element={<RequireAuth loaded={loaded} session={session}><ReportView /></RequireAuth>} />
         <Route path="/prescriptions/:id" element={<RequireAuth loaded={loaded} session={session}><PrescriptionView /></RequireAuth>} />
+        <Route path="/doctor/signature" element={<RequireDoctor loaded={loaded} session={session}><DoctorSignatureSetup /></RequireDoctor>} />
+        <Route path="/doctor/prescriptions" element={<RequireDoctor loaded={loaded} session={session}><DoctorPrescriptionsList /></RequireDoctor>} />
+        <Route path="/doctor/prescriptions/new" element={<RequireDoctor loaded={loaded} session={session}><PrescriptionComposer /></RequireDoctor>} />
+        <Route path="/doctor/prescriptions/new/:patientUsername" element={<RequireDoctor loaded={loaded} session={session}><PrescriptionComposer /></RequireDoctor>} />
+        <Route path="/patient/prescriptions" element={<RequirePatient loaded={loaded} session={session}><Navigate to="/patient/dashboard?panel=documents" replace /></RequirePatient>} />
+        <Route path="/verify/:qrToken" element={<PublicVerify />} />
       </Routes>
     </BrowserRouter>
   );

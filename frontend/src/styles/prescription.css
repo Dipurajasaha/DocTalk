@@ -1,0 +1,122 @@
+.rx-page { max-width: 760px; margin: 0 auto; padding: 32px 24px; font-family: var(--font-primary); background: #F0F2F5; min-height: 100vh; box-sizing: border-box; }
+
+.rx-card {
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.04);
+  border-radius: 16px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.08);
+  padding: 20px 24px;
+  margin-bottom: 20px;
+}
+
+.rx-h1 {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin: 0 0 6px;
+  background: linear-gradient(135deg, #8b7eff, #6c5ce7);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.rx-sub { font-size: 14px; color: #6b7280; margin: 0 0 24px; }
+.rx-label { display: block; font-size: 12px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase; color: #6C5CE7; margin-bottom: 6px; }
+
+.rx-input, .rx-textarea, .rx-select {
+  width: 100%; padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px;
+  font-size: 14px; font-family: var(--font-primary); box-sizing: border-box; background: #fdfdff;
+  transition: border-color .15s;
+}
+.rx-input:focus, .rx-textarea:focus, .rx-select:focus { outline: none; border-color: #6C5CE7; }
+.rx-textarea { resize: vertical; min-height: 60px; }
+
+.rx-row { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 16px; }
+.rx-med-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 8px; align-items: end; margin-bottom: 10px; }
+
+.rx-patient-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.rx-patient-field {
+  padding: 12px 14px;
+  border: 1px solid #edf0f7;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fbfbff 0%, #f9fafc 100%);
+}
+
+.rx-field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .35px;
+  text-transform: uppercase;
+  color: #8b7eff;
+}
+
+.rx-field-value {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  word-break: break-word;
+}
+
+.rx-muted {
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.rx-btn-primary {
+  background: #6C5CE7; color: #fff; border: none; padding: 11px 22px; border-radius: 9999px;
+  font-weight: 600; font-size: 14px; cursor: pointer; font-family: var(--font-primary); transition: .2s;
+}
+.rx-btn-primary:hover:not(:disabled) { background: #5b4bd6; }
+.rx-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.rx-btn-secondary {
+  background: transparent; color: #6B6B6B; border: 1px solid #e2e8f0; padding: 10px 20px;
+  border-radius: 9999px; font-weight: 600; font-size: 14px; cursor: pointer; font-family: var(--font-primary); transition: .2s;
+}
+.rx-btn-secondary:hover { background: #F8F8F8; color: #0C0C0C; }
+
+.rx-btn-danger {
+  background: transparent; color: #c0392b; border: 1px solid #f0c9c2; padding: 8px 16px;
+  border-radius: 9999px; font-weight: 600; font-size: 13px; cursor: pointer; transition: .2s;
+}
+.rx-btn-danger:hover { background: #fdecea; }
+
+.rx-btn-ghost {
+  background: transparent; color: #6C5CE7; border: none; padding: 6px 10px;
+  border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px; transition: .2s;
+}
+.rx-btn-ghost:hover { background: rgba(108, 92, 231, 0.08); }
+
+.rx-badge {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700;
+  letter-spacing: .3px; text-transform: uppercase; padding: 6px 12px; border-radius: 9999px;
+}
+.rx-badge-active { background: #dcfce7; color: #059669; }
+.rx-badge-revoked { background: #fdecea; color: #c0392b; }
+.rx-badge-superseded { background: #f3e8ff; color: #6C5CE7; }
+.rx-badge-verified { background: #dcfce7; color: #059669; }
+.rx-badge-invalid { background: #fdecea; color: #c0392b; }
+
+.rx-list-item { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px solid #f0f2f5; }
+.rx-list-item:last-child { border-bottom: none; }
+.rx-empty { text-align: center; color: #6b7280; padding: 40px 20px; font-size: 14px; }
+
+@media (max-width: 720px) {
+  .rx-patient-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 540px) {
+  .rx-patient-grid {
+    grid-template-columns: 1fr;
+  }
+}
