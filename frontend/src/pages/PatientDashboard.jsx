@@ -96,6 +96,23 @@ const getFolderDisplayName = (value) => {
   return segments[segments.length - 1] || 'Folder';
 };
 
+const getAvatarFallback = (name = 'Patient') => {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#8B7EFF"/>
+          <stop offset="100%" stop-color="#6C5CE7"/>
+        </linearGradient>
+      </defs>
+      <rect width="160" height="160" rx="32" fill="url(#bg)"/>
+      <circle cx="80" cy="62" r="28" fill="rgba(255,255,255,0.9)"/>
+      <path d="M34 138c8-22 25-34 46-34s38 12 46 34" fill="rgba(255,255,255,0.9)"/>
+    </svg>
+  `.trim();
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+};
+
 export default function PatientDashboard() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -1320,7 +1337,17 @@ export default function PatientDashboard() {
       <div className="profile-container" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', boxSizing: 'border-box' }}>
         {/* Sidebar */}
         <div className="sidebar patient-sidebar-override">
-          <img src={user.profile_pic} alt="Profile" className="patient-sidebar-img" />
+          <img
+            src={user.profile_pic || getAvatarFallback(user.name || user.display_name || 'Patient')}
+            alt="Profile"
+            className="patient-sidebar-img"
+            onError={(e) => {
+              const fallback = getAvatarFallback(user.name || user.display_name || 'Patient');
+              if (e.currentTarget.src !== fallback) {
+                e.currentTarget.src = fallback;
+              }
+            }}
+          />
           <div className="patient-sidebar-name">{user.name}</div>
 
           <div className="patient-nav">
