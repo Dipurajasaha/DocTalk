@@ -56,6 +56,26 @@ async def _analyze_text_document(text: str, *, language: str, title: str) -> dic
         temperature=0.2,
         max_output_tokens=1024,
     )
+    if not parsed:
+        snippet = " ".join(str(text or "").split())
+        snippet = snippet[:280] + ("..." if len(snippet) > 280 else "")
+        summary = snippet or "No structured analysis could be generated from this document."
+        return {
+            "success": True,
+            "reply": {
+                "title": title,
+                "description": summary,
+                "key_points": [snippet] if snippet else [],
+                "key_findings": [snippet] if snippet else [],
+                "observations": [snippet] if snippet else [],
+                "recommendations": [],
+                "notes": [],
+                "risks": [],
+                "summary": summary,
+                "findings": summary,
+                "warnings": [],
+            },
+        }
     summary = str(parsed.get("summary") or parsed.get("analysis") or "").strip()
     findings = str(parsed.get("findings") or summary or "").strip()
     recommendations = _listify_text(parsed.get("recommendations"))
@@ -78,7 +98,7 @@ async def _analyze_text_document(text: str, *, language: str, title: str) -> dic
             "summary": summary or findings,
             "findings": findings,
             "warnings": warnings,
-            "raw": parsed,
+            "raw": parsed if parsed else None,
         },
     }
 

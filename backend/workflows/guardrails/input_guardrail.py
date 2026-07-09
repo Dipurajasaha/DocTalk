@@ -79,7 +79,14 @@ class TFIDFValidator:
         
         self.documents = {
             "CORE_CONVERSATION": "hello hi greetings good morning afternoon evening thank thanks bye goodbye",
-            "CORE_MEDICAL_KNOWLEDGE": "medical knowledge health queries query disease diseases symptom symptoms medicine medicines treatment treatments prescription prescriptions diabetes metformin paracetamol advice doctor physician hospital clinic surgery blood report reports scan scans mri xray x-ray lab result results"
+            "CORE_MEDICAL_KNOWLEDGE": (
+                "medical knowledge health queries query disease diseases symptom symptoms "
+                "medicine medicines treatment treatments prescription prescriptions "
+                "diabetes anemia fever cough cold headache nausea dizziness pain fatigue "
+                "blood report reports scan scans mri xray x-ray lab result results "
+                "allergy allergies medication medications doctor physician hospital clinic "
+                "surgery lab test tests cbc hemoglobin platelet pcv hematocrit rbc wbc"
+            )
         }
         
         # Dynamically inject capabilities from the platform's registry
@@ -130,6 +137,18 @@ class TFIDFValidator:
         q_tokens = self._tokenize(text)
         if not q_tokens:
             return "UNSUPPORTED"
+
+        medical_hint_terms = {
+            "anemia", "fever", "cough", "cold", "headache", "nausea", "dizziness", "pain",
+            "fatigue", "allergy", "allergies", "medication", "medications", "prescription",
+            "prescriptions", "blood", "report", "reports", "cbc", "hemoglobin", "platelet",
+            "pcv", "hematocrit", "rbc", "wbc", "xray", "x-ray", "scan", "scans", "symptom",
+            "symptoms", "treatment", "treatments", "doctor", "clinic", "hospital", "medicine",
+            "medicines", "diabetes",
+        }
+
+        if any(term in q_tokens for term in medical_hint_terms):
+            return "MEDICAL"
             
         q_vec = self._vectorize(q_tokens)
         

@@ -19,7 +19,9 @@ export default function StructuredReply({ data }) {
   const keyPoints = toArray(data.key_points).map((item) => toText(item)).filter(Boolean);
   const observations = toArray(data.observations).map((item) => toText(item)).filter(Boolean);
   const recommendations = toArray(data.recommendations).map((item) => toText(item)).filter(Boolean);
-  const fallbackJson = JSON.stringify(data?.raw ?? data, null, 2);
+  const rawData = data?.raw;
+  const hasRawData = rawData && (typeof rawData !== 'object' || Object.keys(rawData).length > 0);
+  const fallbackJson = hasRawData ? JSON.stringify(rawData, null, 2) : '';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -66,10 +68,12 @@ export default function StructuredReply({ data }) {
         </div>
       )}
 
-      <details style={{ marginTop: '4px' }}>
-        <summary style={{ cursor: 'pointer', fontSize: '12px', color: '#475569' }}>Raw JSON</summary>
-        <pre style={{ whiteSpace: 'pre-wrap', margin: '8px 0 0', color: '#0f172a', fontSize: '12px' }}>{fallbackJson}</pre>
-      </details>
+      {hasRawData && (
+        <details style={{ marginTop: '4px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '12px', color: '#475569' }}>Raw JSON</summary>
+          <pre style={{ whiteSpace: 'pre-wrap', margin: '8px 0 0', color: '#0f172a', fontSize: '12px' }}>{fallbackJson}</pre>
+        </details>
+      )}
     </div>
   );
 }
