@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# Environments
+venv/
+env/
+.venv/
+backend/.venv/
+.env
+
+# Node
+node_modules/
+frontend/dist/
+
+# Editor/OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Ignore agent folders and artifacts
+/agent/
+/agents/
+/.github/agents/
+.claude/
+# Local data/uploads used during development and tests
+data/
+data/**
+
+script.py
+workflow_debug_dump.txt
+
+CONTEXT.md
+CLAUDE.md
+workflow.md

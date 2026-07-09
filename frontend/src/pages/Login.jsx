@@ -1,0 +1,709 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useSession } from '../contexts/SessionContext';
+import { authApi } from '../lib/api';
+import '../styles/login.css';
+
+// ─── Validation helpers ───────────────────────────────────────────────────────
+const BLOOD_GROUPS = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
+const SPECIALIZATIONS = [
+  'General Medicine','Cardiology','Neurology','Orthopedics','Dermatology',
+  'Pediatrics','Gynecology','Oncology','Ophthalmology','ENT','Psychiatry',
+  'Radiology','Anesthesiology','Urology','Endocrinology','Nephrology',
+  'Gastroenterology','Pulmonology','Rheumatology','Other',
+];
+const NEWS_CATEGORIES = ['general','announcement','alert','health-tip','research'];
+
+const isValidUsername = (v) => /^[a-zA-Z0-9_]{4,20}$/.test(v);
+const isValidPassword = (v) => v.length >= 8 && /[A-Z]/.test(v) && /[0-9]/.test(v);
+const isValidPhone    = (v) => /^[+]?[\d\s\-()]{7,15}$/.test(v.trim());
+const isValidEmail    = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
+const isValidRegNo    = (v) => /^[A-Z0-9\-\/]{3,20}$/i.test(v.trim());
+const isValidName     = (v) => v.trim().length >= 2 && !/[<>{}]/.test(v);
+const isAdultDob      = (dob) => {
+  if (!dob) return false;
+  const birth = new Date(dob);
+  const today = new Date();
+  const age = today.getFullYear() - birth.getFullYear() -
+    (today < new Date(today.getFullYear(), birth.getMonth(), birth.getDate()) ? 1 : 0);
+  return age >= 0 && age <= 120;
+};
+const isDoctorAge = (dob) => {
+  if (!dob) return false;
+  const birth = new Date(dob);
+  const today = new Date();
+  const age = today.getFullYear() - birth.getFullYear() -
+    (today < new Date(today.getFullYear(), birth.getMonth(), birth.getDate()) ? 1 : 0);
+  return age >= 22 && age <= 80;
+};
+
+function FieldError({ msg }) {
+  if (!msg) return null;
+  return <span style={{ color:'#c62828', fontSize:'11px', marginTop:'3px', display:'block' }}>{msg}</span>;
+}
+
+function PasswordStrength({ value }) {
+  if (!value) return null;
+  const checks = [
+    { label: '8+ chars',     ok: value.length >= 8 },
+    { label: 'Uppercase',    ok: /[A-Z]/.test(value) },
+    { label: 'Number',       ok: /[0-9]/.test(value) },
+    { label: 'Special char', ok: /[^a-zA-Z0-9]/.test(value) },
+  ];
+  const score = checks.filter(c => c.ok).length;
+  const color = score <= 1 ? '#ef4444' : score === 2 ? '#f97316' : score === 3 ? '#eab308' : '#22c55e';
+  const label = ['Weak','Fair','Good','Strong'][score - 1] || 'Weak';
+  return (
+    <div style={{ marginTop: '6px' }}>
+      <div style={{ display:'flex', gap:'4px', marginBottom:'4px' }}>
+        {[1,2,3,4].map(i => (
+          <div key={i} style={{ flex:1, height:'3px', borderRadius:'2px', background: i <= score ? color : '#e5e7eb', transition:'background 0.2s' }} />
+        ))}
+      </div>
+      <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
+        {checks.map(c => (
+          <span key={c.label} style={{ fontSize:'10px', color: c.ok ? '#22c55e' : '#9ca3af' }}>
+            {c.ok ? '✓' : '○'} {c.label}
+          </span>
+        ))}
+        <span style={{ fontSize:'10px', color, fontWeight:'600', marginLeft:'auto' }}>{label}</span>
+      </div>
+    </div>
+  );
+}
+
+// Stable component defined outside Login to prevent unmount/remount on re-renders.
+// Pass fieldErrors and clearFE as props from the parent.
+function FormField({ label, name, type = 'text', placeholder = '', required = false, children, hint, fieldErrors = {}, clearFE }) {
+  return (
+    <div className="input-field">
+      <label>{label}{required && <span style={{ color: '#ef4444', marginLeft: '2px' }}>*</span>}</label>
+      {children || (
+        <input
+          type={type}
+          name={name}
+          placeholder={placeholder}
+          required={required}
+          onChange={() => clearFE && clearFE(name)}
+          style={fieldErrors[name] ? { borderColor: '#ef4444' } : {}}
+        />
+      )}
+      {hint && !fieldErrors[name] && <span style={{ fontSize: '11px', color: '#9ca3af', marginTop: '3px', display: 'block' }}>{hint}</span>}
+      <FieldError msg={fieldErrors[name]} />
+    </div>
+  );
+}
+
+export default function Login() {
+  const [view, setView] = useState(() => {
+    // Support landing on /login?view=reset-password&token=...&role=...
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('token') && params.get('role')) return 'reset';
+    } catch (_) {}
+    return 'login';
+  });
+  const [category, setCategory] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const role = params.get('role');
+      if (role === 'doctor' || role === 'admin') return role;
+    } catch (_) {}
+    return 'patient';
+  });
+  const [errorMsg, setErrorMsg] = useState(null);
+  const [successMsg, setSuccessMsg] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [pwValue, setPwValue] = useState('');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [devResetUrl, setDevResetUrl] = useState(null);
+  // Reset-password view state
+  const [resetToken] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('token') || ''; } catch (_) { return ''; }
+  });
+  const [resetRole] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('role') || 'patient'; } catch (_) { return 'patient'; }
+  });
+  const [resetNewPw, setResetNewPw] = useState('');
+  const [resetConfirmPw, setResetConfirmPw] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const navigate = useNavigate();
+  const { login } = useSession();
+
+  const setFE = (key, msg) => setFieldErrors(prev => ({ ...prev, [key]: msg }));
+  const clearFE = (key) => setFE(key, undefined);
+
+  // ─── Login ───────────────────────────────────────────────────────────────
+  const handleLoginSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    const fd = new FormData(e.target);
+    const username = fd.get('username').trim();
+    const password = fd.get('password');
+    const mfaCode = fd.get('mfa_code')?.trim() || '';
+    let errs = {};
+    if (!username) {
+      errs.lu = 'Username is required.';
+    } else if (!isValidUsername(username)) {
+      errs.lu = 'Username: 4\u201320 chars, letters/numbers/underscore only.';
+    }
+    if (!password) {
+      errs.lp = 'Password is required.';
+    } else if (!isValidPassword(password)) {
+      errs.lp = 'Password must be 8+ chars with at least 1 uppercase and 1 number.';
+    }
+    if (Object.keys(errs).length) { setFieldErrors(errs); return; }
+    setFieldErrors({});
+    try {
+      let data;
+      if (category === 'doctor') {
+        data = await authApi.loginDoctor(username, password);
+      } else if (category === 'admin') {
+        data = await authApi.loginAdmin(username, password, mfaCode);
+      } else {
+        data = await authApi.loginPatient(username, password);
+      }
+      if (data?.access_token) {
+        const token = data.access_token;
+        const uid = data.admin_id || data.hospital_id || data.user_id || username;
+        const sess = { role: data.role || category, user_id: uid };
+        try { localStorage.setItem('doctalk_token', token); localStorage.setItem('doctalk_session', JSON.stringify(sess)); } catch (_) {}
+        if (login) await login({ token, sessionHint: sess });
+        if (category === 'admin') navigate('/admin/dashboard');
+        else if (data.role === 'patient' || category === 'patient') navigate('/patient/dashboard');
+        else navigate('/doctor/dashboard');
+      } else {
+        setErrorMsg((data && (data.detail || data.error)) || 'Invalid credentials');
+      }
+    } catch (err) {
+      setErrorMsg(err?.message || 'Server connection error. Is the backend running?');
+    }
+  };
+
+  // ─── Register ────────────────────────────────────────────────────────────
+  const validateRegister = (fd, cat) => {
+    const errs = {};
+    const name     = fd.get('name')?.trim() || '';
+    const username = fd.get('username')?.trim() || '';
+    const password = fd.get('password') || '';
+    const dob      = fd.get('dob') || '';
+
+    if (!isValidName(name))     errs.name = 'Enter a real full name (2+ characters, no special chars).';
+    if (!isValidUsername(username)) errs.username = 'Username: 4\u201320 chars, letters/numbers/underscore only.';
+    if (!isValidPassword(password)) errs.password = 'Password must be 8+ chars with at least 1 uppercase and 1 number.';
+
+    if (cat === 'patient') {
+      if (!isAdultDob(dob)) errs.dob = 'Enter a valid date of birth.';
+      const blood = fd.get('blood_group')?.trim() || '';
+      if (!BLOOD_GROUPS.includes(blood)) errs.blood_group = 'Select a valid blood group (e.g. A+, O-, AB+).';
+      const mobile = fd.get('mobile')?.trim() || '';
+      if (!isValidPhone(mobile)) errs.mobile = 'Enter a valid mobile number.';
+      const address = fd.get('address')?.trim() || '';
+      if (address.length < 5) errs.address = 'Enter a valid address (5+ characters).';
+    }
+
+    if (cat === 'doctor') {
+      if (!isDoctorAge(dob)) errs.dob = 'Doctor must be between 22 and 80 years old.';
+      const regNo = fd.get('registration_number')?.trim() || '';
+      if (!isValidRegNo(regNo)) errs.registration_number = 'Registration number: 3\u201320 alphanumeric chars.';
+      const spec = fd.get('specialization')?.trim() || '';
+      if (!spec) errs.specialization = 'Specialization is required.';
+      const mobile = fd.get('mobile')?.trim() || '';
+      if (mobile && !isValidPhone(mobile)) errs.mobile = 'Enter a valid mobile number.';
+      const email = fd.get('email')?.trim() || '';
+      if (email && !isValidEmail(email)) errs.email = 'Enter a valid email address.';
+    }
+
+    if (cat === 'admin') {
+      const inviteToken = fd.get('invite_token')?.trim() || '';
+      if (!inviteToken) errs.invite_token = 'Invite token is required for admin access.';
+      const email = fd.get('email')?.trim() || '';
+      if (email && !isValidEmail(email)) errs.email = 'Enter a valid email address.';
+    }
+
+    return errs;
+  };
+
+  const handleRegisterSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    const fd = new FormData(e.target);
+    const errs = validateRegister(fd, category);
+    if (Object.keys(errs).length) { setFieldErrors(errs); return; }
+    setFieldErrors({});
+
+    try {
+      const username = fd.get('username').trim();
+      const name     = fd.get('name').trim();
+      const password = fd.get('password');
+      let data;
+
+      if (category === 'admin') {
+        const extraFields = {};
+        ['display_name','email','bio','profile_pic','invite_token'].forEach(k => {
+          const v = fd.get(k); if (v) extraFields[k] = v;
+        });
+        data = await authApi.acceptAdminInvite(extraFields.invite_token, username, name, password, extraFields);
+      } else if (category === 'patient') {
+        data = await authApi.signupPatient(username, name, password);
+      } else {
+        // Doctor registration: pass all extra fields
+        const extraFields = {};
+        ['specialization','registration_number','hospital_name','hospital_location','mobile','email','gender','bio','experience','address'].forEach(k => {
+          const v = fd.get(k); if (v) extraFields[k] = v;
+        });
+        data = await authApi.signupDoctor(username, name, password, extraFields);
+      }
+
+      if (data?.access_token) {
+        const token = data.access_token;
+        try { localStorage.setItem('doctalk_token', token); localStorage.setItem('doctalk_session', JSON.stringify({ role: data.role })); } catch (_) {}
+        if (login) await login({ token, sessionHint: { role: data.role, user_id: data.user_id || data.admin_id || data.hospital_id } });
+        setView('login'); setErrorMsg(null);
+        alert('Registration successful! You are logged in.');
+        if (category === 'admin') navigate('/admin/dashboard');
+        else if (data.role === 'patient') navigate('/patient/dashboard');
+        else navigate('/doctor/dashboard');
+      } else {
+        setErrorMsg((data && (data.detail || data.error)) || 'Registration failed');
+      }
+    } catch (err) {
+      setErrorMsg(err?.message || 'Server connection error.');
+    }
+  };
+
+  // ─── Forgot Password ──────────────────────────────────────────────────────
+  const handleForgotSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    if (!isValidEmail(forgotEmail)) { setErrorMsg('Please enter a valid email address.'); return; }
+    setForgotLoading(true);
+    try {
+      const data = await authApi.forgotPassword(forgotEmail, category);
+      setForgotSent(true);
+      if (data?.dev_reset_url) {
+        setDevResetUrl(data.dev_reset_url);
+      }
+    } catch (err) {
+      // Still show "sent" to prevent enumeration, but surface real connection errors
+      if (err?.status >= 500 || err?.message?.includes('connection')) {
+        setErrorMsg(err?.message || 'Failed to send reset email. Please try again.');
+      } else {
+        setForgotSent(true); // Anti-enumeration: always show success on 4xx
+      }
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  // ─── Reset Password (from email link) ────────────────────────────────────
+  const handleResetSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    if (!isValidPassword(resetNewPw)) {
+      setErrorMsg('Password must be 8+ chars with at least 1 uppercase and 1 number.');
+      return;
+    }
+    if (resetNewPw !== resetConfirmPw) {
+      setErrorMsg('Passwords do not match.');
+      return;
+    }
+    if (!resetToken) {
+      setErrorMsg('Invalid or missing reset token. Please request a new reset link.');
+      return;
+    }
+    setResetLoading(true);
+    try {
+      const data = await authApi.resetPassword(resetToken, resetNewPw, resetRole);
+      if (data?.success) {
+        setSuccessMsg('Password reset successful! You can now log in.');
+        setTimeout(() => { setView('login'); setSuccessMsg(null); }, 2500);
+      } else {
+        setErrorMsg(data?.detail || data?.message || 'Password reset failed. The link may have expired.');
+      }
+    } catch (err) {
+      setErrorMsg(err?.message || 'Password reset failed. The link may have expired.');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  return (
+    <div className="login-page">
+      <button className="back-home-btn" onClick={() => navigate('/')}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Back to Home
+      </button>
+      <div className={`container ${['login', 'forgot', 'reset'].includes(view) ? 'login-view' : 'register-view'}`}>
+        <div className="logo-container">
+          <div className="text-logo">DocTalk<span className="logo-sup">AI</span></div>
+        </div>
+
+        {errorMsg && (
+          <div style={{ width:'100%', maxWidth:'460px', margin:'0 auto 14px' }}>
+            <div className="flash-msg error">{errorMsg}</div>
+          </div>
+        )}
+        {successMsg && (
+          <div style={{ width:'100%', maxWidth:'460px', margin:'0 auto 14px' }}>
+            <div className="flash-msg" style={{ background:'#e8f5e9', border:'1px solid #a5d6a7', color:'#2e7d32' }}>{successMsg}</div>
+          </div>
+        )}
+
+        {/* ── Forgot Password View ── */}
+        {view === 'forgot' && (
+          <div className="fade-in">
+            <h3 style={{ textAlign:'center', marginBottom:'6px', color:'#2D3748', fontSize:'16px' }}>Reset Password</h3>
+            <p style={{ textAlign:'center', fontSize:'13px', color:'#6B6B6B', marginBottom:'20px' }}>
+              Enter your registered email. We'll send a reset link.
+            </p>
+            {forgotSent ? (
+              <div style={{ textAlign:'center', padding:'20px' }}>
+                <div style={{ fontSize:'40px', marginBottom:'12px' }}>📧</div>
+                <p style={{ color:'#2e7d32', fontWeight:'600', marginBottom:'8px' }}>Reset link sent!</p>
+                <p style={{ color:'#6B6B6B', fontSize:'13px', marginBottom:'16px' }}>
+                  Check your inbox at <strong>{forgotEmail}</strong> for the password reset link.
+                </p>
+                {devResetUrl && (
+                  <div style={{ background:'#fff3cd', border:'1px solid #ffc107', borderRadius:'8px', padding:'12px', marginBottom:'16px', textAlign:'left' }}>
+                    <div style={{ fontSize:'11px', fontWeight:'700', color:'#856404', marginBottom:'6px' }}>🔧 Dev Mode — SMTP not configured</div>
+                    <div style={{ fontSize:'11px', color:'#533f03', marginBottom:'8px' }}>Use this link to test the reset flow:</div>
+                    <a href={devResetUrl} style={{ fontSize:'11px', color:'#007bff', wordBreak:'break-all' }}>{devResetUrl}</a>
+                  </div>
+                )}
+                <button className="action-btn" style={{ width:'100%' }} onClick={() => { setView('login'); setForgotSent(false); setForgotEmail(''); setDevResetUrl(null); }}>
+                  Back to Login
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleForgotSubmit} className="single-column-form">
+                <div className="category-btns" style={{ marginBottom:'16px' }}>
+                  {['patient','doctor'].map(c => (
+                    <button key={c} type="button" className={`toggle-tab ${category === c ? 'active' : ''}`} onClick={() => setCategory(c)}>
+                      {c.charAt(0).toUpperCase() + c.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                <div className="input-field">
+                  <label>Email Address<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                  <input
+                    type="email"
+                    placeholder="Enter your registered email"
+                    value={forgotEmail}
+                    onChange={e => setForgotEmail(e.target.value)}
+                    required
+                  />
+                </div>
+                <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'10px' }} disabled={forgotLoading}>
+                  {forgotLoading ? 'Sending…' : 'Send Reset Link'}
+                </button>
+                <button type="button" onClick={() => { setView('login'); setErrorMsg(null); }}
+                  style={{ background:'none', border:'none', color:'#8B7EFF', cursor:'pointer', fontSize:'13px', fontWeight:'600', textAlign:'center', marginTop:'4px' }}>
+                  ← Back to Login
+                </button>
+              </form>
+            )}
+          </div>
+        )}
+
+        {/* ── Reset Password View (from email link) ── */}
+        {view === 'reset' && (
+          <div className="fade-in">
+            <h3 style={{ textAlign:'center', marginBottom:'6px', color:'#2D3748', fontSize:'16px' }}>Set New Password</h3>
+            <p style={{ textAlign:'center', fontSize:'13px', color:'#6B6B6B', marginBottom:'20px' }}>
+              Choose a strong new password for your <strong>{resetRole}</strong> account.
+            </p>
+            <form onSubmit={handleResetSubmit} className="single-column-form">
+              <div className="input-field">
+                <label>New Password<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                <input
+                  type="password"
+                  placeholder="Min 8 chars, 1 uppercase, 1 number"
+                  value={resetNewPw}
+                  onChange={e => setResetNewPw(e.target.value)}
+                  required
+                />
+                <PasswordStrength value={resetNewPw} />
+              </div>
+              <div className="input-field">
+                <label>Confirm Password<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                <input
+                  type="password"
+                  placeholder="Re-enter your new password"
+                  value={resetConfirmPw}
+                  onChange={e => setResetConfirmPw(e.target.value)}
+                  required
+                />
+                {resetConfirmPw && resetNewPw !== resetConfirmPw && (
+                  <span style={{ color:'#c62828', fontSize:'11px', marginTop:'3px', display:'block' }}>Passwords do not match</span>
+                )}
+              </div>
+              <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'10px' }} disabled={resetLoading}>
+                {resetLoading ? 'Resetting…' : 'Reset Password'}
+              </button>
+              <button type="button" onClick={() => { setView('login'); setErrorMsg(null); }}
+                style={{ background:'none', border:'none', color:'#8B7EFF', cursor:'pointer', fontSize:'13px', fontWeight:'600', textAlign:'center', marginTop:'4px' }}>
+                ← Back to Login
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* ── Login / Register View ── */}
+        {view !== 'forgot' && view !== 'reset' && (
+          <>
+            <div className="btn-group">
+              <button className={`toggle-tab ${view === 'login' ? 'active' : ''}`} onClick={() => { setView('login'); setErrorMsg(null); setFieldErrors({}); }}>Login</button>
+              <button className={`toggle-tab ${view === 'register' ? 'active' : ''}`} onClick={() => { setView('register'); setErrorMsg(null); setFieldErrors({}); }}>Register</button>
+            </div>
+
+            <div className="category-btns">
+              {['patient','doctor','admin'].map(c => (
+                <button key={c} className={`toggle-tab ${category === c ? 'active' : ''}`} onClick={() => { setCategory(c); setFieldErrors({}); setErrorMsg(null); }}>
+                  {c.charAt(0).toUpperCase() + c.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            <div key={view + category} className="fade-in">
+
+              {/* ── Login form ── */}
+              {view === 'login' && (
+                <div className="single-column-form">
+                  <form onSubmit={handleLoginSubmit} className="single-column-form">
+                    <div className="input-field">
+                      <label>Username<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="text" name="username" placeholder="Enter your username" required
+                        onChange={() => clearFE('lu')}
+                        style={fieldErrors.lu ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.lu} />
+                    </div>
+                    <div className="input-field">
+                      <label>Password<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="password" name="password" placeholder="Enter your password" required
+                        onChange={() => clearFE('lp')}
+                        style={fieldErrors.lp ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.lp} />
+                    </div>
+                    {category === 'admin' && (
+                      <div className="input-field">
+                        <label>MFA Code</label>
+                        <input type="text" name="mfa_code" placeholder="6-digit code if MFA is enabled" inputMode="numeric" />
+                      </div>
+                    )}
+
+                    {/* Forgot Password link */}
+                    <div style={{ textAlign:'right', marginTop:'-8px' }}>
+                      <button type="button"
+                        onClick={() => { setView('forgot'); setErrorMsg(null); setFieldErrors({}); }}
+                        style={{ background:'none', border:'none', color:'#8B7EFF', cursor:'pointer', fontSize:'12px', fontWeight:'600', padding:'0', textDecoration:'underline' }}>
+                        Forgot Password?
+                      </button>
+                    </div>
+
+                    <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'8px' }}>
+                      Login as {category === 'patient' ? 'Patient' : category === 'doctor' ? 'Doctor' : 'Admin'}
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* ── Patient Register ── */}
+              {view === 'register' && category === 'patient' && (
+                <form onSubmit={handleRegisterSubmit}>
+                  <div className="form-grid">
+                    <FormField label="Full Name" name="name" placeholder="e.g. Rahul Kumar" required
+                      hint="2+ characters, no special symbols" fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <FormField label="Date of Birth" name="dob" type="date" required fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <div className="input-field">
+                      <label>Gender<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <select name="gender" required>
+                        <option value="">— Select gender —</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="input-field">
+                      <label>Blood Group<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <select name="blood_group" required onChange={() => clearFE('blood_group')}
+                        style={fieldErrors.blood_group ? { borderColor:'#ef4444' } : {}}>
+                        <option value="">— Select —</option>
+                        {BLOOD_GROUPS.map(b => <option key={b} value={b}>{b}</option>)}
+                      </select>
+                      <FieldError msg={fieldErrors.blood_group} />
+                    </div>
+                    <div className="input-field">
+                      <label>Mobile Number<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="tel" name="mobile" placeholder="+91 98765 43210" required
+                        onChange={() => clearFE('mobile')}
+                        style={fieldErrors.mobile ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.mobile} />
+                    </div>
+                    <FormField label="Email Address" name="email" type="email" placeholder="you@example.com" hint="Optional" fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <div className="input-field full-width">
+                      <label>Address<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="text" name="address" placeholder="House/Street, City, State" required
+                        onChange={() => clearFE('address')}
+                        style={fieldErrors.address ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.address} />
+                    </div>
+                    <div className="input-field">
+                      <label>Username<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="text" name="username" placeholder="4–20 chars, a–z 0–9 _" required
+                        onChange={() => clearFE('username')}
+                        style={fieldErrors.username ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.username} />
+                    </div>
+                    <div className="input-field">
+                      <label>Password<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="password" name="password" placeholder="Min 8 chars" required
+                        onChange={e => { setPwValue(e.target.value); clearFE('password'); }}
+                        style={fieldErrors.password ? { borderColor:'#ef4444' } : {}} />
+                      <PasswordStrength value={pwValue} />
+                      <FieldError msg={fieldErrors.password} />
+                    </div>
+                    <div className="input-field full-width">
+                      <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'10px' }}>Register as Patient</button>
+                    </div>
+                  </div>
+                </form>
+              )}
+
+              {/* ── Doctor Register ── */}
+              {view === 'register' && category === 'doctor' && (
+                <form onSubmit={handleRegisterSubmit}>
+                  <div className="form-grid">
+                    <FormField label="Full Name" name="name" placeholder="Dr. Priya Sharma" required hint="Must match official records" fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <div className="input-field">
+                      <label>Date of Birth<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="date" name="dob" required
+                        onChange={() => clearFE('dob')}
+                        style={fieldErrors.dob ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.dob} />
+                    </div>
+                    <div className="input-field">
+                      <label>Gender<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <select name="gender" required>
+                        <option value="">— Select gender —</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="input-field">
+                      <label>Specialization<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <select name="specialization" required onChange={() => clearFE('specialization')}
+                        style={fieldErrors.specialization ? { borderColor:'#ef4444' } : {}}>
+                        <option value="">— Select specialization —</option>
+                        {SPECIALIZATIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                      <FieldError msg={fieldErrors.specialization} />
+                    </div>
+                    <div className="input-field">
+                      <label>Medical Registration No.<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="text" name="registration_number" placeholder="e.g. MCI-2024-78901" required
+                        onChange={() => clearFE('registration_number')}
+                        style={fieldErrors.registration_number ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.registration_number} />
+                    </div>
+                    <FormField label="Years of Experience" name="experience" type="number" placeholder="e.g. 5" fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <FormField label="Hospital / Clinic Name" name="hospital_name" placeholder="City Medical Centre" required fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <FormField label="Hospital Location" name="hospital_location" placeholder="City, State" required fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <div className="input-field">
+                      <label>Mobile Number<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="tel" name="mobile" placeholder="+91 98765 43210" required
+                        onChange={() => clearFE('mobile')}
+                        style={fieldErrors.mobile ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.mobile} />
+                    </div>
+                    <div className="input-field">
+                      <label>Email Address<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="email" name="email" placeholder="doctor@hospital.com" required
+                        onChange={() => clearFE('email')}
+                        style={fieldErrors.email ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.email} />
+                    </div>
+                    <div className="input-field">
+                      <label>Username<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="text" name="username" placeholder="4–20 chars, a–z 0–9 _" required
+                        onChange={() => clearFE('username')}
+                        style={fieldErrors.username ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.username} />
+                    </div>
+                    <div className="input-field">
+                      <label>Password<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="password" name="password" placeholder="Min 8 chars, 1 uppercase, 1 number" required
+                        onChange={e => { setPwValue(e.target.value); clearFE('password'); }}
+                        style={fieldErrors.password ? { borderColor:'#ef4444' } : {}} />
+                      <PasswordStrength value={pwValue} />
+                      <FieldError msg={fieldErrors.password} />
+                    </div>
+                    <div className="input-field full-width">
+                      <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'10px' }}>Register as Doctor</button>
+                    </div>
+                  </div>
+                </form>
+              )}
+
+              {/* ── Admin Register ── */}
+              {view === 'register' && category === 'admin' && (
+                <form onSubmit={handleRegisterSubmit}>
+                  <div className="form-grid">
+                    <div className="input-field full-width">
+                      <label>Invite Token<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="text" name="invite_token" placeholder="Paste your one-time invite token" required
+                        onChange={() => clearFE('invite_token')}
+                        style={fieldErrors.invite_token ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.invite_token} />
+                    </div>
+                    <div className="input-field">
+                      <label>Admin ID<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="text" name="username" placeholder="Unique login ID (4–20 chars)" required
+                        onChange={() => clearFE('username')}
+                        style={fieldErrors.username ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.username} />
+                    </div>
+                    <div className="input-field">
+                      <label>Password<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="password" name="password" placeholder="Min 8 chars" required
+                        onChange={e => { setPwValue(e.target.value); clearFE('password'); }}
+                        style={fieldErrors.password ? { borderColor:'#ef4444' } : {}} />
+                      <PasswordStrength value={pwValue} />
+                      <FieldError msg={fieldErrors.password} />
+                    </div>
+                    <div className="input-field full-width">
+                      <label>Admin Name<span style={{ color:'#ef4444', marginLeft:'2px' }}>*</span></label>
+                      <input type="text" name="name" placeholder="Full admin name" required
+                        onChange={() => clearFE('name')}
+                        style={fieldErrors.name ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.name} />
+                    </div>
+                    <div className="input-field">
+                      <label>Email</label>
+                      <input type="email" name="email" placeholder="admin@hospital.com"
+                        onChange={() => clearFE('email')}
+                        style={fieldErrors.email ? { borderColor:'#ef4444' } : {}} />
+                      <FieldError msg={fieldErrors.email} />
+                    </div>
+                    <FormField label="Display Name" name="display_name" placeholder="Shown on the admin profile" fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <FormField label="Profile Picture URL" name="profile_pic" type="url" placeholder="https://..." fieldErrors={fieldErrors} clearFE={clearFE} />
+                    <div className="input-field full-width">
+                      <label>Bio</label>
+                      <textarea name="bio" placeholder="Short admin bio or role description" rows="4" />
+                    </div>
+                    <div className="input-field full-width">
+                      <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'10px' }}>Accept Admin Invite</button>
+                    </div>
+                  </div>
+                </form>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

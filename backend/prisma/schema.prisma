@@ -1,0 +1,410 @@
+generator client {
+  provider             = "prisma-client-py"
+  interface            = "asyncio"
+  recursive_type_depth = 5
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  directUrl         = env("DIRECT_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+enum Role {
+  patient
+  doctor
+  admin
+}
+
+enum Gender {
+  male
+  female
+  other
+}
+
+enum SymptomSeverity {
+  mild
+  moderate
+  severe
+  critical
+}
+
+model Patient {
+  username            String         @id
+  name                String
+  displayName         String?
+  dob                 DateTime?
+  gender              Gender?
+  password            String
+  bloodGroup          String?
+  address             String?
+  mobile              String?
+  email               String?
+  phone               String?
+  profilePic          String?
+  closedDoctorChats   Json?          @db.JsonB
+  doctorChats         Json?          @db.JsonB
+  xrayAnalyses        Json?          @db.JsonB
+  customAssets        Json?          @db.JsonB
+  appointments        Appointment[]
+  consultations       Consultation[]
+  ragDocuments        RagDocument[]
+  publicKey           String?
+  encryptedPrivateKey String?
+  fileKeys            FileKey[]
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@map("patients")
+}
+
+model Doctor {
+  doctorId            String         @id
+  name                String
+  displayName         String?
+  gender              Gender?
+  password            String
+  role                Role           @default(doctor)
+  category            String?
+  location            String?
+  address             String?
+  email               String?
+  mobile              String?
+  experience          String?
+  registrationNumber  String?
+  hospitalName        String?
+  hospitalLocation    String?
+  specialization      String?
+  bio                 String?
+  profilePic          String?
+  schedules           Json?          @db.JsonB
+  appointmentRequests Json?          @db.JsonB
+  payments            Json?          @db.JsonB
+  patientChats        Json?          @db.JsonB
+  closedChats         Json?          @db.JsonB
+  isBanned           Boolean        @default(false)
+  bannedAt           DateTime?
+  banReason          String?
+  appointments        Appointment[]
+  consultations       Consultation[]
+  doctorSlots         DoctorSlot[]
+  publicKey           String?
+  encryptedPrivateKey String?
+  fileKeys            FileKey[]
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@map("doctors")
+}
+
+model Admin {
+  adminId         String   @id
+  name            String
+  displayName     String?
+  email           String?
+  password        String
+  profilePic      String?
+  bio             String?
+  isSuperAdmin    Boolean  @default(false)
+  mfaEnabled      Boolean  @default(false)
+  mfaSecret       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  invitesCreated  AdminInvite[] @relation("AdminInvitesCreated")
+  auditLogs       AdminAuditLog[]
+
+  @@map("admins")
+}
+
+model AdminInvite {
+  id               String   @id @default(uuid())
+  tokenHash        String   @unique
+  createdByAdminId String
+  inviteeEmail     String?
+  note             String?
+  expiresAt        DateTime
+  usedAt           DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  createdByAdmin Admin @relation("AdminInvitesCreated", fields: [createdByAdminId], references: [adminId], onDelete: Cascade)
+
+  @@index([createdByAdminId])
+  @@index([expiresAt])
+  @@map("admin_invites")
+}
+
+model AdminAuditLog {
+  id         String   @id @default(uuid())
+  identifier String
+  adminId    String?
+  eventType  String
+  success    Boolean  @default(false)
+  ipAddress  String?
+  userAgent  String?
+  detail     String?
+  createdAt  DateTime @default(now())
+
+  admin Admin? @relation(fields: [adminId], references: [adminId], onDelete: SetNull)
+
+  @@index([identifier, eventType, createdAt])
+  @@index([adminId, eventType, createdAt])
+  @@index([createdAt])
+  @@map("admin_audit_logs")
+}
+
+model DoctorSlot {
+  id        String       @id @default(uuid())
+  doctorId  String
+  startTime DateTime
+  endTime   DateTime
+  isBooked  Boolean      @default(false)
+  isActive  Boolean      @default(true)
+  doctor    Doctor       @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+  appointment Appointment?
+
+  @@index([doctorId])
+  @@unique([doctorId, startTime])
+  @@map("doctor_slots")
+}
+
+model Appointment {
+  id               String       @id @default(uuid())
+  patientUsername   String
+  doctorId          String
+  slotId            String?      @unique
+  appointmentDate   DateTime?
+  scheduledTime     DateTime?
+  date              String?
+  time              String?
+  reason            String
+  note              String?
+  doctorMessage     String?
+  status            String       @default("PENDING")
+  requestedAt       DateTime     @default(now())
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  completedAt       DateTime?
+  patient           Patient      @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  doctor            Doctor       @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+  slot              DoctorSlot?  @relation(fields: [slotId], references: [id], onDelete: SetNull)
+  consultation      Consultation?
+
+  @@index([patientUsername])
+  @@index([doctorId])
+  @@index([slotId])
+  @@index([status])
+  @@map("appointments")
+}
+
+model Consultation {
+  id              String    @id @default(uuid())
+  appointmentId   String    @unique
+  patientUsername String
+  doctorId        String
+  lastMessageAt   DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  appointment   Appointment    @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patient       Patient        @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  doctor        Doctor         @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+  messages      Message[]
+  ragDocuments  RagDocument[]
+
+  @@index([patientUsername])
+  @@index([doctorId])
+  @@index([lastMessageAt])
+  @@map("consultations")
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  consultationId String
+  senderId       String
+  senderRole     Role
+  message        String
+  timestamp      DateTime @default(now())
+
+  consultation Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+
+  @@index([consultationId, timestamp])
+  @@index([senderId])
+  @@map("messages")
+}
+
+model FileKey {
+  id               String   @id @default(uuid())
+  fileId           String
+  patientUsername  String?
+  doctorId         String?
+  encryptedFileKey String
+  createdAt        DateTime @default(now())
+
+  patient Patient? @relation(fields: [patientUsername], references: [username], onDelete: Cascade)
+  doctor  Doctor?  @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
+
+  @@index([fileId])
+  @@index([patientUsername])
+  @@index([doctorId])
+  @@map("file_keys")
+}
+
+model User {
+  id            String         @id @default(uuid())
+  medicalAssets MedicalAsset[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@map("users")
+}
+
+model MedicalAsset {
+  id               String   @id @default(uuid())
+  userId           String
+  fileName         String
+  fileType         String
+  folderPath       String   @default("/my_documents/unclassified/")
+  assetCategory    String   @default("UNCLASSIFIED")
+  processingStatus  String   @default("PENDING")
+  extractedText    String?  @db.Text
+  encryptionNonce   String?
+  wrappedKey        String?
+  keyNonce          String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("medical_assets")
+}
+
+model RagDocument {
+  id             String                @id @default(uuid())
+  patientId      String                @map("patient_id")
+  consultationId String?               @map("consultation_id")
+  sourceType     String                @map("source_type")
+  content        String
+  summary        String
+  embedding      Unsupported("vector")
+  metadata       Json?                 @db.JsonB
+  createdAt      DateTime              @default(now()) @map("created_at")
+
+  patient      Patient       @relation(fields: [patientId], references: [username], onDelete: Cascade)
+  consultation Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+
+  @@index([patientId])
+  @@index([consultationId])
+  @@index([sourceType])
+  @@map("rag_documents")
+}
+
+model AiChatSession {
+  id              String   @id @default(uuid())
+  userId          String   @map("userId")
+  role            String   @map("userRole")
+  mode            String   @default("default")
+  targetPatientId String?  @map("targetPatientId")
+  title           String?
+  createdAt       DateTime @default(now()) @map("createdAt")
+  updatedAt       DateTime @updatedAt @map("updatedAt")
+
+  messages AiChatMessage[]
+
+  @@index([userId])
+  @@index([targetPatientId])
+  @@map("ai_chat_sessions")
+}
+
+model AiChatMessage {
+  id        String   @id @default(uuid())
+  sessionId String   @map("sessionId")
+  role      String
+  content   String   @db.Text
+  createdAt DateTime @default(now()) @map("createdAt")
+
+  session AiChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("ai_chat_messages")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  userRole  String   // "patient" | "doctor"
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, userRole])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+model Payment {
+  id              String   @id @default(uuid())
+  razorpayOrderId String   @unique
+  razorpayPaymentId String? @unique
+  razorpaySignature String?
+  appointmentId   String?
+  patientUsername String
+  amount          Int      // in paise (INR smallest unit)
+  currency        String   @default("INR")
+  status          String   @default("CREATED") // CREATED | PAID | FAILED
+  description     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([patientUsername])
+  @@index([appointmentId])
+  @@index([razorpayOrderId])
+  @@map("payments")
+}
+
+model AssetIndex {
+  id            String   @id @default(cuid())
+  assetId       String   @unique
+  patientId     String
+  
+  fileName      String?
+  
+  documentType  String?
+  reportType    String?
+  
+  documentDate  DateTime?
+  title         String?
+  summary       String?
+  
+  keywords      Json?    @db.JsonB
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([patientId, documentType])
+  @@index([patientId, reportType])
+  @@index([patientId, documentDate])
+  @@map("asset_indexes")
+}
+
+model PatientMedicalHistory {
+  id          String    @id @default(cuid())
+  patientId   String
+  historyType String
+  title       String
+  value       String    @db.Text
+  source      String?
+  sourceId    String?
+  recordDate  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([patientId])
+  @@index([patientId, historyType])
+  @@index([recordDate])
+  @@map("patient_medical_histories")
+}

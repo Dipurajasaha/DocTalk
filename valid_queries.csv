@@ -1,0 +1,19 @@
+query,intent_type,action/subtype
+Is Dr. DocDipu available on July 4?,doctor_availability,check
+Does Dr. DocDipu have any open slots?,doctor_availability,check
+Show me available slots for DocDipu,doctor_availability,check
+When is DocDipu free?,doctor_availability,check
+Book an appointment with DocDipu for July 4 at 4:30 PM,appointment,book
+Can you cancel my appointment for July 4 at 4:00 PM?,appointment,cancel
+Show me all my upcoming appointments,appointment,list
+Do I have any upcoming appointments?,appointment,list
+I have a severe headache,symptom,none
+I am feeling dizzy and nauseous,symptom,none
+What medications am I taking?,patient_history,medication
+Do I have any allergies?,patient_history,allergy
+Review my blood report,document_query,review_blood
+What is my Hemoglobin level from the latest report?,document_query,latest_blood
+Summarize my CBC report,document_query,summarize_report
+Are my PCV levels normal in the blood test?,document_query,analyze_blood
+What is my RBC count?,document_query,analyze_blood
+Is my WBC count within normal range?,document_query,analyze_blood
