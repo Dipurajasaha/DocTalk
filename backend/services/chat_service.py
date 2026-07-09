@@ -24,6 +24,7 @@ class ChatService:
                     {"doctorId": user_id},
                 ]
             },
+            include={"patient": True, "doctor": True},
             order={"updatedAt": "desc"},
         )
         return [self._serialize_consultation(item) for item in consultations]
@@ -367,11 +368,15 @@ class ChatService:
     @staticmethod
     def _serialize_consultation(consultation: Any) -> dict[str, Any]:
         data = consultation.model_dump() if hasattr(consultation, "model_dump") else dict(consultation)
+        patient = data.get("patient") if isinstance(data.get("patient"), dict) else None
+        doctor = data.get("doctor") if isinstance(data.get("doctor"), dict) else None
         return {
             "id": data.get("id"),
             "appointment_id": data.get("appointmentId"),
             "patient_id": data.get("patientUsername"),
             "doctor_id": data.get("doctorId"),
+            "patient_name": (patient or {}).get("name") if patient else None,
+            "doctor_name": (doctor or {}).get("name") if doctor else None,
             "created_at": data.get("createdAt"),
             "updated_at": data.get("updatedAt"),
             "last_message_at": data.get("lastMessageAt"),

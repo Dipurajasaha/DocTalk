@@ -9,7 +9,7 @@ const statusBadge = (status) => {
   return <span className="rx-badge rx-badge-superseded">Superseded</span>;
 };
 
-export default function DoctorPrescriptionsList() {
+export default function DoctorPrescriptionsList({ embedded = false, onCreateNew, onBack }) {
   const navigate = useNavigate();
   const [prescriptions, setPrescriptions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -38,15 +38,30 @@ export default function DoctorPrescriptionsList() {
   };
 
   return (
-    <div className="rx-page">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+    <div className={embedded ? '' : 'rx-page'}>
+      <div
+        style={
+          embedded
+            ? { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 20, flexWrap: 'wrap' }
+            : { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }
+        }
+      >
         <div>
           <h1 className="rx-h1">Prescriptions</h1>
-          <p className="rx-sub">Everything you've issued — signed, sealed, tamper-evident.</p>
+          <p className="rx-sub" style={embedded ? { marginBottom: 0 } : undefined}>
+            Everything you've issued — signed, sealed, tamper-evident.
+          </p>
         </div>
-        <button className="rx-btn-secondary" onClick={() => navigate('/doctor/signature')}>
-          {hasSignature ? 'Update signature' : 'Set up signature'}
-        </button>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {embedded && onBack && (
+            <button className="rx-btn-secondary" onClick={onBack}>
+              Back to dashboard
+            </button>
+          )}
+          <button className="rx-btn-secondary" onClick={() => navigate('/doctor/signature')}>
+            {hasSignature ? 'Update signature' : 'Set up signature'}
+          </button>
+        </div>
       </div>
 
       {!hasSignature && (
@@ -58,7 +73,11 @@ export default function DoctorPrescriptionsList() {
         </div>
       )}
 
-      <button className="rx-btn-primary" onClick={() => navigate('/doctor/prescriptions/new')} style={{ marginBottom: 20 }}>
+      <button
+        className="rx-btn-primary"
+        onClick={() => (onCreateNew ? onCreateNew() : navigate('/doctor/prescriptions/new'))}
+        style={{ marginBottom: 20 }}
+      >
         + New prescription
       </button>
 

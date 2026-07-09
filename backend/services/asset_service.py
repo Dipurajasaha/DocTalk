@@ -2,6 +2,7 @@ from __future__ import annotations
 from ..core.crypto_utils import encrypt_file
 
 import asyncio
+import io
 import json
 import logging
 import shutil
@@ -21,12 +22,18 @@ from ..ai.vectorstore.pgvector_service import pgvector_service
 from ..core.config import DATA_ROOT, settings
 from ..core.database import prisma
 from .xray_analysis_service import xray_analysis_service
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.colors import HexColor
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
 
 
 logger = logging.getLogger(__name__)
 AuthRole = Literal["patient", "doctor"]
 AssetCategory = Literal["REPORT", "PRESCRIPTION", "XRAY"]
 AssetSourceType = Literal["report", "prescription", "xray"]
+PAGE_W, PAGE_H = A4
+WATERMARK = HexColor("#f1efe8")
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +49,50 @@ class AssetService:
         self.config = config
         self.upload_root = DATA_ROOT / "uploads" / config.storage_folder
         self.upload_root.mkdir(parents=True, exist_ok=True)
+
+    async def create_generated_asset(
+        self,
+        user_id: str,
+        *,
+        file_name: str,
+        file_type: str,
+        source_bytes: bytes,
+        asset_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Stage a server-generated document using the same pipeline as uploads."""
+        await self._ensure_user_exists(user_id)
+
+        normalized_asset_id = asset_id or uuid4().hex
+        normalized_file_name = Path(file_name).name.strip() or f"{normalized_asset_id}.pdf"
+        extension = Path(normalized_file_name).suffix.lower()
+        if not extension and file_type.lower() == "application/pdf":
+            extension = ".pdf"
+
+        relative_path = self._build_storage_path(normalized_asset_id, extension)
+        stored_path = DATA_ROOT / relative_path
+        stored_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            stored_path.write_bytes(source_bytes)
+            self._validate_saved_file(stored_path, extension, file_type)
+        except Exception:
+            self._safe_unlink(stored_path)
+            raise
+
+        record = await self.client.medicalasset.create(
+            data={
+                "id": normalized_asset_id,
+                "userId": user_id,
+                "fileName": normalized_file_name,
+                "fileType": file_type,
+                "folderPath": "/my_documents/unclassified/",
+                "assetCategory": "UNCLASSIFIED",
+                "processingStatus": "PENDING",
+                "extractedText": None,
+            },
+            include={"user": True},
+        )
+
+        return self._serialize_record(record, stored_path.resolve().as_posix(), len(source_bytes))
 
     async def upload_asset(
         self,
@@ -545,8 +596,13 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
             
         print(f"[DEBUG][RAG_STORAGE] Successfully stored asset {asset_id} in RAG ({chunk_count} chunk{'s' if chunk_count != 1 else ''})")
         
-        # 8. File Encryption (Final Security Layer)
+        # 8. Final document rendering before encryption.
         plaintext_bytes = destination_path.read_bytes()
+        if category == "PRESCRIPTION" and mime_type == "application/pdf":
+            plaintext_bytes = _apply_pdf_watermark(plaintext_bytes, "DOCTALK HEALTH")
+            destination_path.write_bytes(plaintext_bytes)
+
+        # 9. File Encryption (Final Security Layer)
         encrypted = encrypt_file(plaintext_bytes)
         destination_path.write_bytes(encrypted.ciphertext)
         
@@ -583,6 +639,32 @@ async def _relocate_asset_file(source_path: Path, category: AssetCategory) -> Pa
     destination_path = destination_dir / source_path.name
     await asyncio.to_thread(shutil.move, str(source_path), str(destination_path))
     return destination_path
+
+
+def _apply_pdf_watermark(pdf_bytes: bytes, text: str) -> bytes:
+    overlay = io.BytesIO()
+    c = canvas.Canvas(overlay, pagesize=A4)
+    c.saveState()
+    c.setFillColor(WATERMARK)
+    c.setFont("Helvetica-Bold", 34)
+    c.translate(PAGE_W / 2, PAGE_H / 2)
+    c.rotate(35)
+    label = f"  {text.upper()}  "
+    for row in range(-3, 4):
+        c.drawCentredString(0, row * 28 * mm, label * 3)
+    c.restoreState()
+    c.showPage()
+    c.save()
+
+    overlay_doc = fitz.open(stream=overlay.getvalue(), filetype="pdf")
+    pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        for page in pdf_doc:
+            page.show_pdf_page(page.rect, overlay_doc, 0, overlay=True)
+        return pdf_doc.tobytes(deflate=True)
+    finally:
+        overlay_doc.close()
+        pdf_doc.close()
 
 
 def _category_to_folder(category: AssetCategory) -> str:

@@ -33,6 +33,43 @@
 .rx-row { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 16px; }
 .rx-med-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 8px; align-items: end; margin-bottom: 10px; }
 
+.rx-patient-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.rx-patient-field {
+  padding: 12px 14px;
+  border: 1px solid #edf0f7;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fbfbff 0%, #f9fafc 100%);
+}
+
+.rx-field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .35px;
+  text-transform: uppercase;
+  color: #8b7eff;
+}
+
+.rx-field-value {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  word-break: break-word;
+}
+
+.rx-muted {
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
 .rx-btn-primary {
   background: #6C5CE7; color: #fff; border: none; padding: 11px 22px; border-radius: 9999px;
   font-weight: 600; font-size: 14px; cursor: pointer; font-family: var(--font-primary); transition: .2s;
@@ -71,3 +108,15 @@
 .rx-list-item { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px solid #f0f2f5; }
 .rx-list-item:last-child { border-bottom: none; }
 .rx-empty { text-align: center; color: #6b7280; padding: 40px 20px; font-size: 14px; }
+
+@media (max-width: 720px) {
+  .rx-patient-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 540px) {
+  .rx-patient-grid {
+    grid-template-columns: 1fr;
+  }
+}

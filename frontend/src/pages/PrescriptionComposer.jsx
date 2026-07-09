@@ -1,17 +1,29 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { prescriptionApi } from '../lib/api';
+import { doctorApi, prescriptionApi } from '../lib/api';
 import '../styles/prescription.css';
 
 const emptyMedicine = () => ({ name: '', dosage: '', frequency: '', duration: '', notes: '' });
 
-export default function PrescriptionComposer() {
+const getAgeFromDob = (dobValue) => {
+  if (!dobValue) return '';
+  const dob = new Date(dobValue);
+  if (Number.isNaN(dob.getTime())) return '';
+
+  const now = new Date();
+  let age = now.getFullYear() - dob.getFullYear();
+  const monthDiff = now.getMonth() - dob.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < dob.getDate())) age -= 1;
+  return age >= 0 ? `${age} years` : '';
+};
+
+export default function PrescriptionComposer({ embedded = false, onBack, onDone } = {}) {
   const { patientUsername: routePatient } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const [patientUsername, setPatientUsername] = useState(routePatient || searchParams.get('patient') || '');
-  const [consultationId] = useState(searchParams.get('consultationId') || null);
+  const [patientUsername, setPatientUsername] = useState('');
+  const [consultationId, setConsultationId] = useState(searchParams.get('consultationId') || null);
   const [medicines, setMedicines] = useState([emptyMedicine()]);
   const [includeSickNote, setIncludeSickNote] = useState(false);
   const [sickNote, setSickNote] = useState({ reason: '', startDate: '', endDate: '' });
@@ -19,6 +31,89 @@ export default function PrescriptionComposer() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [issued, setIssued] = useState(null);
+  const [consultedPatients, setConsultedPatients] = useState([]);
+  const [loadingPatients, setLoadingPatients] = useState(true);
+  const [selectedPatientProfile, setSelectedPatientProfile] = useState(null);
+  const [loadingPatientProfile, setLoadingPatientProfile] = useState(false);
+  const [patientProfileError, setPatientProfileError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadConsultedPatients = async () => {
+      setLoadingPatients(true);
+      try {
+        const consultations = await doctorApi.listConsultations();
+        if (cancelled) return;
+
+        const patientMap = new Map();
+        (Array.isArray(consultations) ? consultations : []).forEach((consultation) => {
+          const patientId = String(consultation?.patient_id || '').trim();
+          if (!patientId || patientMap.has(patientId)) return;
+          patientMap.set(patientId, {
+            id: patientId,
+            name: String(consultation?.patient_name || patientId).trim(),
+            consultationId: consultation?.id || null,
+          });
+        });
+
+        const nextPatients = Array.from(patientMap.values());
+        setConsultedPatients(nextPatients);
+
+        const routeMatch = routePatient && nextPatients.find((patient) => patient.id === routePatient);
+        const searchMatch = searchParams.get('patient') && nextPatients.find((patient) => patient.id === searchParams.get('patient'));
+        const selected = routeMatch || searchMatch || null;
+        if (selected) {
+          setPatientUsername(selected.id);
+          if (selected.consultationId) setConsultationId(selected.consultationId);
+        } else {
+          setPatientUsername('');
+          setSelectedPatientProfile(null);
+        }
+      } finally {
+        if (!cancelled) setLoadingPatients(false);
+      }
+    };
+
+    loadConsultedPatients();
+    return () => {
+      cancelled = true;
+    };
+  }, [routePatient, searchParams]);
+
+  const consultedPatientOptions = useMemo(() => consultedPatients, [consultedPatients]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPatientProfile = async () => {
+      const targetPatient = String(patientUsername || '').trim();
+      if (!targetPatient) {
+        setSelectedPatientProfile(null);
+        setPatientProfileError('');
+        return;
+      }
+
+      setLoadingPatientProfile(true);
+      setPatientProfileError('');
+      try {
+        const profile = await doctorApi.getPatientProfile(targetPatient);
+        if (cancelled) return;
+        setSelectedPatientProfile(profile || null);
+      } catch (err) {
+        if (cancelled) return;
+        setSelectedPatientProfile(null);
+        setPatientProfileError(err?.message || 'Could not load patient details');
+      } finally {
+        if (!cancelled) setLoadingPatientProfile(false);
+      }
+    };
+
+    loadPatientProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [patientUsername]);
 
   const updateMedicine = (i, field, value) => {
     setMedicines((prev) => prev.map((m, idx) => (idx === i ? { ...m, [field]: value } : m)));
@@ -35,7 +130,7 @@ export default function PrescriptionComposer() {
       .map((m) => ({ ...m }));
 
     if (!patientUsername.trim()) {
-      setError('Enter the patient\'s username');
+      setError('Select a patient from the consulted patients list');
       return;
     }
     if (cleanedMedicines.length === 0 && !includeSickNote) {
@@ -70,13 +165,13 @@ export default function PrescriptionComposer() {
 
   if (issued) {
     return (
-      <div className="rx-page">
+      <div className={embedded ? '' : 'rx-page'}>
         <div className="rx-card" style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 40, marginBottom: 8 }}>✓</div>
           <h1 className="rx-h1">Prescription issued</h1>
           <p className="rx-sub">{issued.prescriptionNumber} · signed and sealed</p>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 20 }}>
-            <button className="rx-btn-secondary" onClick={() => navigate(-1)}>Done</button>
+            <button className="rx-btn-secondary" onClick={() => (onDone ? onDone() : navigate(-1))}>Done</button>
             <button
               className="rx-btn-primary"
               onClick={async () => {
@@ -94,22 +189,75 @@ export default function PrescriptionComposer() {
   }
 
   return (
-    <div className="rx-page">
-      <button onClick={() => navigate(-1)} className="rx-btn-ghost" style={{ marginBottom: 12 }}>← Back</button>
+    <div className={embedded ? '' : 'rx-page'}>
+      <button onClick={() => (onBack ? onBack() : navigate(-1))} className="rx-btn-ghost" style={{ marginBottom: 12 }}>← Back</button>
       <h1 className="rx-h1">New prescription</h1>
       <p className="rx-sub">Signed, sealed, and tamper-evident once issued — corrections require a new version.</p>
 
       <form onSubmit={handleSubmit}>
         <div className="rx-card">
-          <label className="rx-label">Patient username</label>
-          <input
+          <label className="rx-label">Patient</label>
+          <select
             className="rx-input"
             value={patientUsername}
-            onChange={(e) => setPatientUsername(e.target.value)}
-            disabled={!!routePatient}
-            placeholder="e.g. rohit_b21"
-          />
+            onChange={(e) => {
+              const nextPatient = consultedPatientOptions.find((patient) => patient.id === e.target.value);
+              setPatientUsername(e.target.value);
+              setConsultationId(nextPatient?.consultationId || null);
+              setSelectedPatientProfile(null);
+              setPatientProfileError('');
+            }}
+            disabled={loadingPatients || consultedPatientOptions.length === 0}
+          >
+            <option value="">
+              {loadingPatients
+                ? 'Loading consulted patients...'
+                : consultedPatientOptions.length === 0
+                  ? 'No consulted patients available'
+                  : 'Select a patient'}
+            </option>
+            {consultedPatientOptions.map((patient) => (
+              <option key={patient.id} value={patient.id}>
+                {patient.name}{patient.name !== patient.id ? ` (${patient.id})` : ''}
+              </option>
+            ))}
+          </select>
+          {!loadingPatients && consultedPatientOptions.length === 0 && (
+            <p style={{ marginTop: 8, marginBottom: 0, fontSize: 12, color: '#8a8980' }}>
+              You can only prescribe to patients who have already consulted you.
+            </p>
+          )}
         </div>
+
+        {patientUsername && (
+          <div className="rx-card">
+            <label className="rx-label" style={{ marginBottom: 12 }}>Patient information</label>
+            {loadingPatientProfile ? (
+              <p className="rx-muted">Loading patient details...</p>
+            ) : selectedPatientProfile ? (
+              <div className="rx-patient-grid">
+                <div className="rx-patient-field">
+                  <span className="rx-field-label">Name</span>
+                  <span className="rx-field-value">{selectedPatientProfile.name || '—'}</span>
+                </div>
+                <div className="rx-patient-field">
+                  <span className="rx-field-label">Age</span>
+                  <span className="rx-field-value">{getAgeFromDob(selectedPatientProfile.dob) || '—'}</span>
+                </div>
+                <div className="rx-patient-field">
+                  <span className="rx-field-label">Gender</span>
+                  <span className="rx-field-value">{selectedPatientProfile.gender || '—'}</span>
+                </div>
+                <div className="rx-patient-field">
+                  <span className="rx-field-label">Patient ID</span>
+                  <span className="rx-field-value">{selectedPatientProfile.patient_id || patientUsername}</span>
+                </div>
+              </div>
+            ) : (
+              <p className="rx-muted">{patientProfileError || 'Patient details will appear here after selection.'}</p>
+            )}
+          </div>
+        )}
 
         <div className="rx-card">
           <label className="rx-label" style={{ marginBottom: 14 }}>Medicines</label>
@@ -169,7 +317,7 @@ export default function PrescriptionComposer() {
 
         {error && <p style={{ color: '#c0392b', fontSize: 14, marginBottom: 14 }}>{error}</p>}
 
-        <button type="submit" className="rx-btn-primary" disabled={submitting}>
+        <button type="submit" className="rx-btn-primary" disabled={submitting || loadingPatients || consultedPatientOptions.length === 0}>
           {submitting ? 'Issuing…' : 'Issue prescription'}
         </button>
       </form>

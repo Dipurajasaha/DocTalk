@@ -1336,9 +1336,6 @@ export default function PatientDashboard() {
             >
               My Documents
             </button>
-            <button onClick={() => navigate('/patient/prescriptions')}>
-              Prescriptions
-            </button>
             <button 
               className={activePanel === 'xray' ? 'active' : ''}
               onClick={() => setActivePanelFromNav('xray')}

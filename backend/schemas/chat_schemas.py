@@ -22,6 +22,8 @@ class ConsultationResponse(BaseModel):
     appointment_id: str
     patient_id: str
     doctor_id: str
+    patient_name: str | None = None
+    doctor_name: str | None = None
     created_at: datetime
     updated_at: datetime
     last_message_at: datetime | None = None

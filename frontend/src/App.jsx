@@ -9,7 +9,6 @@ import PrescriptionView from './pages/PrescriptionView';
 import DoctorSignatureSetup from './pages/DoctorSignatureSetup';
 import DoctorPrescriptionsList from './pages/DoctorPrescriptionsList';
 import PrescriptionComposer from './pages/PrescriptionComposer';
-import PatientPrescriptionsList from './pages/PatientPrescriptionsList';
 import PublicVerify from './pages/PublicVerify';
 import { useSession } from './contexts/SessionContext';
 import { useEffect } from 'react';
@@ -95,7 +94,7 @@ function App() {
         <Route path="/doctor/prescriptions" element={<RequireDoctor loaded={loaded} session={session}><DoctorPrescriptionsList /></RequireDoctor>} />
         <Route path="/doctor/prescriptions/new" element={<RequireDoctor loaded={loaded} session={session}><PrescriptionComposer /></RequireDoctor>} />
         <Route path="/doctor/prescriptions/new/:patientUsername" element={<RequireDoctor loaded={loaded} session={session}><PrescriptionComposer /></RequireDoctor>} />
-        <Route path="/patient/prescriptions" element={<RequirePatient loaded={loaded} session={session}><PatientPrescriptionsList /></RequirePatient>} />
+        <Route path="/patient/prescriptions" element={<RequirePatient loaded={loaded} session={session}><Navigate to="/patient/dashboard?panel=documents" replace /></RequirePatient>} />
         <Route path="/verify/:qrToken" element={<PublicVerify />} />
       </Routes>
     </BrowserRouter>

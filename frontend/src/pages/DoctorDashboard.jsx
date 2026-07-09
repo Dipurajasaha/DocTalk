@@ -8,6 +8,8 @@ import '../styles/doctor.css';
 import '../styles/chat.css';
 import CopilotPanel from '../components/CopilotPanel';
 import { useNotifications } from '../contexts';
+import DoctorPrescriptionsList from './DoctorPrescriptionsList';
+import PrescriptionComposer from './PrescriptionComposer';
 
 const timeSlots = [];
 for (let h = 0; h < 24; h++) {
@@ -186,7 +188,7 @@ export default function DoctorDashboard() {
   const [activeTab, setActiveTab] = useState(() => {
     try {
       const tab = new URLSearchParams(window.location.search).get('tab');
-      if (['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].includes(tab)) return tab;
+      if (['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings', 'prescriptions'].includes(tab)) return tab;
       return localStorage.getItem('doctalk_doctor_active_tab') || 'dashboard';
     } catch (e) {
       return 'dashboard';
@@ -246,19 +248,25 @@ export default function DoctorDashboard() {
   }, [dashboardData?.appointments]);
 
   const setActiveTabFromNav = (tab) => {
-    const nextTab = ['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].includes(tab) ? tab : 'dashboard';
+    const nextTab = ['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings', 'prescriptions'].includes(tab) ? tab : 'dashboard';
     setActiveTab(nextTab);
+    if (nextTab === 'prescriptions') setPrescriptionView('list');
     navigate(`/doctor/dashboard?tab=${encodeURIComponent(nextTab)}`);
   };
 
   useEffect(() => {
     try {
       const tab = new URLSearchParams(location.search).get('tab');
-      if (['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].includes(tab)) {
+      if (['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings', 'prescriptions'].includes(tab)) {
         setActiveTab((current) => (current === tab ? current : tab));
       }
     } catch (e) {}
   }, [location.search]);
+
+  useEffect(() => {
+    if (activeTab !== 'prescriptions') return;
+    setPrescriptionView((current) => current || 'list');
+  }, [activeTab]);
 
   // Patient Chat States
   const [patientChatList, setPatientChatList] = useState([]);
@@ -269,6 +277,7 @@ export default function DoctorDashboard() {
   const [patientMsgInput, setPatientMsgInput] = useState('');
   const [patientInputFocused, setPatientInputFocused] = useState(false);
   const [chatDisabled, setChatDisabled] = useState(false);
+  const [prescriptionView, setPrescriptionView] = useState('list');
   const patientChatEndRef = useRef(null);
   const patientAutoScrollRef = useRef(false);
   const patientChatRealtimeRef = useRef(null);
@@ -1137,6 +1146,19 @@ export default function DoctorDashboard() {
         </div>
         </div>
       );
+      case 'prescriptions':
+        return prescriptionView === 'new' ? (
+          <PrescriptionComposer
+            embedded
+            onBack={() => setPrescriptionView('list')}
+            onDone={() => setPrescriptionView('list')}
+          />
+        ) : (
+          <DoctorPrescriptionsList
+            embedded
+            onCreateNew={() => setPrescriptionView('new')}
+          />
+        );
       case 'settings': {
         const specs = ['General Medicine','Cardiology','Neurology','Orthopedics','Dermatology','Pediatrics','Gynecology','Oncology','Ophthalmology','ENT','Psychiatry','Radiology','Anesthesiology','Urology','Endocrinology','Nephrology','Gastroenterology','Pulmonology','Rheumatology','Other'];
         return (
@@ -1282,17 +1304,16 @@ export default function DoctorDashboard() {
         <div className="doc-name">{user.display_name}</div>
         
         <div className="doc-nav">
-          {['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings'].map(tab => (
+          {['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings', 'prescriptions'].map(tab => (
             <button 
               key={tab} 
               onClick={() => setActiveTabFromNav(tab)}
               className={activeTab === tab ? 'active' : ''}
               style={tab === 'sessions' ? {textTransform: 'capitalize'} : {}}
             >
-              {tab === 'patientchats' ? 'Patient Chats' : tab === 'sessions' ? 'Manage Sessions' : tab}
+              {tab === 'patientchats' ? 'Patient Chats' : tab === 'sessions' ? 'Manage Sessions' : tab === 'prescriptions' ? 'Prescriptions' : tab}
             </button>
           ))}
-          <button onClick={() => navigate('/doctor/prescriptions')}>Prescriptions</button>
         </div>
 
       </div>

@@ -15,8 +15,8 @@ from ..core.prescription_signing import (
     get_public_key_b64,
     CURRENT_SIGNING_KEY_ID,
 )
+from .asset_service import AssetConfig, AssetService, process_asset_background
 from .prescription_pdf_service import render_prescription_pdf
-from .prescription_pdf_storage import save_prescription_pdf
 
 
 class PrescriptionService:
@@ -50,6 +50,25 @@ class PrescriptionService:
             )
         if patient is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
+
+        consulted_patient = await self.client.consultation.find_first(
+            where={"doctorId": doctor_id, "patientUsername": patient_username}
+        )
+        if consulted_patient is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only issue prescriptions for patients you have consulted",
+            )
+
+        if consultation_id:
+            matching_consultation = await self.client.consultation.find_first(
+                where={"id": str(consultation_id), "doctorId": doctor_id, "patientUsername": patient_username}
+            )
+            if matching_consultation is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Selected consultation does not belong to this doctor and patient",
+                )
 
         cleaned_medicines = [self._clean_medicine(m) for m in medicines]
         cleaned_sick_note = self._clean_sick_note(sick_note) if sick_note else None
@@ -87,7 +106,30 @@ class PrescriptionService:
         )
 
         pdf_bytes = render_prescription_pdf(self._serialize(created, include_verification=True), doctor, patient)
-        await save_prescription_pdf(created.id, pdf_bytes, client=self.client)
+        asset_service = AssetService(AssetConfig(storage_folder="prescriptions"), client=self.client)
+        pdf_asset = await asset_service.create_generated_asset(
+            patient.username,
+            file_name=f"{prescription_number}.pdf",
+            file_type="application/pdf",
+            source_bytes=pdf_bytes,
+            asset_id=str(created.id),
+        )
+        await process_asset_background(
+            pdf_asset["id"],
+            str(pdf_asset.get("file_path") or ""),
+            str(pdf_asset.get("file_type") or "application/pdf"),
+            self.client,
+        )
+        await self.client.prescription.update(
+            where={"id": created.id},
+            data={
+                "pdfAssetId": pdf_asset["id"],
+                "pdfFileName": pdf_asset["file_name"],
+                "pdfEncryptionNonce": None,
+                "pdfWrappedKey": None,
+                "pdfKeyNonce": None,
+            },
+        )
 
         return self._serialize(created, include_verification=True)
 
@@ -136,8 +178,13 @@ class PrescriptionService:
     async def get_pdf_bytes(self, prescription_id: str, *, requester_type: str, requester_id: str) -> bytes:
         # Reuses get() for the exact same access-control rules as viewing the record.
         await self.get(prescription_id, requester_type=requester_type, requester_id=requester_id)
-        from .prescription_pdf_storage import load_decrypted_prescription_pdf
-        return await load_decrypted_prescription_pdf(prescription_id, client=self.client)
+        record = await self.client.prescription.find_unique(where={"id": prescription_id})
+        if record is None or not record.pdfAssetId:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prescription PDF not found")
+        asset_service = AssetService(AssetConfig(storage_folder="prescriptions"), client=self.client)
+        asset_user_id = record.patientUsername if requester_type == "doctor" else requester_id
+        plaintext, _, _ = await asset_service.get_decrypted_asset(asset_user_id, record.pdfAssetId)
+        return plaintext
 
     # ---------- reading ----------
 
