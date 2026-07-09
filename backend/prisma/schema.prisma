@@ -15,7 +15,6 @@ enum Role {
   patient
   doctor
   admin
-  hospital
 }
 
 enum Gender {
@@ -52,8 +51,6 @@ model Patient {
   consultations       Consultation[]
   ragDocuments        RagDocument[]
   prescriptions       Prescription[]
-  registeredByHospitalId String?
-  registeredByHospital   Hospital?      @relation("HospitalPatients", fields: [registeredByHospitalId], references: [hospitalId], onDelete: SetNull)
   publicKey           String?
   encryptedPrivateKey String?
   fileKeys            FileKey[]
@@ -288,80 +285,6 @@ model MedicalAsset {
 
   @@index([userId])
   @@map("medical_assets")
-}
-
-model Hospital {
-  hospitalId    String         @id
-  name          String
-  displayName   String?
-  address       String?
-  city          String?
-  state         String?
-  registrationNumber String?
-  phone         String?
-  email         String?
-  website       String?
-  password      String
-  role          Role           @default(hospital)
-  profilePic    String?
-  isVerified    Boolean        @default(false)
-  totalBeds     Int?
-  availableBeds Int?
-  specialties   Json?          @db.JsonB
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-
-  symptomReports SymptomReport[]
-  hospitalNews   HospitalNews[]
-  registeredPatients Patient[]      @relation("HospitalPatients")
-
-  @@map("hospitals")
-}
-
-model SymptomReport {
-  id              String          @id @default(uuid())
-  hospitalId      String
-  patientName     String?
-  patientAge      Int?
-  patientGender   Gender?
-  diseaseName     String
-  symptoms        Json            @db.JsonB
-  newSymptoms     Json?           @db.JsonB
-  severity        SymptomSeverity @default(moderate)
-  status          String          @default("admitted")
-  onsetDate       DateTime?
-  reportedDate    DateTime        @default(now())
-  additionalNotes String?
-  isAnonymous     Boolean         @default(false)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-
-  hospital Hospital @relation(fields: [hospitalId], references: [hospitalId], onDelete: Cascade)
-
-  @@index([hospitalId])
-  @@index([diseaseName])
-  @@index([reportedDate])
-  @@map("symptom_reports")
-}
-
-model HospitalNews {
-  id         String   @id @default(uuid())
-  hospitalId String
-  title      String
-  content    String   @db.Text
-  category   String   @default("general")
-  isGlobal   Boolean  @default(false)
-  priority   Int      @default(0)
-  publishedAt DateTime @default(now())
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  hospital Hospital @relation(fields: [hospitalId], references: [hospitalId], onDelete: Cascade)
-
-  @@index([hospitalId])
-  @@index([isGlobal, publishedAt])
-  @@index([category])
-  @@map("hospital_news")
 }
 
 enum PrescriptionStatus {
