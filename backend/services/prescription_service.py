@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from prisma import Json
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 from fastapi import HTTPException, status
+import asyncio
 
 from ..core.database import prisma
 from ..core.prescription_signing import (
@@ -35,7 +37,10 @@ class PrescriptionService:
         if not medicines and not sick_note:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Provide at least one medicine or a sick note")
 
-        doctor = await self.client.doctor.find_unique(where={"doctorId": doctor_id})
+        doctor, patient = await asyncio.gather(
+            self.client.doctor.find_unique(where={"doctorId": doctor_id}),
+            self.client.patient.find_unique(where={"username": patient_username}),
+        )
         if doctor is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")
         if not getattr(doctor, "signatureImageBase64", None):
@@ -43,8 +48,6 @@ class PrescriptionService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Save your signature before issuing prescriptions (Doctor settings > Signature)",
             )
-
-        patient = await self.client.patient.find_unique(where={"username": patient_username})
         if patient is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
 
@@ -70,8 +73,8 @@ class PrescriptionService:
                 "doctorId": doctor_id,
                 "patientUsername": patient_username,
                 "consultationId": consultation_id,
-                "medicines": cleaned_medicines,
-                "sickNote": cleaned_sick_note,
+                "medicines": Json(cleaned_medicines),
+                "sickNote": Json(cleaned_sick_note) if cleaned_sick_note else Json(None),
                 "doctorNotes": doctor_notes,
                 "status": "ACTIVE",
                 "contentHash": signed.content_hash,
