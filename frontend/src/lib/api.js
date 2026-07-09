@@ -88,6 +88,10 @@ export const hospitalApi = {
   updateProfile: (data) => apiClient.put('/api/hospital/profile', data, { retries: 0, auth: true }),
 };
 
+export const medicinePriceApi = {
+  lookupPrices: (medicines) => apiClient.post('/api/medicine-prices', { medicines }, { retries: 1, auth: true }),
+};
+
 export const prescriptionApi = {
   issue: (data) => apiClient.post('/api/prescriptions', data, { retries: 0, auth: true }),
   listMine: () => apiClient.get('/api/prescriptions/mine', { retries: 1, auth: true }),

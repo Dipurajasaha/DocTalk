@@ -185,7 +185,7 @@ class ChatService:
                     langchain_messages,
                     model=model,
                     temperature=0.2,
-                    max_output_tokens=1024,
+                    max_output_tokens=4096,
                 )
             except Exception as exc:
                 ai_text = (

@@ -354,6 +354,17 @@ class AssetService:
                 except Exception:
                     pass
 
+        # Robust Fallback: Check all known storage folders
+        for possible_folder in ["prescriptions", "reports", "medical_images", "unclassified"]:
+            try:
+                candidate = Path("uploads") / possible_folder / f"{asset_id}{extension}"
+                resolved = self._resolve_disk_path(candidate)
+                if resolved.exists():
+                    return resolved
+            except HTTPException:
+                pass
+                
+        # Final fallback
         return self._resolve_disk_path(self._build_storage_path(asset_id, extension))
 
     def _resolve_disk_path(self, stored_path: str | Path) -> Path:

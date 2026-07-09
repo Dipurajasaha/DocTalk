@@ -1240,7 +1240,7 @@ export default function PatientDashboard() {
             }
             return [...filtered, { sender: 'model', text: textReply }];
           }
-          return [...filtered, { sender: 'model', text: 'Error analyzing ' + fileObj.name + ': ' + data.error }];
+        return [...filtered, { sender: 'model', text: 'Error analyzing ' + fileObj.name + ': ' + (data.error || data.detail || data.message || 'Unknown error') }];
         });
       }
 
@@ -1263,6 +1263,7 @@ export default function PatientDashboard() {
       const formData = new FormData();
       formData.append('file_id', selectedDocForAnalysis);
       formData.append('language', language);
+      formData.append('ai_session_id', 'patient_ai');
 
       const token = localStorage.getItem('doctalk_token');
       const response = await fetch('/api/analyze_document', {
@@ -1280,7 +1281,7 @@ export default function PatientDashboard() {
           if (reply && typeof reply === 'object') return [...filtered, { sender: 'model', structured: reply }];
           return [...filtered, { sender: 'model', text: String(reply) }];
         }
-        return [...filtered, { sender: 'model', text: 'Error analyzing document: ' + data.error }];
+        return [...filtered, { sender: 'model', text: 'Error analyzing document: ' + (data.error || data.detail || data.message || 'Unknown error') }];
       });
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== 'loading'));
