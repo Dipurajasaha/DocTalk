@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../styles/home.css';
+import { patientApi } from '../lib/api';
 
 // ─── Animated counter hook ────────────────────────────────────────────────────
 function useCounter(target, duration = 1800, start = false) {
@@ -59,6 +60,7 @@ const Home = () => {
   const navigate = useNavigate();
   const [news, setNews] = useState([]);
   const [newsLoading, setNewsLoading] = useState(true);
+  const [newsError, setNewsError] = useState(false);
   const [statsRef, statsInView] = useInView(0.3);
   const [stats, setStats] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -71,8 +73,25 @@ const Home = () => {
   }, []);
 
   useEffect(() => {
-    setNews([]);
-    setNewsLoading(false);
+    let cancelled = false;
+    const loadNews = async () => {
+      try {
+        const data = await patientApi.getLandingNews();
+        if (!cancelled) {
+          setNews(Array.isArray(data) ? data : []);
+          setNewsError(false);
+        }
+      } catch (_) {
+        if (!cancelled) {
+          setNews([]);
+          setNewsError(true);
+        }
+      } finally {
+        if (!cancelled) setNewsLoading(false);
+      }
+    };
+    loadNews();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -205,16 +224,22 @@ const Home = () => {
         {/* ══════════════════════════════════ NEWS ══════════════════════════════════ */}
         <section id="news" className="news-section">
           <div className="section-header-center">
-            <div className="section-eyebrow">Platform Updates</div>
-            <h2 className="section-title">Latest Product Updates</h2>
+            <div className="section-eyebrow">Health News</div>
+            <h2 className="section-title">Latest Health News</h2>
             <p className="section-body" style={{ maxWidth: '520px', margin: '0 auto' }}>
-              The latest notes from the DocTalk team while the platform evolves.
+              Curated health headlines from around the web, refreshed for you.
             </p>
           </div>
 
           {newsLoading ? (
             <div className="news-skeleton-grid">
               {[1, 2, 3].map(i => <div key={i} className="news-skeleton-card" />)}
+            </div>
+          ) : newsError ? (
+            <div className="news-empty">
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>⚠️</div>
+              <p>Couldn't load health news right now. Make sure the backend server is running.</p>
+              <button onClick={() => window.location.reload()} className="btn-primary-hero" style={{ marginTop: '16px' }}>Retry</button>
             </div>
           ) : news.length === 0 ? (
             <div className="news-empty">

@@ -7,6 +7,8 @@ export class ApiError extends Error {
   }
 }
 
+const API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL) || '';
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const readPayload = async (response) => {
@@ -74,7 +76,7 @@ export async function apiRequest(path, options = {}) {
 
     while (attempt <= retries) {
       try {
-        const response = await fetch(path, {
+        const response = await fetch(API_BASE + path, {
           method,
           headers: finalHeaders,
           body: payload,
