@@ -20,6 +20,7 @@ class WorkflowState(TypedDict):
     user_id: str
     target_patient_id: str | None
     ai_session_id: str
+    language: str
     triage_level: str
     context_payload: dict[str, Any]
     final_response: str
@@ -63,11 +64,13 @@ def create_workflow_state(
     target_patient_id: str | None = None,
     context_payload: dict[str, Any] | None = None,
     triage_level: str = "routine",
+    language: str = "en",
     final_response: str = "",
 ) -> WorkflowState:
     normalized_user_id = str(user_id or "").strip()
     normalized_ai_session_id = str(ai_session_id or "").strip()
     normalized_target_patient_id = str(target_patient_id or "").strip() or None
+    normalized_language = str(language or "en").strip().lower() or "en"
     return WorkflowState(
         messages=list(messages),
         role=role,
@@ -75,6 +78,7 @@ def create_workflow_state(
         mode=mode,
         target_patient_id=normalized_target_patient_id,
         ai_session_id=normalized_ai_session_id,
+        language=normalized_language,
         triage_level=triage_level,
         context_payload=dict(context_payload or {}),
         final_response=final_response,
@@ -116,6 +120,7 @@ def create_unified_chat_state(
     target_patient_id: str | None = None,
     context_payload: dict[str, Any] | None = None,
     triage_level: str = "routine",
+    language: str = "en",
     final_response: str = "",
 ) -> WorkflowState:
     return create_workflow_state(
@@ -127,5 +132,6 @@ def create_unified_chat_state(
         target_patient_id=target_patient_id,
         context_payload=context_payload,
         triage_level=triage_level,
+        language=language,
         final_response=final_response,
     )

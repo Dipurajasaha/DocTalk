@@ -1068,7 +1068,7 @@ export default function PatientDashboard() {
 
         socket.onopen = () => {
           resetInactivityTimeout();
-          socket.send(inputMsg);
+          socket.send(JSON.stringify({ message: inputMsg, language }));
         };
 
         socket.onmessage = (event) => {
@@ -1186,6 +1186,18 @@ export default function PatientDashboard() {
       name: file.name,
       type: file.type
     }]);
+
+    // Persist the file as a MedicalAsset so it appears in the "My Documents" section.
+    patientApi.uploadAsset(file)
+      .then((data) => {
+        if (data && (data.success || data.id)) {
+          try { removeAsset && removeAsset('assets_files'); } catch (err) {}
+          loadAssets({ forceRefresh: true });
+        }
+      })
+      .catch((err) => {
+        console.error('Background asset upload failed', err);
+      });
 
     if (explainUploadInputRef.current) {
       explainUploadInputRef.current.value = '';

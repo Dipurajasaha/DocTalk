@@ -22,6 +22,24 @@ for (let h = 0; h < 24; h++) {
 }
 
 
+const getAvatarFallback = (name = 'Doctor') => {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+      <defs>
+        <linearGradient id="docbg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#8B7EFF"/>
+          <stop offset="100%" stop-color="#6C5CE7"/>
+        </linearGradient>
+      </defs>
+      <rect width="160" height="160" rx="32" fill="url(#docbg)"/>
+      <circle cx="80" cy="62" r="28" fill="rgba(255,255,255,0.9)"/>
+      <path d="M34 138c8-22 25-34 46-34s38 12 46 34" fill="rgba(255,255,255,0.9)"/>
+      <path d="M72 26h16v16h16v16H88v16H72V58H56V42h16z" fill="#6C5CE7"/>
+    </svg>
+  `.trim();
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+};
+
 const CustomCalendar = ({ selectedDate, onDateSelect, dashboardData, slotsData }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
 
@@ -578,6 +596,38 @@ export default function DoctorDashboard() {
       try { localStorage.removeItem('doctalk_token'); localStorage.removeItem('doctalk_session'); } catch (e) {}
     }
     navigate('/login');
+  };
+
+  const [isUploadingProfilePic, setIsUploadingProfilePic] = useState(false);
+
+  const handleDoctorProfilePicUpload = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    setIsUploadingProfilePic(true);
+    try {
+      const formData = new FormData();
+      formData.append('profile_pic', file);
+      const token = localStorage.getItem('doctalk_token');
+      const res = await fetch('/api/update_patient_profile', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (data && data.success) {
+        setUser((prev) => ({ ...prev, profile_pic: data.profile_pic }));
+        try { addNotification({ type: 'success', message: 'Profile picture updated' }); } catch (e) {}
+      } else {
+        try { addNotification({ type: 'error', message: 'Failed to update profile picture' }); } catch (e) {}
+      }
+    } catch (err) {
+      console.error(err);
+      try { addNotification({ type: 'error', message: 'Error updating profile picture' }); } catch (e) {}
+    } finally {
+      setIsUploadingProfilePic(false);
+      if (event.target) event.target.value = '';
+    }
   };
 
   const renderDashboardTab = () => {
@@ -1204,6 +1254,27 @@ export default function DoctorDashboard() {
 
               <div style={{ fontSize: '14px', fontWeight: '700', color: '#2D3748', marginTop: '8px' }}>Editable Fields</div>
 
+              {/* ── Profile Picture ── */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <img
+                  src={user.profile_pic || getAvatarFallback(user.display_name || user.name || 'Doctor')}
+                  alt="Profile"
+                  onError={(e) => { e.currentTarget.src = getAvatarFallback(user.display_name || user.name || 'Doctor'); }}
+                  style={{ width: '72px', height: '72px', borderRadius: '50%', objectFit: 'cover', border: '1px solid #e2e8f0' }}
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Profile Picture</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleDoctorProfilePicUpload}
+                    disabled={isUploadingProfilePic}
+                    style={{ fontSize: '12px', color: '#475569' }}
+                  />
+                  {isUploadingProfilePic && <span style={{ fontSize: '12px', color: '#8B7EFF' }}>Uploading…</span>}
+                </div>
+              </div>
+
               {/* ── Editable Fields ── */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div>
@@ -1300,7 +1371,11 @@ export default function DoctorDashboard() {
       <div className="doc-layout">
         {/* Sidebar */}
         <div className="doc-sidebar">
-        <img src={user.profile_pic} alt="Profile" />
+        <img
+          src={user.profile_pic || getAvatarFallback(user.display_name || user.name || 'Doctor')}
+          alt="Profile"
+          onError={(e) => { e.currentTarget.src = getAvatarFallback(user.display_name || user.name || 'Doctor'); }}
+        />
         <div className="doc-name">{user.display_name}</div>
         
         <div className="doc-nav">

@@ -9,6 +9,12 @@ from langchain_core.messages import SystemMessage
 from ...graph.common import get_workflow_model, latest_message_text, message_content_text
 from ...graph.state import UnifiedChatState
 from ...capabilities.tools.rag_tools import doctor_rag_tool
+from ....ai.prompts.templates import medical_prompt_service
+
+
+def _language_instruction(state: UnifiedChatState) -> str:
+    language = str(state.get("language") or "en").strip().lower() or "en"
+    return medical_prompt_service._language_hint(language)
 
 
 DOCTOR_SYSTEM_PROMPT = (
@@ -26,7 +32,7 @@ async def doctor_general_llm(state: UnifiedChatState) -> dict[str, Any]:
         payload.setdefault("latest_request", latest_message)
 
     messages = [
-        SystemMessage(content=DOCTOR_SYSTEM_PROMPT),
+        SystemMessage(content=DOCTOR_SYSTEM_PROMPT + f"\n\n{_language_instruction(state)}"),
         *list(state.get("messages") or []),
     ]
     
@@ -78,6 +84,7 @@ async def doctor_scoped_llm(state: UnifiedChatState) -> dict[str, Any]:
             "You are a medical AI. Answer the user's query using ONLY this retrieved data: "
             f"{context_str}. If empty, say no records exist."
         )
+        + f"\n\n{_language_instruction(state)}"
     )
     
     messages = [sys_msg] + messages_list

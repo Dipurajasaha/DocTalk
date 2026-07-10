@@ -548,10 +548,30 @@ async def _run_ai_websocket(
         )
 
         while True:
-            user_text = (await websocket.receive_text()).strip()
+            raw_text = (await websocket.receive_text()).strip()
+            if not raw_text:
+                continue
+
+            # Accept either a raw string message or a JSON payload carrying
+            # {"message": "...", "language": "..."} so callers can request a
+            # specific response language.
+            user_text = raw_text
+            language = "en"
+            try:
+                parsed_payload = json.loads(raw_text)
+                if isinstance(parsed_payload, dict):
+                    parsed_message = str(parsed_payload.get("message") or "").strip()
+                    parsed_language = str(parsed_payload.get("language") or "").strip().lower()
+                    if parsed_message:
+                        user_text = parsed_message
+                    if parsed_language:
+                        language = parsed_language
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
             if not user_text:
                 continue
-                
+
             import time
             from ...workflows.utils.logger import log_section, log_key_value, format_duration
             
@@ -570,6 +590,7 @@ async def _run_ai_websocket(
                 "mode": mode,
                 "user_id": current_user.user_id,
                 "ai_session_id": ai_session_id,
+                "language": language,
                 "target_patient_id": normalized_target_patient_id,
                 "context_payload": {
                     "ai_session_id": ai_session_id,
