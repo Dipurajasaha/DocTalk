@@ -10,6 +10,9 @@ from pydantic.v1 import BaseSettings, Field
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env", override=False)
+# Support repo-root `env` file when `.env` is absent (common local setup).
+if not (PROJECT_ROOT / ".env").exists() and (PROJECT_ROOT / "env").is_file():
+    load_dotenv(PROJECT_ROOT / "env", override=False)
 
 
 class Settings(BaseSettings):

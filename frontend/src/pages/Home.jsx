@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../styles/home.css';
-import { patientApi } from '../lib/api';
+import { apiClient } from '../lib/apiClient';
 
 // ─── Animated counter hook ────────────────────────────────────────────────────
 function useCounter(target, duration = 1800, start = false) {
@@ -76,7 +76,7 @@ const Home = () => {
     let cancelled = false;
     const loadNews = async () => {
       try {
-        const data = await patientApi.getLandingNews();
+        const data = await apiClient.get('/api/public/news', { retries: 1 });
         if (!cancelled) {
           setNews(Array.isArray(data) ? data : []);
           setNewsError(false);

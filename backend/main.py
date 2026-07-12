@@ -34,6 +34,10 @@ app.add_middleware(
 )
 
 
+# Routes that do not require a database connection (external APIs, health checks).
+_DB_OPTIONAL_PATHS = frozenset({"/health", "/api/public/news"})
+
+
 @app.middleware("http")
 async def db_connect_middleware(request: Request, call_next):
     """Ensure the database is connected before each request.
@@ -41,6 +45,9 @@ async def db_connect_middleware(request: Request, call_next):
     This runs BEFORE any route handler so that services never hit
     ClientNotConnectedError even if the startup DB connect failed.
     """
+    if request.url.path in _DB_OPTIONAL_PATHS:
+        return await call_next(request)
+
     try:
         await ensure_connected()
     except Exception as exc:
