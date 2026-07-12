@@ -73,7 +73,9 @@ class AppointmentResponse(BaseModel):
     doctorMessage: str | None = None
     doctor_message: str | None = None
     isActive: bool = True
-    status: AppointmentStatus
+    status: str
+    payment_status: str | None = None  # CREATED | CAPTURED | FAILED | REFUNDED | None
+    amount_paise: int | None = None    # consultation fee charged
     requested_at: datetime
     created_at: datetime
     updated_at: datetime | None = None

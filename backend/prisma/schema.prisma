@@ -81,9 +81,9 @@ model Doctor {
   specialization      String?
   bio                 String?
   profilePic          String?
+  consultationFee     Int?           @default(0)
   schedules           Json?          @db.JsonB
   appointmentRequests Json?          @db.JsonB
-  payments            Json?          @db.JsonB
   patientChats        Json?          @db.JsonB
   closedChats         Json?          @db.JsonB
   isBanned           Boolean        @default(false)
@@ -187,6 +187,7 @@ model Appointment {
   note              String?
   doctorMessage     String?
   status            String       @default("PENDING")
+  amountPaise       Int?         @default(0)
   requestedAt       DateTime     @default(now())
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
@@ -195,6 +196,7 @@ model Appointment {
   doctor            Doctor       @relation(fields: [doctorId], references: [doctorId], onDelete: Cascade)
   slot              DoctorSlot?  @relation(fields: [slotId], references: [id], onDelete: SetNull)
   consultation      Consultation?
+  payment           Payment?
 
   @@index([patientUsername])
   @@index([doctorId])
@@ -433,4 +435,31 @@ model PatientMedicalHistory {
   @@index([patientId, historyType])
   @@index([recordDate])
   @@map("patient_medical_histories")
+}
+
+enum PaymentStatus {
+  CREATED
+  CAPTURED
+  FAILED
+  REFUNDED
+}
+
+model Payment {
+  id                  String        @id @default(uuid())
+  appointmentId       String        @unique
+  razorpayOrderId     String        @unique
+  razorpayPaymentId   String?
+  razorpaySignature   String?
+  amountPaise         Int
+  currency            String        @default("INR")
+  status              PaymentStatus @default(CREATED)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([razorpayOrderId])
+  @@index([razorpayPaymentId])
+  @@index([appointmentId])
+  @@map("payments")
 }

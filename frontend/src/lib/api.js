@@ -56,6 +56,46 @@ export const patientApi = {
   requestAppointment: (body) => apiClient.post('/api/appointment_request', body, { retries: 0, auth: true }),
 };
 
+export const paymentApi = {
+  /**
+   * Create a Razorpay order for an appointment.
+   * Returns { order_id, amount, currency, key_id, appointment_id }.
+   */
+  createOrder: (appointmentType, doctorId, slotId, reason, note) =>
+    apiClient.post(
+      '/api/payments/create-order',
+      { appointment_type: appointmentType, doctor_id: doctorId, slot_id: slotId || null, reason, note: note || null },
+      { retries: 0, auth: true }
+    ),
+
+  /**
+   * Create a new Razorpay order for an existing pending appointment.
+   */
+  retryOrder: (appointmentId) =>
+    apiClient.post(
+      '/api/payments/retry-order',
+      { appointment_id: appointmentId },
+      { retries: 0, auth: true }
+    ),
+
+  /**
+   * Verify the payment signature returned by Razorpay checkout.
+   * Returns { success, appointment_id, status }.
+   */
+  verifyPayment: (razorpayOrderId, razorpayPaymentId, razorpaySignature, appointmentId) =>
+    apiClient.post(
+      '/api/payments/verify',
+      {
+        razorpay_order_id: razorpayOrderId,
+        razorpay_payment_id: razorpayPaymentId,
+        razorpay_signature: razorpaySignature,
+        appointment_id: appointmentId,
+      },
+      { retries: 0, auth: true }
+    ),
+};
+
+
 export const hospitalApi = {
   login: (hospitalId, password) => apiClient.post('/api/hospital/auth/login', { hospital_id: hospitalId, password }, { retries: 0 }),
   signup: (data) => apiClient.post('/api/hospital/auth/signup', data, { retries: 0 }),

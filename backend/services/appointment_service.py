@@ -127,7 +127,7 @@ class AppointmentService:
 
         await self.client.doctorslot.update(where={"id": slot_id}, data={"isBooked": True})
         try:
-            created = await self.client.appointment.create(data=appointment_data, include={"patient": True, "doctor": True, "slot": True})
+            created = await self.client.appointment.create(data=appointment_data, include={"patient": True, "doctor": True, "slot": True, "payment": True})
         except Exception:
             await self.client.doctorslot.update(where={"id": slot_id}, data={"isBooked": False})
             raise
@@ -156,7 +156,7 @@ class AppointmentService:
                 "requestedAt": datetime.now(timezone.utc),
                 "status": "PENDING",
             },
-            include={"patient": True, "doctor": True, "slot": True},
+            include={"patient": True, "doctor": True, "slot": True, "payment": True},
         )
         return self._serialize_appointment(created)
 
@@ -168,7 +168,7 @@ class AppointmentService:
         if action not in {"ACCEPT", "REJECT"}:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="status must be ACCEPT or REJECT")
 
-        appointment = await self.client.appointment.find_unique(where={"id": appointment_id}, include={"patient": True, "doctor": True, "slot": True})
+        appointment = await self.client.appointment.find_unique(where={"id": appointment_id}, include={"patient": True, "doctor": True, "slot": True, "payment": True})
         if appointment is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found")
         if appointment.doctorId != doctor_id:
@@ -186,7 +186,7 @@ class AppointmentService:
                     "status": "CONFIRMED",
                     "doctorMessage": doctor_message or "Accepted by doctor",
                 },
-                include={"patient": True, "doctor": True, "slot": True},
+                include={"patient": True, "doctor": True, "slot": True, "payment": True},
             )
             return self._serialize_appointment(updated)
 
@@ -196,7 +196,7 @@ class AppointmentService:
                 "status": "REJECTED",
                 "doctorMessage": doctor_message or "Rejected by doctor",
             },
-            include={"patient": True, "doctor": True, "slot": True},
+            include={"patient": True, "doctor": True, "slot": True, "payment": True},
         )
         return self._serialize_appointment(updated)
 
@@ -211,7 +211,7 @@ class AppointmentService:
         appointments = await self.client.appointment.find_many(
             where={"patientUsername": patient_id},
             order={"createdAt": "desc"},
-            include={"patient": True, "doctor": True, "slot": True},
+            include={"patient": True, "doctor": True, "slot": True, "payment": True},
         )
         return [self._serialize_appointment(item) for item in appointments]
 
@@ -219,7 +219,7 @@ class AppointmentService:
         appointments = await self.client.appointment.find_many(
             where={"doctorId": doctor_id},
             order={"createdAt": "desc"},
-            include={"patient": True, "doctor": True, "slot": True},
+            include={"patient": True, "doctor": True, "slot": True, "payment": True},
         )
         return [self._serialize_appointment(item) for item in appointments]
 
@@ -238,7 +238,7 @@ class AppointmentService:
         return await self.create_open_request(patient_id, {"doctorId": doctor_id, "reason": reason})
 
     async def update_appointment(self, appointment_id: str, payload: dict[str, Any], *, actor_role: str, actor_id: str) -> dict[str, Any]:
-        appointment = await self.client.appointment.find_unique(where={"id": appointment_id}, include={"patient": True, "doctor": True, "slot": True})
+        appointment = await self.client.appointment.find_unique(where={"id": appointment_id}, include={"patient": True, "doctor": True, "slot": True, "payment": True})
         if appointment is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found")
 
@@ -251,7 +251,7 @@ class AppointmentService:
         if not updates:
             return self._serialize_appointment(appointment)
 
-        updated = await self.client.appointment.update(where={"id": appointment_id}, data=updates, include={"patient": True, "doctor": True, "slot": True})
+        updated = await self.client.appointment.update(where={"id": appointment_id}, data=updates, include={"patient": True, "doctor": True, "slot": True, "payment": True})
         return self._serialize_appointment(updated)
 
     async def approve_appointment(self, doctor_id: str, appointment_id: str) -> dict[str, Any]:
@@ -275,12 +275,12 @@ class AppointmentService:
         updated = await self.client.appointment.update(
             where={"id": appointment_id},
             data={"status": "CANCELLED", "slotId": None},
-            include={"patient": True, "doctor": True, "slot": True},
+            include={"patient": True, "doctor": True, "slot": True, "payment": True},
         )
         return self._serialize_appointment(updated)
 
     async def _require_doctor_owned_appointment(self, doctor_id: str, appointment_id: str) -> Any:
-        appointment = await self.client.appointment.find_unique(where={"id": appointment_id}, include={"patient": True, "doctor": True, "slot": True})
+        appointment = await self.client.appointment.find_unique(where={"id": appointment_id}, include={"patient": True, "doctor": True, "slot": True, "payment": True})
         if appointment is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found")
         if appointment.doctorId != doctor_id:
@@ -288,7 +288,7 @@ class AppointmentService:
         return appointment
 
     async def _require_patient_owned_appointment(self, patient_id: str, appointment_id: str) -> Any:
-        appointment = await self.client.appointment.find_unique(where={"id": appointment_id}, include={"patient": True, "doctor": True, "slot": True})
+        appointment = await self.client.appointment.find_unique(where={"id": appointment_id}, include={"patient": True, "doctor": True, "slot": True, "payment": True})
         if appointment is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found")
         if appointment.patientUsername != patient_id:
@@ -362,9 +362,11 @@ class AppointmentService:
         patient = data.get("patient") or {}
         doctor = data.get("doctor") or {}
         slot = data.get("slot") or {}
+        payment = data.get("payment") or {}
         patient_data = patient.model_dump() if hasattr(patient, "model_dump") else dict(patient)
         doctor_data = doctor.model_dump() if hasattr(doctor, "model_dump") else dict(doctor)
         slot_data = slot.model_dump() if hasattr(slot, "model_dump") else dict(slot)
+        payment_data = payment.model_dump() if hasattr(payment, "model_dump") else dict(payment) if payment else {}
         appointment_date = data.get("appointmentDate") or data.get("scheduledTime")
         normalized_status = cls._normalize_status(data.get("status"))
         doctor_message = data.get("doctorMessage")
@@ -388,6 +390,8 @@ class AppointmentService:
             "doctor_message": doctor_message,
             "isActive": bool(data.get("isActive", True)),
             "status": normalized_status,
+            "payment_status": payment_data.get("status") if payment_data else None,
+            "amount_paise": data.get("amountPaise") or payment_data.get("amountPaise"),
             "requested_at": data.get("requestedAt"),
             "created_at": data.get("createdAt"),
             "updated_at": data.get("updatedAt"),
