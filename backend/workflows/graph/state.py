@@ -46,7 +46,7 @@ class WorkflowState(TypedDict):
     timing_metrics: dict[str, float]
     conversation_memory: dict[str, Any]
     recommendation_context: dict[str, Any]
-    session_risk_score: int
+    session_risk_score: Annotated[int, operator.add]
     input_guardrail_context: dict[str, Any]
     output_guardrail_context: dict[str, Any]
 

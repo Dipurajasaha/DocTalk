@@ -114,7 +114,7 @@ async def output_guardrail_node(state: UnifiedChatState) -> dict[str, Any]:
     return {
         "messages": [messages[last_index]] if triggered_rules else [],
         "final_response": guarded_text if triggered_rules else response_text,
-        "session_risk_score": new_risk_score,
+        "session_risk_score": session_risk_delta,
         "output_guardrail_context": {
             "triggered_rules": triggered_rules,
             "session_risk_delta": session_risk_delta,

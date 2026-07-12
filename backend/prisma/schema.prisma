@@ -434,3 +434,13 @@ model PatientMedicalHistory {
   @@index([recordDate])
   @@map("patient_medical_histories")
 }
+
+model SemanticCacheWord {
+  id        String   @id @default(cuid())
+  word      String   @unique
+  category  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("semantic_cache_words")
+}
