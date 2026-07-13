@@ -131,6 +131,7 @@ class CurrentUserProfileResponse(BaseModel):
     banned_at: datetime | None = None
     ban_reason: str | None = None
     is_super_admin: bool | None = None
+    consultation_fee: int | None = None  # paise (₹ × 100)
 
 
 class UserProfileUpdateRequest(BaseModel):
@@ -154,4 +155,4 @@ class UserProfileUpdateRequest(BaseModel):
     specialization: str | None = None
     bio: str | None = None
     experience: str | None = None
-
+    consultation_fee: int | None = None  # paise (₹ × 100)

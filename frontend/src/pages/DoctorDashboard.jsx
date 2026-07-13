@@ -1300,6 +1300,13 @@ export default function DoctorDashboard() {
                   <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Mobile Number</label>
                   <input id="doc-setting-mobile" type="text" defaultValue={user.mobile || ''} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px', marginTop: '6px', boxSizing: 'border-box' }} />
                 </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#6C5CE7' }}>💳 Consultation Fee (₹)</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
+                    <input id="doc-setting-fee" type="number" min="0" step="50" defaultValue={user.consultation_fee ? Math.round(user.consultation_fee / 100) : ''} placeholder="e.g. 500" style={{ flex: 1, padding: '12px 14px', border: '2px solid #C4B5FD', borderRadius: '12px', outline: 'none', fontSize: '14px', boxSizing: 'border-box', background: '#FDFAFF' }} />
+                    <div style={{ fontSize: '12px', color: '#64748B', minWidth: '160px' }}>Patients pay this amount before an appointment is confirmed. Leave blank for the default (₹500).</div>
+                  </div>
+                </div>
               </div>
 
               <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -1312,6 +1319,10 @@ export default function DoctorDashboard() {
                       location: document.getElementById('doc-setting-location').value || undefined,
                       hospital_location: document.getElementById('doc-setting-location').value || undefined,
                       mobile: document.getElementById('doc-setting-mobile').value || undefined,
+                      consultation_fee: (() => {
+                        const v = document.getElementById('doc-setting-fee')?.value;
+                        return v && !isNaN(Number(v)) && Number(v) > 0 ? Math.round(Number(v) * 100) : undefined;
+                      })(),
                     };
                     // Remove undefined/empty keys
                     Object.keys(payload).forEach(k => { if (payload[k] === undefined) delete payload[k]; });

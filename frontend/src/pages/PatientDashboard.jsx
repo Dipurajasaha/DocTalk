@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSession } from '../contexts/SessionContext';
 import { useNotifications, useAssetCache } from '../contexts';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { authApi, patientApi, buildAssetDownloadUrl } from '../lib/api';
+import { authApi, patientApi, paymentApi, buildAssetDownloadUrl } from '../lib/api';
 import { buildAiChatWebSocketUrl, createRealTimeClient } from '../lib/realTimeClient';
 import '../styles/patient.css';
 import XrayAnalyzerPanel from '../components/XrayAnalyzerPanel';
@@ -10,6 +10,7 @@ import MarkdownMessage from '../components/chat/MarkdownMessage';
 import FileViewer from '../components/FileViewer';
 import AiProcessingCard from '../components/AiProcessingCard';
 import StructuredReply from '../components/StructuredReply';
+import RazorpayCheckout from '../components/RazorpayCheckout';
 
 const GENERAL_UPLOADS_FOLDER_PATH = '/my_documents/general_uploads/';
 const LEGACY_UNCLASSIFIED_FOLDER_PATH = '/my_documents/unclassified/';
@@ -198,6 +199,9 @@ export default function PatientDashboard() {
   const [selectedSlotId, setSelectedSlotId] = useState('');
   const [slotLoading, setSlotLoading] = useState(false);
   const [bookingInProgress, setBookingInProgress] = useState(false);
+  // ── Razorpay payment state ───────────────────────────────────────────────
+  const [pendingOrder, setPendingOrder] = useState(null);  // active Razorpay order
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
 
   const [activeDocChat, setActiveDocChat] = useState(null);
   const [consultations, setConsultations] = useState([]);
@@ -905,10 +909,12 @@ export default function PatientDashboard() {
     }
   };
 
-  const handleCreateAppointment = async (e) => {
-    e.preventDefault();
+  // ── Razorpay payment handlers ─────────────────────────────────────────────
 
-    if (bookingInProgress) return;
+  /** Step 1: Patient submits form → create Razorpay order (provisional appointment) */
+  const handleInitiatePayment = async (e) => {
+    e.preventDefault();
+    if (bookingInProgress || paymentProcessing) return;
 
     const doctorId = String(appointmentDraft.doctor_id || '').trim();
     const reason = String(appointmentDraft.reason || '').trim();
@@ -917,7 +923,6 @@ export default function PatientDashboard() {
       try { addNotification({ type: 'error', message: 'Choose a doctor and add a reason before booking.' }); } catch (e) {}
       return;
     }
-
     if (bookingMode === 'direct' && !String(selectedSlotId || '').trim()) {
       try { addNotification({ type: 'error', message: 'Choose an available slot before booking.' }); } catch (e) {}
       return;
@@ -925,33 +930,102 @@ export default function PatientDashboard() {
 
     setBookingInProgress(true);
     try {
-      const data = bookingMode === 'direct'
-        ? await patientApi.bookDirectAppointment(selectedSlotId, reason, appointmentDraft.note.trim())
-        : await patientApi.bookOpenAppointment(doctorId, reason, appointmentDraft.note.trim());
-
-      if (data && (data.id || data.success)) {
-        try { addNotification({ type: 'success', message: bookingMode === 'direct' ? 'Appointment booked successfully' : 'Open request sent successfully' }); } catch (e) {}
-        await refreshAvailableSlotsForDoctor(doctorId);
-        setAppointmentDraft(prev => ({
-          ...prev,
-          reason: 'General consultation',
-          note: '',
-        }));
-        loadAppointments();
+      const order = await paymentApi.createOrder(
+        bookingMode,
+        doctorId,
+        bookingMode === 'direct' ? selectedSlotId : null,
+        reason,
+        appointmentDraft.note?.trim() || null,
+      );
+      if (order?.order_id) {
+        setPendingOrder(order);
       } else {
-        try { addNotification({ type: 'error', message: 'Error creating appointment: ' + (data && (data.error || data.detail) || 'unknown') }); } catch (e) {}
+        throw new Error(order?.detail || order?.error || 'Order creation failed');
       }
     } catch (err) {
-      console.error('create appointment failed', err);
+      console.error('create order failed', err);
       if (err?.status === 409) {
         await refreshAvailableSlotsForDoctor(doctorId);
-        try { window.alert('That slot was just booked by someone else. Please choose another available slot.'); } catch (e) {}
-        try { addNotification({ type: 'error', message: 'That slot was just booked by someone else. Please choose another available slot.' }); } catch (e) {}
+        try { addNotification({ type: 'error', message: 'That slot was just booked. Please choose another.' }); } catch (e) {}
       } else {
-        try { addNotification({ type: 'error', message: 'Error creating appointment: ' + (err?.message || 'server error') }); } catch (e) {}
+        try { addNotification({ type: 'error', message: 'Payment initiation failed: ' + (err?.message || 'server error') }); } catch (e) {}
       }
     } finally {
       setBookingInProgress(false);
+    }
+  };
+
+  /** Step 2: Razorpay checkout succeeded → verify HMAC on backend */
+  const handlePaymentSuccess = async ({ razorpay_order_id, razorpay_payment_id, razorpay_signature, appointment_id }) => {
+    setPaymentProcessing(true);
+    try {
+      const result = await paymentApi.verifyPayment(
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature,
+        appointment_id,
+      );
+      if (result?.success) {
+        const isDirectBooking = result.status === 'CONFIRMED';
+        try {
+          addNotification({
+            type: 'success',
+            message: isDirectBooking
+              ? '✅ Payment successful! Your appointment is confirmed.'
+              : '✅ Payment successful! Appointment request sent — the doctor will confirm the time.',
+          });
+        } catch (e) {}
+        setPendingOrder(null);
+        setAppointmentDraft(prev => ({ ...prev, reason: 'General consultation', note: '' }));
+        await refreshAvailableSlotsForDoctor(appointmentDraft.doctor_id);
+        loadAppointments();
+      } else {
+        try { addNotification({ type: 'error', message: 'Payment verification failed. Please contact support.' }); } catch (e) {}
+      }
+    } catch (err) {
+      console.error('verify payment failed', err);
+      try { addNotification({ type: 'error', message: 'Payment verification error: ' + (err?.message || 'server error') }); } catch (e) {}
+    } finally {
+      setPaymentProcessing(false);
+    }
+  };
+
+  /** Step 2b: Razorpay checkout failed or was dismissed */
+  const handlePaymentFailure = (err) => {
+    setPendingOrder(null);
+    setPaymentProcessing(false);
+    try { addNotification({ type: 'error', message: 'Payment failed: ' + (err?.message || 'unknown error') }); } catch (e) {}
+    // Refresh slots in case the slot hold was released by the backend
+    if (appointmentDraft.doctor_id) {
+      refreshAvailableSlotsForDoctor(appointmentDraft.doctor_id);
+    }
+    loadAppointments();
+  };
+
+  const handlePaymentDismiss = () => {
+    setPendingOrder(null);
+    setPaymentProcessing(false);
+    try { addNotification({ type: 'info', message: 'Payment cancelled. Your appointment request was not confirmed.' }); } catch (e) {}
+    if (appointmentDraft.doctor_id) {
+      refreshAvailableSlotsForDoctor(appointmentDraft.doctor_id);
+    }
+    loadAppointments();
+  };
+
+  /** "Pay Now" button for existing PAYMENT_PENDING appointments */
+  const handlePayNow = async (appt) => {
+    if (paymentProcessing) return;
+    setPaymentProcessing(true);
+    try {
+      const order = await paymentApi.retryOrder(appt.id);
+      if (order?.order_id) {
+        setPendingOrder(order);
+      } else {
+        throw new Error('Could not recreate payment order');
+      }
+    } catch (err) {
+      setPaymentProcessing(false);
+      try { addNotification({ type: 'error', message: 'Could not initiate payment: ' + (err?.message || 'server error') }); } catch (e) {}
     }
   };
 
@@ -2499,7 +2573,7 @@ export default function PatientDashboard() {
 
           {activePanel === 'appointments' && (
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }}>
                   <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>Appointments Hub</h2>
                 </div>
@@ -2517,19 +2591,38 @@ export default function PatientDashboard() {
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         {appointments.map((appt, i) => (
-                          <div key={i} className="session-card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', background: '#FFF', border: '1px solid #E2E8F0', borderRadius: '16px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                          <div key={i} className="session-card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', background: '#FFF', border: `1px solid ${String(appt.status || '').toUpperCase() === 'PAYMENT_PENDING' ? '#FED7AA' : '#E2E8F0'}`, borderRadius: '16px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', borderLeft: `4px solid ${String(appt.status || '').toUpperCase() === 'CONFIRMED' ? '#22c55e' : String(appt.status || '').toUpperCase() === 'PAYMENT_PENDING' ? '#f97316' : String(appt.status || '').toUpperCase() === 'REJECTED' || String(appt.status || '').toUpperCase() === 'CANCELLED' ? '#ef4444' : '#8B7EFF'}` }}>
                             <div>
                               <strong style={{ fontSize: '11px', color: '#1E293B' }}>Dr. {appt.doctor_display}</strong>
                               <div style={{ fontSize: '11px', color: '#64748B', marginTop: '6px' }}>Reason: {appt.reason}</div>
                               {(appt.appointmentDate || appt.scheduled_time) && <div style={{ fontSize: '11px', color: '#8B7EFF', marginTop: '4px', fontWeight: '500' }}>Time: {new Date(appt.appointmentDate || appt.scheduled_time).toLocaleString()}</div>}
                               {String(appt.doctorMessage || '').trim() && String(appt.status || '').toUpperCase() === 'REJECTED' && <div style={{ fontSize: '11px', color: '#B45309', marginTop: '4px' }}>Doctor note: {appt.doctorMessage}</div>}
+                              {appt.amount_paise > 0 && (
+                                <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span>💳</span>
+                                  <span>₹{(appt.amount_paise / 100).toFixed(0)} · </span>
+                                  <span style={{ fontWeight: '700', color: appt.payment_status === 'CAPTURED' ? '#16a34a' : appt.payment_status === 'FAILED' ? '#ef4444' : '#f97316' }}>
+                                    {appt.payment_status === 'CAPTURED' ? 'Paid' : appt.payment_status === 'FAILED' ? 'Failed' : 'Payment Pending'}
+                                  </span>
+                                </div>
+                              )}
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                              <span style={{ display: 'inline-block', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '700', background: String(appt.status || '').toUpperCase() === 'PENDING' ? '#FEF3C7' : String(appt.status || '').toUpperCase() === 'CONFIRMED' ? '#DCFCE7' : String(appt.status || '').toUpperCase() === 'REJECTED' ? '#FEE2E2' : '#E2E8F0', color: String(appt.status || '').toUpperCase() === 'PENDING' ? '#D97706' : String(appt.status || '').toUpperCase() === 'CONFIRMED' ? '#166534' : String(appt.status || '').toUpperCase() === 'REJECTED' ? '#B91C1C' : '#475569' }}>
-                                {String(appt.status || '').toUpperCase()}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                              <span style={{ display: 'inline-block', padding: '6px 12px', borderRadius: '50px', fontSize: '10px', fontWeight: '700', background: String(appt.status || '').toUpperCase() === 'PAYMENT_PENDING' ? '#FFF7ED' : String(appt.status || '').toUpperCase() === 'PENDING' ? '#FEF3C7' : String(appt.status || '').toUpperCase() === 'CONFIRMED' ? '#DCFCE7' : String(appt.status || '').toUpperCase() === 'REJECTED' ? '#FEE2E2' : '#E2E8F0', color: String(appt.status || '').toUpperCase() === 'PAYMENT_PENDING' ? '#c2410c' : String(appt.status || '').toUpperCase() === 'PENDING' ? '#D97706' : String(appt.status || '').toUpperCase() === 'CONFIRMED' ? '#166534' : String(appt.status || '').toUpperCase() === 'REJECTED' ? '#B91C1C' : '#475569' }}>
+                                {String(appt.status || '').toUpperCase() === 'PAYMENT_PENDING' ? '⏳ Awaiting Payment' : String(appt.status || '').toUpperCase()}
                               </span>
+                              {String(appt.status || '').toUpperCase() === 'PAYMENT_PENDING' && appt.payment_status !== 'CAPTURED' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handlePayNow(appt)}
+                                  disabled={paymentProcessing}
+                                  style={{ padding: '8px 14px', borderRadius: '50px', border: 'none', background: 'linear-gradient(135deg, #f97316, #ea580c)', color: '#FFF', fontSize: '10px', fontWeight: '700', cursor: paymentProcessing ? 'not-allowed' : 'pointer', boxShadow: '0 4px 12px rgba(249,115,22,0.3)' }}
+                                >
+                                  {paymentProcessing ? '...' : '💳 Pay Now'}
+                                </button>
+                              )}
                               {String(appt.status || '').toUpperCase() !== 'CANCELLED' && String(appt.status || '').toUpperCase() !== 'COMPLETED' && String(appt.status || '').toUpperCase() !== 'REJECTED' && (
-                                <button type="button" onClick={() => handleCancelAppointment(appt.id)} style={{ padding: '8px 14px', borderRadius: '50px', border: '1px solid #FCA5A5', background: '#FFF1F2', color: '#BE123C', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>
+                                <button type="button" onClick={() => handleCancelAppointment(appt.id)} style={{ padding: '8px 14px', borderRadius: '50px', border: '1px solid #FCA5A5', background: '#FFF1F2', color: '#BE123C', fontSize: '10px', fontWeight: '700', cursor: 'pointer' }}>
                                   Cancel
                                 </button>
                               )}
@@ -2542,7 +2635,7 @@ export default function PatientDashboard() {
 
                   <div style={{ flex: 1 }}>
                     <h3 style={{ fontSize: '11px', marginBottom: '24px', color: '#475569', borderBottom: '2px solid #F1F5F9', paddingBottom: '12px' }}>Book New Appointment</h3>
-                    <form onSubmit={handleCreateAppointment} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', padding: '20px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '16px', marginBottom: '24px' }}>
+                    <form onSubmit={handleInitiatePayment} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', padding: '20px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '16px', marginBottom: '24px' }}>
                       <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '10px' }}>
                         <button type="button" onClick={() => setBookingMode('direct')} style={{ flex: 1, padding: '10px 14px', borderRadius: '999px', border: bookingMode === 'direct' ? 'none' : '1px solid #CBD5E1', background: bookingMode === 'direct' ? '#6C5CE7' : '#FFF', color: bookingMode === 'direct' ? '#FFF' : '#475569', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>Pick a Time</button>
                         <button type="button" onClick={() => setBookingMode('open')} style={{ flex: 1, padding: '10px 14px', borderRadius: '999px', border: bookingMode === 'open' ? 'none' : '1px solid #CBD5E1', background: bookingMode === 'open' ? '#6C5CE7' : '#FFF', color: bookingMode === 'open' ? '#FFF' : '#475569', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>Send Open Request</button>
@@ -2553,7 +2646,8 @@ export default function PatientDashboard() {
                           <option value="">Select a doctor</option>
                           {doctors.map(doc => {
                             const doctorId = doc.doctor_id || doc.id;
-                            return <option key={doctorId} value={doctorId}>Dr. {doc.name} {doc.category ? `- ${doc.category}` : ''}</option>;
+                            const fee = doc.consultation_fee ? ` · ₹${(doc.consultation_fee / 100).toFixed(0)}` : '';
+                            return <option key={doctorId} value={doctorId}>Dr. {doc.name} {doc.category ? `- ${doc.category}` : ''}{fee}</option>;
                           })}
                         </select>
                       </label>
@@ -2580,25 +2674,42 @@ export default function PatientDashboard() {
                         Note
                         <textarea value={appointmentDraft.note} onChange={e => setAppointmentDraft(prev => ({ ...prev, note: e.target.value }))} placeholder="Optional context for the doctor" rows="3" style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF', resize: 'vertical' }} />
                       </label>
+                      {appointmentDraft.doctor_id && (() => {
+                        const selDoc = doctors.find(d => String(d.doctor_id || d.id) === String(appointmentDraft.doctor_id));
+                        const fee = selDoc?.consultation_fee || 50000;
+                        return (
+                          <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'linear-gradient(135deg, #EDE9FE, #F3F0FF)', borderRadius: '12px', border: '1px solid #C4B5FD' }}>
+                            <span style={{ fontSize: '11px', color: '#5B21B6', fontWeight: '600' }}>💳 Consultation Fee</span>
+                            <span style={{ fontSize: '14px', fontWeight: '800', color: '#4C1D95' }}>₹{(fee / 100).toFixed(0)}</span>
+                          </div>
+                        );
+                      })()}
                       <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
                         <button
                           type="submit"
-                          disabled={bookingInProgress || (bookingMode === 'direct' && (!selectedSlotId || slotLoading))}
-                          style={{ padding: '12px 18px', borderRadius: '999px', border: 'none', background: bookingInProgress || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? '#C4B5FD' : '#8B7EFF', color: '#FFF', fontSize: '11px', fontWeight: '700', cursor: bookingInProgress || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? 'not-allowed' : 'pointer', boxShadow: '0 8px 18px rgba(139,126,255,0.28)' }}>
-                          {bookingInProgress ? 'Booking...' : bookingMode === 'direct' ? 'Book Slot' : 'Send Request'}
+                          disabled={bookingInProgress || paymentProcessing || (bookingMode === 'direct' && (!selectedSlotId || slotLoading))}
+                          style={{ padding: '12px 24px', borderRadius: '999px', border: 'none', background: bookingInProgress || paymentProcessing || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? '#C4B5FD' : 'linear-gradient(135deg, #8B7EFF, #6C5CE7)', color: '#FFF', fontSize: '11px', fontWeight: '700', cursor: bookingInProgress || paymentProcessing || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? 'not-allowed' : 'pointer', boxShadow: '0 8px 18px rgba(139,126,255,0.28)', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          {bookingInProgress ? 'Creating Order…' : paymentProcessing ? 'Processing…' : '💳 Proceed to Pay'}
                         </button>
                       </div>
                     </form>
 
-                    <div className="doctor-profile-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '20px' }}>
+                    <div className="doctor-profile-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '20px' }}>
                       {doctors.map(doc => {
                         const doctorId = String(doc.doctor_id || doc.id || '');
+                        const feePaise = doc.consultation_fee || 0;
+                        const isSelected = appointmentDraft.doctor_id === doctorId;
                         return (
-                          <div key={doctorId} style={{ padding: '24px', border: '1px solid #E2E8F0', borderRadius: '16px', background: appointmentDraft.doctor_id === doctorId ? '#F3F0FF' : '#F8FAFC', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', transition: 'all 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.05)'} onMouseLeave={(e) => e.currentTarget.style.boxShadow='none'}>
-                            <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: '#E2E8F0', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}></div>
-                            <div style={{ fontWeight: '700', fontSize: '11px', color: '#1E293B' }}>Dr. {doc.name}</div>
-                            <div style={{ fontSize: '11px', color: '#64748B', marginBottom: '20px' }}>{doc.category}</div>
-                            <button onClick={() => handleSelectDoctorForAppointment(doctorId)} style={{ width: '100%', background: appointmentDraft.doctor_id === doctorId ? '#6C5CE7' : '#8B7EFF', color: '#fff', border: 'none', padding: '12px 16px', borderRadius: '50px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>Select Doctor</button>
+                          <div key={doctorId} style={{ padding: '24px', border: `1px solid ${isSelected ? '#C4B5FD' : '#E2E8F0'}`, borderRadius: '16px', background: isSelected ? '#F3F0FF' : '#F8FAFC', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', transition: 'all 0.2s', boxShadow: isSelected ? '0 4px 16px rgba(108,92,231,0.15)' : 'none' }} onMouseEnter={(e) => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.07)'} onMouseLeave={(e) => e.currentTarget.style.boxShadow=isSelected ? '0 4px 16px rgba(108,92,231,0.15)' : 'none'}>
+                            <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: isSelected ? '#DDD6FE' : '#E2E8F0', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>👨‍⚕️</div>
+                            <div style={{ fontWeight: '700', fontSize: '11px', color: '#1E293B', marginBottom: '2px' }}>Dr. {doc.name}</div>
+                            <div style={{ fontSize: '10px', color: '#64748B', marginBottom: '6px' }}>{doc.category}</div>
+                            {feePaise > 0
+                              ? <div style={{ fontSize: '12px', fontWeight: '800', color: '#6C5CE7', marginBottom: '12px', background: '#EDE9FE', padding: '3px 10px', borderRadius: '50px' }}>₹{(feePaise / 100).toFixed(0)}</div>
+                              : <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '12px' }}>Fee not set</div>
+                            }
+                            <button onClick={() => handleSelectDoctorForAppointment(doctorId)} style={{ width: '100%', background: isSelected ? '#6C5CE7' : '#8B7EFF', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '50px', cursor: 'pointer', fontSize: '11px', fontWeight: '600', transition: 'all 0.2s' }}>{isSelected ? '✓ Selected' : 'Select Doctor'}</button>
                           </div>
                         );
                       })}
@@ -2607,6 +2718,20 @@ export default function PatientDashboard() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* ── Razorpay Checkout Modal ─────────────────────────────── */}
+          {pendingOrder && (
+            <RazorpayCheckout
+              order={pendingOrder}
+              patientName={user?.name || user?.display_name || ''}
+              patientEmail={user?.email || ''}
+              patientPhone={user?.mobile || user?.phone || ''}
+              onSuccess={handlePaymentSuccess}
+              onFailure={handlePaymentFailure}
+              onDismiss={handlePaymentDismiss}
+              autoOpen={true}
+            />
           )}
 
           {activePanel === 'docchat' && (

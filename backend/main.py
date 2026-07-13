@@ -16,6 +16,7 @@ from .api.users import doctor_router as user_doctor_router, router as users_rout
 from .api.image_analysis import router as image_analysis_router
 from .api.stats import router as stats_router
 from .api.prescriptions import router as prescriptions_router
+from .api.payments import router as payments_router
 from .api.medicine_prices import router as medicine_prices_router
 from .core.database import connect_prisma, disconnect_prisma, ensure_connected, ping_database
 
@@ -85,6 +86,7 @@ app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 app.include_router(image_analysis_router, prefix="/api", tags=["images"])
 app.include_router(stats_router, prefix="/api/public", tags=["public"])
 app.include_router(prescriptions_router, prefix="/api/prescriptions", tags=["prescriptions"])
+app.include_router(payments_router, prefix="/api/payments", tags=["payments"])
 app.include_router(medicine_prices_router, prefix="/api", tags=["medicine-prices"])
 
 

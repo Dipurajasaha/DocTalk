@@ -131,6 +131,7 @@ class UserService:
             "mobile": "mobile",
             "experience": "experience",
             "location": "location",
+            "consultation_fee": "consultationFee",
         }
         updates: dict[str, Any] = {}
         for key, value in payload.items():
@@ -210,6 +211,7 @@ class UserService:
             "banned_at": data.get("bannedAt"),
             "ban_reason": data.get("banReason"),
             "is_super_admin": None,
+            "consultation_fee": data.get("consultationFee"),
         }
 
     @staticmethod
