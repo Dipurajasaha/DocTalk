@@ -17,6 +17,8 @@ from ..services.asset_service import AssetService, AssetConfig
 from ..services.user_service import UserService
 from ..services.xray_analysis_service import xray_analysis_service
 from ..services.patient_history_service import patient_history_service
+from ..services.chat_service import ChatService
+from ..services.medicine_price_service import search_medicine_prices
 from ..schemas.patient_history import CreatePatientHistory
 from ..core.database import prisma
 
@@ -46,7 +48,32 @@ def _listify_text(value: Any) -> list[str]:
     return [text] if text else []
 
 
-async def _analyze_text_document(text: str, *, language: str, title: str) -> dict[str, Any]:
+async def _extract_medicine_names_from_text(text: str) -> list[str]:
+    """Extract medicine names from prescription text using LLM."""
+    prompt = (
+        "Extract all medicine names from the following prescription text. "
+        "Return ONLY valid JSON in this exact format: {\"medicines\": [\"Aspirin\", \"Paracetamol\"]}. "
+        "Do not include dosages, frequencies, or instructions. "
+        "If no medicines are found, return {\"medicines\": []}.\n\n"
+        f"Prescription text:\n{text[:3000]}"
+    )
+    parsed = await complete_json(
+        [
+            SystemMessage(content="You are a medicine name extractor."),
+            HumanMessage(content=prompt),
+        ],
+        temperature=0.1,
+        max_output_tokens=512,
+    )
+    if not parsed:
+        return []
+    medicines = parsed.get("medicines") or []
+    if isinstance(medicines, list):
+        return [str(m).strip() for m in medicines if str(m).strip()][:20]
+    return []
+
+
+async def _analyze_text_document(text: str, *, language: str, title: str, asset_category: str | None = None) -> dict[str, Any]:
     prompt = medical_prompt_service.build_consultation_prompt(language=language, context_text=text)
     parsed = await complete_json(
         [
@@ -56,6 +83,26 @@ async def _analyze_text_document(text: str, *, language: str, title: str) -> dic
         temperature=0.2,
         max_output_tokens=1024,
     )
+    if not parsed:
+        snippet = " ".join(str(text or "").split())
+        snippet = snippet[:280] + ("..." if len(snippet) > 280 else "")
+        summary = snippet or "No structured analysis could be generated from this document."
+        return {
+            "success": True,
+            "reply": {
+                "title": title,
+                "description": summary,
+                "key_points": [snippet] if snippet else [],
+                "key_findings": [snippet] if snippet else [],
+                "observations": [snippet] if snippet else [],
+                "recommendations": [],
+                "notes": [],
+                "risks": [],
+                "summary": summary,
+                "findings": summary,
+                "warnings": [],
+            },
+        }
     summary = str(parsed.get("summary") or parsed.get("analysis") or "").strip()
     findings = str(parsed.get("findings") or summary or "").strip()
     recommendations = _listify_text(parsed.get("recommendations"))
@@ -78,7 +125,7 @@ async def _analyze_text_document(text: str, *, language: str, title: str) -> dic
             "summary": summary or findings,
             "findings": findings,
             "warnings": warnings,
-            "raw": parsed,
+            "raw": parsed if parsed else None,
         },
     }
 
@@ -160,9 +207,13 @@ async def explain_report(
 async def analyze_document(
     file_id: str = Form(...),
     language: str = Form(default="en"),
+    ai_session_id: str = Form(default=""),
     current_user: CurrentUser = Depends(get_current_user),
     service: AssetService = Depends(_asset_service),
 ) -> dict[str, Any]:
+    asset_record = await service.client.medicalasset.find_unique(where={"id": file_id})
+    asset_category = getattr(asset_record, "assetCategory", None) if asset_record else None
+
     plaintext, file_name, mime_type = await service.get_decrypted_asset(current_user.user_id, file_id)
 
     suffix = Path(file_name).suffix or ""
@@ -175,7 +226,7 @@ async def analyze_document(
     if mime_type.startswith("image/"):
         analysis = await xray_analysis_service.analyze_image(file_path, language=language)
         temp_file_path.unlink(missing_ok=True)
-        return {
+        result = {
             "success": True,
             "reply": {
                 "title": file_name,
@@ -192,13 +243,49 @@ async def analyze_document(
                 "raw": analysis,
             },
         }
+    else:
+        extracted = await ocr_service.extract_text(file_path, mime_type=mime_type)
+        text = str(extracted.get("extracted_text") or "").strip()
+        if not text:
+            text = f"No readable text could be extracted from {file_name}."
+        temp_file_path.unlink(missing_ok=True)
+        result = await _analyze_text_document(text, language=language, title=file_name, asset_category=asset_category)
 
-    extracted = await ocr_service.extract_text(file_path, mime_type=mime_type)
-    text = str(extracted.get("extracted_text") or "").strip()
-    if not text:
-        text = f"No readable text could be extracted from {file_name}."
-    temp_file_path.unlink(missing_ok=True)
-    return await _analyze_text_document(text, language=language, title=file_name)
+        if asset_category == "PRESCRIPTION" and result.get("success"):
+            medicine_names = await _extract_medicine_names_from_text(text)
+            if medicine_names:
+                try:
+                    medicine_prices = await search_medicine_prices(medicine_names)
+                    if medicine_prices:
+                        result["reply"]["medicines"] = medicine_prices
+                except Exception:
+                    pass
+
+    if ai_session_id and result.get("success"):
+        try:
+            session_id = str(ai_session_id).strip()
+            if current_user.role == "patient":
+                session_id = f"patient_ai_{current_user.user_id}"
+            elif current_user.role == "doctor":
+                session_id = f"doctor_ai_{current_user.user_id}"
+            chat_service = ChatService()
+            await chat_service.ensure_ai_session(
+                current_user.user_id,
+                current_user.role,
+                session_id,
+                mode="PATIENT" if current_user.role == "patient" else "DOCTOR_GENERAL",
+            )
+            reply = result.get("reply") or {}
+            content = json.dumps(reply, ensure_ascii=False, default=str)
+            await chat_service.append_ai_chat_exchange(
+                ai_session_id=session_id,
+                user_message="",
+                assistant_message=content,
+            )
+        except Exception:
+            pass
+
+    return result
 
 
 @router.post("/analyze_xray")

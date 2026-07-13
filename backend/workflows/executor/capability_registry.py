@@ -56,13 +56,23 @@ async def handle_appointment_retrieve(state: UnifiedChatState, params: dict[str,
             doctor_id=c_doctor_id,
             upcoming_only=(action == "upcoming")
         )
+        content_str = f"Appointment status: {action}.\n"
+        if appointments:
+            content_str += f"Found {len(appointments)} appointments:\n"
+            for appt in appointments:
+                doc_name = appt.doctor.name if appt.doctor else "Unknown Doctor"
+                slot_time = appt.slot.startTime.strftime('%Y-%m-%d %H:%M') if appt.slot else "Unknown Time"
+                content_str += f"- Doctor: {doc_name} | Time: {slot_time} | Status: {appt.status}\n"
+        else:
+            content_str += "No appointments found."
+
         return CapabilityResult(
             capability_name="APPOINTMENT",
             data={"action": action, "appointments": appointments},
             evidence=[{
                 "source": "APPOINTMENT",
                 "type": "appointment",
-                "content": f"Appointment status: {action}.",
+                "content": content_str,
                 "metadata": {"action": action}
             }]
         )
@@ -170,10 +180,21 @@ async def handle_asset_index_retrieve(state: UnifiedChatState, params: dict[str,
     if p_id:
         if action == "latest":
             doc = await get_latest_document(p_id, document_type=document_type) if report_type == "general" else await get_latest_report_by_type(p_id, report_type)
+            if not doc and report_type != "general":
+                # Fallback 1: Try document_type if available and not generic
+                if document_type and document_type not in ["medical_record", "general"]:
+                    doc = await get_latest_document(p_id, document_type=document_type)
+                # Fallback 2: Try the latest medical_record
+                if not doc:
+                    doc = await get_latest_document(p_id, document_type="medical_record")
             if doc:
                 asset_ids.append(doc.get("assetId"))
         elif action == "compare":
             docs = await get_reports_by_report_type(p_id, report_type, limit=limit, start_date=start_date)
+            if not docs and report_type != "general":
+                # Fallback
+                if document_type and document_type not in ["medical_record", "general"]:
+                    docs = await get_documents_by_type(p_id, doc_type=document_type, limit=limit, start_date=start_date)
             for d in docs:
                 asset_ids.append(d.get("assetId"))
                 

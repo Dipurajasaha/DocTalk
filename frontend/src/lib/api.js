@@ -111,6 +111,7 @@ export const hospitalApi = {
   createNews: (data) => apiClient.post('/api/hospital/news', data, { retries: 0, auth: true }),
   listNews: () => apiClient.get('/api/hospital/news', { retries: 1, auth: true }),
   getGlobalNews: (limit = 10) => apiClient.get(`/api/hospital/public/news/global?limit=${limit}`, { retries: 1 }),
+  getLandingNews: () => apiClient.get('/api/public/news', { retries: 1 }),
   getGlobalReports: (page = 1, perPage = 20, disease = '') => {
     const params = new URLSearchParams({ page, per_page: perPage });
     if (disease) params.set('disease', disease);
@@ -126,6 +127,10 @@ export const hospitalApi = {
   getPatientReports: (username) => apiClient.get(`/api/hospital/reports/patient/${encodeURIComponent(username)}`, { retries: 1, auth: true }),
   getProfile: () => apiClient.get('/api/hospital/profile', { retries: 0, auth: true }),
   updateProfile: (data) => apiClient.put('/api/hospital/profile', data, { retries: 0, auth: true }),
+};
+
+export const medicinePriceApi = {
+  lookupPrices: (medicines) => apiClient.post('/api/medicine-prices', { medicines }, { retries: 1, auth: true }),
 };
 
 export const prescriptionApi = {

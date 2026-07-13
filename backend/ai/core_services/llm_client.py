@@ -154,14 +154,9 @@ async def complete_text(
 
     payload_messages = [_message_to_payload(message) for message in messages]
 
-    print(
-        "=================== LLM INVOCATION PIPELINE (complete_text) ==================="
-    )
-    print(f"1. input model name: {effective_model}")
-    print(f"2. provider: {client.base_url}")
-    print(f"3. temperature: {temperature}")
-    print(f"4. max tokens: {max_output_tokens}")
-    print(f"5. messages being passed: {json.dumps(payload_messages, indent=2)}")
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[LLM] complete_text | model={effective_model} | provider={client.base_url} | tokens={max_output_tokens} | msgs={len(payload_messages)}")
 
     create_kwargs: dict[str, Any] = {
         "model": effective_model,

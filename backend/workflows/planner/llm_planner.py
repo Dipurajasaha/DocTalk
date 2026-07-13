@@ -62,8 +62,8 @@ OUTPUT SCHEMA (JSON ONLY):
       "specialty": "Specialty if detected",
       "booking_datetime": "Slot time if detected",
       "booking_ordinal": "e.g. 'first' if detected",
-      "document_type": "e.g. lab_report, prescription, imaging, medical_record",
-      "report_type": "e.g. blood_test, xray, prescription, general",
+      "document_type": "e.g. lab_report, prescription, imaging, medical_record (use medical_record if unsure)",
+      "report_type": "e.g. blood_test, xray, mri, ct, prescription, general (use general if unsure)",
       "limit": "Integer e.g. 2, 5, 10 if explicitly requested",
       "time_range": "e.g. '2_months', '1_year', '6_months' if explicitly requested"
   }

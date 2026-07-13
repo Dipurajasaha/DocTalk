@@ -11,6 +11,12 @@ from ...graph.common import get_workflow_model, latest_message_text, message_con
 from ...graph.state import UnifiedChatState
 from ...capabilities.tools.rag_tools import patient_rag_tool
 from ...utils.sanitizer import sanitize_for_llm
+from ....ai.prompts.templates import medical_prompt_service
+
+
+def _language_instruction(state: UnifiedChatState) -> str:
+    language = str(state.get("language") or "en").strip().lower() or "en"
+    return medical_prompt_service._language_hint(language)
 
 
 class TriageEvaluation(BaseModel):
@@ -117,7 +123,9 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
     )
     if context_str:
         sys_content += f"\n\nYou have access to the following retrieved context. Summarize and use it to answer the user's query:\n{context_str}"
-        
+
+    sys_content += f"\n\n{_language_instruction(state)}"
+
     all_messages = list(state.get("messages") or [])
     ai_message_count = sum(1 for m in all_messages if getattr(m, "type", "") == "ai")
     
@@ -177,7 +185,9 @@ async def patient_knowledge_llm(state: UnifiedChatState) -> dict[str, Any]:
         "Do not diagnose the user or provide personalized medical advice. "
         "Explain medical terms clearly."
     )
-        
+
+    sys_content += f"\n\n{_language_instruction(state)}"
+
     all_messages = list(state.get("messages") or [])
     
     messages = [
@@ -259,6 +269,8 @@ async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
             "   If no 'care_recommendation' is provided, simply conclude with the sentence above."
         )
     )
+
+    sys_msg = SystemMessage(content=sys_msg.content + f"\n\n{_language_instruction(state)}")
     
     ai_message_count = sum(1 for m in messages_list if getattr(m, "type", "") == "ai")
     if context_str and context_str != '""' and context_str != "{}" and context_str != "[]" and context_str != "null" and messages_list:

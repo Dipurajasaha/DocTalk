@@ -69,88 +69,8 @@ def _detect_rules(text: str, risk_level: str) -> list[str]:
             
     return triggered_rules
     
-class TFIDFValidator:
-    """
-    A deterministic, math-based domain validator using TF-IDF and Cosine Similarity.
-    Replaces brittle regex and keyword lists.
-    """
-    def __init__(self):
-        from ..executor.capability_registry import REGISTRY
-        
-        self.documents = {
-            "CORE_CONVERSATION": "hello hi greetings good morning afternoon evening thank thanks bye goodbye",
-            "CORE_MEDICAL_KNOWLEDGE": "medical knowledge health queries query disease diseases symptom symptoms medicine medicines treatment treatments prescription prescriptions diabetes metformin paracetamol advice doctor physician hospital clinic surgery blood report reports scan scans mri xray x-ray lab result results"
-        }
-        
-        # Dynamically inject capabilities from the platform's registry
-        for cap_name, cap_def in REGISTRY.items():
-            self.documents[cap_name] = cap_def["metadata"].description + " " + cap_name.replace("_", " ").lower()
-            
-        self.doc_ids = list(self.documents.keys())
-        self.corpus = [self._tokenize(doc) for doc in self.documents.values()]
-        
-        # Build TF-IDF model
-        import math
-        from collections import Counter
-        
-        self.df = Counter()
-        for doc in self.corpus:
-            self.df.update(set(doc))
-            
-        self.idf = {}
-        N = len(self.corpus)
-        for term, count in self.df.items():
-            self.idf[term] = math.log((N + 1) / (count + 1)) + 1
-            
-        self.doc_vectors = [self._vectorize(doc) for doc in self.corpus]
-
-    def _tokenize(self, text: str) -> list[str]:
-        words = re.findall(r'\b[a-z0-9]+\b', text.lower())
-        stopwords = {"explain", "analyze", "show", "tell", "me", "about", "what", "is", "how", "does", "the", "for", "to", "or", "and", "my", "this", "a", "an", "of", "in", "write", "create", "generate", "solve"}
-        return [w for w in words if w not in stopwords]
-
-    def _vectorize(self, tokens: list[str]) -> dict[str, float]:
-        import math
-        from collections import Counter
-        tf = Counter(tokens)
-        vec = {}
-        norm = 0.0
-        for term, count in tf.items():
-            val = count * self.idf.get(term, math.log((len(self.corpus) + 1) / 1) + 1)
-            vec[term] = val
-            norm += val * val
-        
-        norm = math.sqrt(norm)
-        if norm > 0:
-            for term in vec:
-                vec[term] /= norm
-        return vec
-
-    def classify(self, text: str) -> str:
-        q_tokens = self._tokenize(text)
-        if not q_tokens:
-            return "UNSUPPORTED"
-            
-        q_vec = self._vectorize(q_tokens)
-        
-        best_doc = None
-        best_score = -1.0
-        
-        for doc_id, doc_vec in zip(self.doc_ids, self.doc_vectors):
-            score = sum(q_vec.get(term, 0.0) * doc_vec.get(term, 0.0) for term in q_vec)
-            if score > best_score:
-                best_score = score
-                best_doc = doc_id
-                
-        # Threshold to ensure we don't accidentally match irrelevant text
-        if best_score < 0.05:
-            return "UNSUPPORTED"
-            
-        if best_doc == "CORE_CONVERSATION":
-            return "CONVERSATION"
-            
-        # Any other match (registered capabilities or CORE_MEDICAL)
-        return "MEDICAL"
+from .semantic_cache import cache_manager
+from backend.ai.core_services.llm_client import complete_text, _extract_json
 
 async def input_guardrail_node(state: UnifiedChatState) -> dict[str, Any]:
     messages = list(state.get("messages") or [])
@@ -175,41 +95,95 @@ async def input_guardrail_node(state: UnifiedChatState) -> dict[str, Any]:
     
     if triggered_rules:
         decision = "BLOCK"
-        session_risk_delta = len(triggered_rules) * 2 # Increase risk significantly on input violation
+        session_risk_delta = len(triggered_rules) * 2
         
-    new_risk_score = current_risk_score + session_risk_delta
+    domain = "UNKNOWN"
     
-    # Domain Validation
-    domain_validator = TFIDFValidator()
-    domain = domain_validator.classify(text)
-    
-    if domain == "UNSUPPORTED" and decision != "BLOCK":
-        decision = "BLOCK"
+    # 2. Semantic Cache Domain Validation
+    if decision != "BLOCK":
+        words = re.findall(r'\b[a-z0-9]+\b', text.lower())
+        stopwords = {"explain", "analyze", "show", "tell", "me", "about", "what", "is", "how", "does", "the", "for", "to", "or", "and", "my", "this", "a", "an", "of", "in", "write", "create", "generate", "solve", "can", "you", "i", "want"}
+        tokens = [w for w in words if w not in stopwords]
         
-    # Structured Logging
-    security_status = "FAIL" if triggered_rules else "PASS"
-    log_lines = [
-        "==========================",
-        "INPUT GUARDRAIL",
-        "==========================",
-        f"Security: {security_status}",
-        f"Domain: {domain}",
-        f"Decision: {decision}"
-    ]
-    if decision == "BLOCK":
-        log_lines.append("Planner Invoked: NO")
+        if not tokens and words:
+            # If the user only typed stopwords (e.g. "what is this"), don't blindly block.
+            # Revert to the original words so the LLM fallback can evaluate the context!
+            tokens = words
+            
+        if not tokens:
+            domain = "UNSUPPORTED"
+            decision = "BLOCK"
+        else:
+            logger.info(f"\n[DEBUG] Guardrail checking tokens against Semantic Cache: {tokens}")
+            cache_result = await cache_manager.check_tokens(tokens)
+            
+            if cache_result == "BLOCKED":
+                domain = "UNSUPPORTED"
+                decision = "BLOCK"
+                logger.info(f"Blocked by Semantic Cache. Tokens: {tokens}")
+            elif cache_result == "ALLOWED":
+                domain = "MEDICAL"
+            else:
+                logger.info(f"Semantic Cache MISS. Triggering LLM Fallback for: '{text}'")
+                history_text = ""
+                if len(messages) > 1:
+                    recent_messages = messages[-4:-1]
+                    history_lines = []
+                    for m in recent_messages:
+                        role = "USER" if m.type == "human" else "ASSISTANT"
+                        content = str(getattr(m, "content", "")).replace('\n', ' ')
+                        if len(content) > 150:
+                            content = content[:147] + "..."
+                        history_lines.append(f"{role}: {content}")
+                    history_text = "\n".join(history_lines)
+
+                from langchain_core.messages import HumanMessage
+                prompt = f"""You are a security domain classifier for a healthcare app.
+
+Recent Conversation Context (for reference):
+{history_text if history_text else "None"}
+
+Analyze this new user query: "{text}"
+
+1. Is this query related to healthcare/medical topics, or is it a normal friendly greeting or a valid conversational follow-up to the context? (If yes, it is ALLOWED).
+2. Is this query completely irrelevant to the context (e.g. coding, cars, cooking, finance) or malicious? (If yes, it is REJECTED).
+
+Extract 1-3 highly specific ROOT NOUNS or core topical words from the query that define its domain. 
+CRITICAL: If the query is a vague follow-up (like "explain it", "yes", "elaborate") and has no specific nouns, just return an empty array [] for extracted_keywords. Do NOT extract common verbs.
+
+Return ONLY a JSON object with this exact structure:
+{{
+  "classification": "ALLOWED", // or "REJECTED"
+  "extracted_keywords": ["word1", "word2"] // or [] if none
+}}"""
+                try:
+                    response_text = await complete_text([HumanMessage(content=prompt)], temperature=0.0)
+                    response_json = _extract_json(response_text)
+                    
+                    classification = response_json.get("classification", "REJECTED")
+                    keywords = response_json.get("extracted_keywords", [])
+                    logger.info(f"[Guardrail] LLM Fallback: {classification} (Keywords: {keywords})")
+                    
+                    if classification == "ALLOWED":
+                        domain = "MEDICAL"
+                        for kw in keywords:
+                            await cache_manager.add_allowed(kw)
+                    else:
+                        domain = "UNSUPPORTED"
+                        decision = "BLOCK"
+                        for kw in keywords:
+                            await cache_manager.add_blocked(kw)
+                except Exception as e:
+                    logger.error(f"[Guardrail] LLM Fallback failed: {e}")
+                    domain = "UNSUPPORTED"
+                    decision = "BLOCK"
         
-    logger.info("\n" + "\n".join(log_lines) + "\n")
-    
-    if triggered_rules:
-        logger.info(f"Risk Level: {risk_level}\nTriggered Rules:\n" + "\n".join(f"- {r}" for r in triggered_rules))
-        if session_risk_delta > 0:
-            logger.info(f"Risk Score\n{current_risk_score} -> {new_risk_score}")
+    logger.info(f"[Guardrail] Result: {decision} | Domain: {domain} | Risk: {current_risk_score}->{current_risk_score + session_risk_delta} | Rules: {triggered_rules}")
     
     status = "blocked" if decision == "BLOCK" else "allowed"
     
     updates: dict[str, Any] = {
-        "session_risk_score": new_risk_score,
+        "session_risk_score": session_risk_delta,
         "input_guardrail_context": {
             "status": status,
             "triggered_rules": triggered_rules,

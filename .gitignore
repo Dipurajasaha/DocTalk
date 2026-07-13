@@ -12,6 +12,7 @@ __pycache__/
 # Environments
 venv/
 env/
+env
 .venv/
 backend/.venv/
 .env
@@ -43,3 +44,5 @@ workflow.md
 
 # Logs
 logs/
+
+frontend_Copy/

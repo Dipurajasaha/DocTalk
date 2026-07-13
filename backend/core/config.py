@@ -10,6 +10,9 @@ from pydantic.v1 import BaseSettings, Field
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env", override=False)
+# Support repo-root `env` file when `.env` is absent (common local setup).
+if not (PROJECT_ROOT / ".env").exists() and (PROJECT_ROOT / "env").is_file():
+    load_dotenv(PROJECT_ROOT / "env", override=False)
 
 
 class Settings(BaseSettings):
@@ -54,6 +57,13 @@ class Settings(BaseSettings):
     # --- Imagga ---
     imgaga_api_key: str = Field(default="", env="IMGAGA_API_KEY")
     imgaga_api_url: str = Field(default="", env="IMGAGA_API_URL")
+
+    # --- External News API (landing page health news) ---
+    news_api_key: str = Field(default="", env="NEWS_API_KEY")
+    news_api_url: str = Field(
+        default="https://newsapi.org/v2/top-headlines?category=health&language=en&pageSize=6",
+        env="NEWS_API_URL",
+    )
 
     ai_request_timeout_seconds: float = Field(default=45.0, env="AI_REQUEST_TIMEOUT_SECONDS")
     xray_analysis_timeout_seconds: float = Field(default=300.0, env="XRAY_ANALYSIS_TIMEOUT_SECONDS")

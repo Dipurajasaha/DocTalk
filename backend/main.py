@@ -17,6 +17,7 @@ from .api.image_analysis import router as image_analysis_router
 from .api.stats import router as stats_router
 from .api.prescriptions import router as prescriptions_router
 from .api.payments import router as payments_router
+from .api.medicine_prices import router as medicine_prices_router
 from .core.database import connect_prisma, disconnect_prisma, ensure_connected, ping_database
 
 
@@ -34,6 +35,10 @@ app.add_middleware(
 )
 
 
+# Routes that do not require a database connection (external APIs, health checks).
+_DB_OPTIONAL_PATHS = frozenset({"/health", "/api/public/news"})
+
+
 @app.middleware("http")
 async def db_connect_middleware(request: Request, call_next):
     """Ensure the database is connected before each request.
@@ -41,6 +46,9 @@ async def db_connect_middleware(request: Request, call_next):
     This runs BEFORE any route handler so that services never hit
     ClientNotConnectedError even if the startup DB connect failed.
     """
+    if request.url.path in _DB_OPTIONAL_PATHS:
+        return await call_next(request)
+
     try:
         await ensure_connected()
     except Exception as exc:
@@ -79,6 +87,7 @@ app.include_router(image_analysis_router, prefix="/api", tags=["images"])
 app.include_router(stats_router, prefix="/api/public", tags=["public"])
 app.include_router(prescriptions_router, prefix="/api/prescriptions", tags=["prescriptions"])
 app.include_router(payments_router, prefix="/api/payments", tags=["payments"])
+app.include_router(medicine_prices_router, prefix="/api", tags=["medicine-prices"])
 
 
 @app.get("/health", tags=["system"])
