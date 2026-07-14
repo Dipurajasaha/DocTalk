@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 AppointmentStatus = Literal["PENDING", "CONFIRMED", "REJECTED", "COMPLETED", "CANCELLED"]
-DoctorActionStatus = Literal["ACCEPT", "REJECT"]
+DoctorActionStatus = Literal["ACCEPT", "REJECT", "COMPLETE"]
 
 
 class SlotCreate(BaseModel):

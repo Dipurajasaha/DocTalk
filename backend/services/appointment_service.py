@@ -165,14 +165,26 @@ class AppointmentService:
         assigned_date = data.get("assignedDate") or data.get("assigned_date")
         doctor_message = data.get("doctorMessage") or data.get("doctor_message")
 
-        if action not in {"ACCEPT", "REJECT"}:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="status must be ACCEPT or REJECT")
+        if action not in {"ACCEPT", "REJECT", "COMPLETE"}:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="status must be ACCEPT, REJECT or COMPLETE")
 
         appointment = await self.client.appointment.find_unique(where={"id": appointment_id}, include={"patient": True, "doctor": True, "slot": True, "payment": True})
         if appointment is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found")
         if appointment.doctorId != doctor_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to modify this appointment")
+
+        if action == "COMPLETE":
+            updated = await self.client.appointment.update(
+                where={"id": appointment_id},
+                data={
+                    "status": "COMPLETED",
+                    "completedAt": datetime.now(timezone.utc),
+                    "doctorMessage": doctor_message or "Completed by doctor",
+                },
+                include={"patient": True, "doctor": True, "slot": True, "payment": True},
+            )
+            return self._serialize_appointment(updated)
 
         if action == "ACCEPT":
             if not assigned_date:

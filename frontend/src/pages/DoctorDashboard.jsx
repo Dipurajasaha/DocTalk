@@ -1047,7 +1047,7 @@ export default function DoctorDashboard() {
                           const token = localStorage.getItem('doctalk_token');
                           fetch(`/api/appointments/${s.id}/action`, {
                             method: 'PUT', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, credentials: 'include',
-                            body: JSON.stringify({ status: 'ACCEPT', assignedDate: s.appointmentDate || s.scheduled_time, doctorMessage: 'Completed session' })
+                            body: JSON.stringify({ status: 'COMPLETE', doctorMessage: 'Completed session' })
                           }).then(r=>r.json()).then(d=>{
                               if(d && (d.id || d.success)) doctorApi.dashboardData(currentDoctorId).then((newData)=>{
                                 setDashboardData(newData);

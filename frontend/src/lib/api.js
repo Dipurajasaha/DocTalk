@@ -196,6 +196,18 @@ export const doctorApi = {
         .filter(Boolean),
     ));
 
+    // Unique patients the doctor has interacted with across BOTH appointments
+    // and chat consultations. Counting only appointments previously caused the
+    // dashboard "Unique Patients" figure to ignore patients the doctor actually
+    // consulted via chat (who may not have a formal appointment record).
+    const appointmentPatientIds = appointments
+      .map((item) => String(item.patientUsername || item.patient_id || item.patient || '').trim())
+      .filter(Boolean);
+    const consultationPatientIds = consultations
+      .map((item) => String(item.patientUsername || item.patient_id || item.patientId || '').trim())
+      .filter(Boolean);
+    const uniquePatientIds = Array.from(new Set([...appointmentPatientIds, ...consultationPatientIds]));
+
     return {
       success: true,
       appointments,
@@ -206,7 +218,7 @@ export const doctorApi = {
       closed_chats: [],
       slots,
       total_requests: requests.length,
-      total_patients: Array.from(new Set(appointments.map((item) => String(item.patientUsername || item.patient_id || item.patient || '').trim()).filter(Boolean))).length,
+      total_patients: uniquePatientIds.length,
       monthly_revenue: 0,
     };
   },

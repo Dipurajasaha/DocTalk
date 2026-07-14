@@ -164,11 +164,11 @@ export default function CopilotPanel({ patientList = [] }) {
         console.log('[FE-CP] FINAL_TRIMMED:', JSON.stringify(replyText));
         setMessages((currentMessages) => appendOrReplaceAssistantMessage(currentMessages, replyText, true));
         finalText = replyText;
-        try {
-          socket.close();
-        } catch (closeError) {
-          console.error('[CopilotPanel] websocket final close error', closeError);
-        }
+        // IMPORTANT: do NOT close the socket here. The backend keeps the
+        // WebSocket open after a final event so the doctor can send follow-up
+        // messages. Closing it here drops the session and the next send()
+        // would fail with "not connected". The socket is only closed when the
+        // patient selection changes (effect cleanup) or the component unmounts.
         return;
       }
 
