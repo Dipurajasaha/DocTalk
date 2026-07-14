@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 from langchain_core.messages import AIMessage, HumanMessage
@@ -321,6 +322,8 @@ class ChatService:
                     "content": user_text,
                 },
             )
+            # Auto-title the session from the first user message when untitled.
+            await self.set_ai_session_title_if_empty(ai_session_id, user_text)
         if assistant_text:
             await self.client.aichatmessage.create(
                 data={
@@ -350,6 +353,116 @@ class ChatService:
         )
 
         return await self.get_ai_chat_history(ai_session_id)
+
+    @staticmethod
+    def _default_ai_session_id(user_id: str, role: str) -> str:
+        base = "doctor_ai" if str(role or "").strip().lower() == "doctor" else "patient_ai"
+        return f"{base}_{user_id}"
+
+    async def list_ai_sessions(self, user_id: str, role: str) -> list[dict[str, Any]]:
+        sessions = await self.client.aichatsession.find_many(
+            where={
+                "userId": str(user_id or "").strip(),
+                "role": str(role or "").strip().lower(),
+            },
+            order={"updatedAt": "desc"},
+        )
+        default_id = self._default_ai_session_id(user_id, role)
+        return [self._serialize_ai_session(item, is_default=str(item.id) == default_id) for item in sessions]
+
+    async def create_ai_session(
+        self,
+        user_id: str,
+        role: str,
+        title: str | None = None,
+        mode: str = "PATIENT",
+    ) -> dict[str, Any]:
+        normalized_user_id = str(user_id or "").strip()
+        normalized_role = str(role or "").strip().lower()
+        session_id = f"{'doctor_ai' if normalized_role == 'doctor' else 'patient_ai'}_{normalized_user_id}_{uuid4().hex}"
+        session = await self.client.aichatsession.create(
+            data={
+                "id": session_id,
+                "userId": normalized_user_id,
+                "role": normalized_role,
+                "mode": mode,
+                "title": str(title or "").strip() or "New Chat",
+            }
+        )
+        return self._serialize_ai_session(session)
+
+    async def get_owned_ai_session(self, user_id: str, role: str, ai_session_id: str) -> Any | None:
+        """Return the session row if it exists and belongs to the given user/role.
+
+        Generic ids (``patient_ai`` / ``doctor_ai``) are resolved to the user-scoped
+        default session. Returns ``None`` when missing or not owned by the caller.
+        """
+        normalized_user_id = str(user_id or "").strip()
+        normalized_role = str(role or "").strip().lower()
+        session_id = str(ai_session_id or "").strip()
+        if not session_id:
+            return None
+        if session_id in {"patient_ai", "doctor_ai"}:
+            session_id = self._default_ai_session_id(normalized_user_id, normalized_role)
+
+        session = await self.client.aichatsession.find_unique(where={"id": session_id})
+        if session is None:
+            return None
+        if str(getattr(session, "userId", "")) != normalized_user_id or str(getattr(session, "role", "")) != normalized_role:
+            return None
+        return session
+
+    async def set_ai_session_title_if_empty(self, ai_session_id: str, title: str) -> None:
+        new_title = str(title or "").strip()
+        if not new_title:
+            return
+        new_title = new_title[:80]
+
+        session = await self.client.aichatsession.find_unique(where={"id": ai_session_id})
+        if session is None:
+            return
+        current_title = str(getattr(session, "title", "") or "").strip()
+        if current_title and current_title.lower() != "new chat":
+            return
+        await self.client.aichatsession.update(
+            where={"id": ai_session_id},
+            data={"title": new_title},
+        )
+
+    async def delete_ai_session(self, user_id: str, role: str, ai_session_id: str) -> None:
+        normalized_user_id = str(user_id or "").strip()
+        normalized_role = str(role or "").strip().lower()
+        session_id = str(ai_session_id or "").strip()
+        if not session_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+        default_id = self._default_ai_session_id(normalized_user_id, normalized_role)
+        if session_id in {"patient_ai", "doctor_ai", default_id}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The default chat session cannot be deleted",
+            )
+
+        owned = await self.get_owned_ai_session(normalized_user_id, normalized_role, session_id)
+        if owned is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+        # Remove child messages first so deletion succeeds even if the DB-level
+        # cascade is not enabled (the relation declares onDelete: Cascade).
+        await self.client.aichatmessage.delete_many(where={"sessionId": session_id})
+        await self.client.aichatsession.delete(where={"id": session_id})
+
+    @staticmethod
+    def _serialize_ai_session(record: Any, *, is_default: bool = False) -> dict[str, Any]:
+        data = record.model_dump() if hasattr(record, "model_dump") else dict(record)
+        return {
+            "id": str(data.get("id") or ""),
+            "title": data.get("title") or None,
+            "mode": str(data.get("mode") or ""),
+            "is_default": bool(is_default),
+            "created_at": data.get("createdAt"),
+            "updated_at": data.get("updatedAt"),
+        }
 
     async def _load_consultation(self, consultation_id: str) -> Any:
         consultation = await self.client.consultation.find_unique(where={"id": consultation_id})

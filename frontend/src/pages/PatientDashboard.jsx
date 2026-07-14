@@ -122,6 +122,8 @@ export default function PatientDashboard() {
   const [messages, setMessages] = useState([]);
   const [inputMsg, setInputMsg] = useState('');
   const [language, setLanguage] = useState('en');
+  const [aiSessions, setAiSessions] = useState([]);
+  const [activeAiSessionId, setActiveAiSessionId] = useState('patient_ai');
   const VALID_PANELS = ['explain', 'documents', 'xray', 'appointments', 'docchat', 'history', 'profile'];
 
   const [activePanel, setActivePanel] = useState(() => {
@@ -612,7 +614,8 @@ export default function PatientDashboard() {
 
   const loadChatHistory = async () => {
     try {
-      const data = await patientApi.getAiChatHistory('patient_ai');
+      const sessionId = activeAiSessionId || 'patient_ai';
+      const data = await patientApi.getAiChatHistory(sessionId);
       const items = Array.isArray(data?.messages) ? data.messages : [];
       setMessages(items.map((item) => ({
         senderId: item?.sender_id || item?.senderId || (String(item?.role || '').toLowerCase() === 'assistant' ? 'doctalk-ai' : 'user'),
@@ -624,6 +627,61 @@ export default function PatientDashboard() {
     } catch (e) {
       console.error(e);
       setMessages([]);
+    }
+  };
+
+  const loadAiSessions = async () => {
+    try {
+      const sessions = await patientApi.listAiSessions();
+      const list = Array.isArray(sessions) ? sessions : [];
+      setAiSessions(list);
+      // Reconcile the active id with a real (user-scoped) session row.
+      setActiveAiSessionId((prev) => {
+        if (prev && prev !== 'patient_ai' && prev !== 'doctor_ai' && list.some((s) => s.id === prev)) {
+          return prev;
+        }
+        const def = list.find((s) => s.is_default) || list[0];
+        return def ? def.id : prev;
+      });
+    } catch (e) {
+      console.error('Failed loading AI sessions', e);
+    }
+  };
+
+  const handleNewChat = async () => {
+    try {
+      const session = await patientApi.createAiSession('');
+      await loadAiSessions();
+      setActiveAiSessionId(session?.id || 'patient_ai');
+      setMessages([]);
+      setActivePanelFromNav('explain');
+    } catch (e) {
+      console.error('Failed to create chat', e);
+      try { addNotification({ type: 'error', message: 'Could not start a new chat.' }); } catch (_) {}
+    }
+  };
+
+  const handleSelectSession = (e) => {
+    const id = e.target.value;
+    if (!id) return;
+    setActiveAiSessionId(id);
+    setMessages([]);
+  };
+
+  const handleDeleteSession = async (id) => {
+    const session = aiSessions.find((s) => s.id === id);
+    if (!id || (session && session.is_default)) {
+      try { addNotification({ type: 'error', message: 'The default chat cannot be deleted.' }); } catch (_) {}
+      return;
+    }
+    if (!window.confirm('Delete this chat? This cannot be undone.')) return;
+    try {
+      await patientApi.deleteAiSession(id);
+      await loadAiSessions();
+      setMessages([]);
+    } catch (e) {
+      console.error('Failed to delete chat', e);
+      try { addNotification({ type: 'error', message: 'Could not delete this chat.' }); } catch (_) {}
     }
   };
 
@@ -1031,8 +1089,9 @@ export default function PatientDashboard() {
 
   useEffect(() => {
     if (!user || activePanel !== 'explain') return;
+    loadAiSessions();
     loadChatHistory();
-  }, [user, activePanel]);
+  }, [user, activePanel, activeAiSessionId]);
 
   const handleCancelAppointment = async (appointmentId) => {
     if (!window.confirm('Cancel this appointment?')) return;
@@ -1086,7 +1145,7 @@ export default function PatientDashboard() {
         throw new Error('Missing session token');
       }
 
-      const wsUrl = buildAiChatWebSocketUrl({ role: 'patient', token });
+      const wsUrl = buildAiChatWebSocketUrl({ role: 'patient', token, aiSessionId: activeAiSessionId });
       const socket = new WebSocket(wsUrl);
       let finalText = '';
       let completed = false;
@@ -1107,8 +1166,8 @@ export default function PatientDashboard() {
         }
       });
 
-      await new Promise((resolve, reject) => {
-        const INACTIVITY_TIMEOUT_MS = 60000;
+        await new Promise((resolve, reject) => {
+          const INACTIVITY_TIMEOUT_MS = 60000;
         let inactivityTimeout = null;
 
         const clearInactivityTimeout = () => {
@@ -1230,6 +1289,7 @@ export default function PatientDashboard() {
           rejectOnce(new Error('Assistant websocket closed unexpectedly'));
         };
       });
+      loadAiSessions();
     } catch (err) {
       if (isMounted) {
         const errText = String(err?.message || '');
@@ -1303,6 +1363,7 @@ export default function PatientDashboard() {
         }
 
         formData.append('language', language);
+        formData.append('ai_session_id', activeAiSessionId || 'patient_ai');
 
         const token = localStorage.getItem('doctalk_token');
         const response = await fetch('/api/explain_report', {
@@ -1348,6 +1409,7 @@ export default function PatientDashboard() {
       }
 
       setUploadedFiles([]);
+      loadAiSessions();
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== 'loading'));
       try { addNotification({ type: 'error', message: 'Analysis failed: ' + err.message }); } catch (e) {}
@@ -1366,7 +1428,7 @@ export default function PatientDashboard() {
       const formData = new FormData();
       formData.append('file_id', selectedDocForAnalysis);
       formData.append('language', language);
-      formData.append('ai_session_id', 'patient_ai');
+      formData.append('ai_session_id', activeAiSessionId || 'patient_ai');
 
       const token = localStorage.getItem('doctalk_token');
       const response = await fetch('/api/analyze_document', {
@@ -1403,6 +1465,9 @@ export default function PatientDashboard() {
 
   if (!user) return <div style={{padding: '50px', textAlign: 'center'}}>Loading App Data...</div>;
 
+  const activeSession = aiSessions.find((s) => s.id === (activeAiSessionId || ''));
+  const isActiveDefault = !!(activeSession && activeSession.is_default);
+
   return (
     <div className="app-wrapper" style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
       {/* Top Navigation Bar */}
@@ -1438,12 +1503,41 @@ export default function PatientDashboard() {
           <div className="patient-sidebar-name">{user.name}</div>
 
           <div className="patient-nav">
-            <button 
-              className={activePanel === 'explain' ? 'active' : ''}
-              onClick={() => setActivePanelFromNav('explain')}
-            >
-              Analyze Report
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button 
+                className={activePanel === 'explain' ? 'active' : ''}
+                onClick={() => setActivePanelFromNav('explain')}
+                style={{ flex: 1 }}
+              >
+                Analyze Report
+              </button>
+              <button
+                onClick={handleNewChat}
+                title="New chat"
+                aria-label="New chat"
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  flexShrink: 0,
+                  background: 'transparent',
+                  color: '#6C5CE7',
+                  border: '1px solid #6C5CE7',
+                  borderRadius: '10px',
+                  fontWeight: '700',
+                  fontSize: '20px',
+                  lineHeight: 1,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: '0.2s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#6C5CE7'; e.currentTarget.style.color = '#FFF'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#6C5CE7'; }}
+              >
+                +
+              </button>
+            </div>
             <button
               className={activePanel === 'documents' ? 'active' : ''}
               onClick={() => setActivePanelFromNav('documents')}
@@ -1454,7 +1548,7 @@ export default function PatientDashboard() {
               className={activePanel === 'xray' ? 'active' : ''}
               onClick={() => setActivePanelFromNav('xray')}
             >
-              X-Ray Analysis
+              Med Image Analysis
             </button>
             <button 
               className={activePanel === 'appointments' ? 'active' : ''}
@@ -2202,17 +2296,58 @@ export default function PatientDashboard() {
                   <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>AI Health Assistant</h2>
                   <p style={{ margin: '6px 0 0 0', fontSize: '11px', color: '#8B7EFF', fontWeight: '500', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif' }}>*Not a substitute for professional medical advice*</p>
                 </div>
-                <div style={{ width: '160px' }}>
-                  <select
-                    value={language}
-                    onChange={(e) => setLanguage(e.target.value)}
-                    style={{ width: '100%', padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', fontSize: '11px', backgroundColor: '#FFF', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ minWidth: '200px' }}>
+                    <select
+                      value={activeAiSessionId || ''}
+                      onChange={handleSelectSession}
+                      title="Select chat"
+                      style={{ width: '100%', padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', fontSize: '11px', backgroundColor: '#FFF', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
+                    >
+                      {aiSessions.length === 0 ? (
+                        <option value="patient_ai">New Chat</option>
+                      ) : (
+                        aiSessions.map((s) => (
+                          <option key={s.id} value={s.id}>{s.title || 'New Chat'}</option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteSession(activeAiSessionId)}
+                    disabled={isActiveDefault}
+                    title="Delete chat"
+                    aria-label="Delete chat"
+                    style={{
+                      width: '38px',
+                      height: '38px',
+                      flexShrink: 0,
+                      background: 'transparent',
+                      color: isActiveDefault ? '#CBD5E1' : '#ef4444',
+                      border: '1px solid',
+                      borderColor: isActiveDefault ? '#CBD5E1' : '#fecaca',
+                      borderRadius: '10px',
+                      fontSize: '16px',
+                      cursor: isActiveDefault ? 'default' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
                   >
-                    <option value="en">English</option>
-                    <option value="es">Español</option>
-                    <option value="hi">Hindi</option>
-                    <option value="bn">Bengali</option>
-                  </select>
+                    ×
+                  </button>
+                  <div style={{ width: '160px' }}>
+                    <select
+                      value={language}
+                      onChange={(e) => setLanguage(e.target.value)}
+                      style={{ width: '100%', padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', fontSize: '11px', backgroundColor: '#FFF', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
+                    >
+                      <option value="en">English</option>
+                      <option value="es">Español</option>
+                      <option value="hi">Hindi</option>
+                      <option value="bn">Bengali</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 

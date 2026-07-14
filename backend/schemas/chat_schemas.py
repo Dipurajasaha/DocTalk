@@ -71,3 +71,20 @@ class MessageHistoryResponse(BaseModel):
     limit: int
     total: int
     has_more: bool
+
+
+class AiSessionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str | None = None
+    mode: str
+    is_default: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class AiSessionCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = None

@@ -53,6 +53,9 @@ export const patientApi = {
     const targetQuery = targetPatientId ? `&target_patient_id=${encodeURIComponent(targetPatientId)}` : '';
     return apiClient.get(`/api/chat/ai/history?ai_session_id=${encodeURIComponent(aiSessionId)}${targetQuery}`, { retries: 1, auth: true });
   },
+  listAiSessions: () => apiClient.get('/api/chat/ai/sessions', { retries: 1, auth: true }),
+  createAiSession: (title = '') => apiClient.post('/api/chat/ai/sessions', { title }, { retries: 0, auth: true }),
+  deleteAiSession: (id) => apiClient.delete(`/api/chat/ai/sessions/${encodeURIComponent(id)}`, { retries: 0, auth: true }),
   requestAppointment: (body) => apiClient.post('/api/appointment_request', body, { retries: 0, auth: true }),
 };
 

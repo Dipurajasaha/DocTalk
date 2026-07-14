@@ -19,6 +19,24 @@ def _language_instruction(state: UnifiedChatState) -> str:
     return medical_prompt_service._language_hint(language)
 
 
+def _dedupe_messages(messages: Any) -> list:
+    """Remove exact (type, content) duplicates while preserving order.
+
+    The websocket reloads the full DB history each turn and the LangGraph
+    in-memory checkpointer also accumulates it, so a resumed conversation can
+    contain the same turns twice. Collapsing them keeps the prompt clean.
+    """
+    seen = set()
+    deduped: list = []
+    for m in (messages or []):
+        key = (getattr(m, "type", ""), str(getattr(m, "content", "") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(m)
+    return deduped
+
+
 class TriageEvaluation(BaseModel):
     is_emergency: bool = Field(
         default=False,
@@ -126,14 +144,15 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
 
     sys_content += f"\n\n{_language_instruction(state)}"
 
-    all_messages = list(state.get("messages") or [])
+    all_messages = _dedupe_messages(state.get("messages") or [])
     ai_message_count = sum(1 for m in all_messages if getattr(m, "type", "") == "ai")
-    
-    if context_str and all_messages:
-        chat_messages = [all_messages[-1]]
-    else:
-        chat_messages = all_messages
-        
+
+    # Always keep the full conversation so the assistant can reference prior
+    # turns. Retrieved context (evidence) is still surfaced via the system
+    # prompt above; truncating history here would make the model "forget"
+    # everything said earlier in the session.
+    chat_messages = all_messages
+
     messages = [
         SystemMessage(content=sys_content),
         *chat_messages,
@@ -273,11 +292,10 @@ async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
     sys_msg = SystemMessage(content=sys_msg.content + f"\n\n{_language_instruction(state)}")
     
     ai_message_count = sum(1 for m in messages_list if getattr(m, "type", "") == "ai")
-    if context_str and context_str != '""' and context_str != "{}" and context_str != "[]" and context_str != "null" and messages_list:
-        chat_messages = [messages_list[-1]]
-    else:
-        chat_messages = messages_list
-        
+    # Keep the entire conversation history (de-duplicated) so the assistant can
+    # refer back to earlier turns instead of only the latest message.
+    chat_messages = _dedupe_messages(messages_list)
+
     messages = [sys_msg] + chat_messages
     
     import time

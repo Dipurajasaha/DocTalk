@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,27 @@ def _listify_text(value: Any) -> list[str]:
         return [str(item).strip() for item in value if str(item).strip()]
     text = str(value or "").strip()
     return [text] if text else []
+
+
+async def _resolve_analysis_session_id(
+    chat_service: ChatService,
+    user_id: str,
+    role: str,
+    provided_id: str,
+) -> str:
+    """Resolve the session id to persist analysis output into.
+
+    Generic or empty ids map to the user's default session. Explicit ids are
+    only honored when owned by the current user; otherwise we fall back to the
+    default session (never leak into another user's session).
+    """
+    base = "doctor_ai" if str(role or "").strip().lower() == "doctor" else "patient_ai"
+    default_id = f"{base}_{user_id}"
+    provided = str(provided_id or "").strip()
+    if not provided or provided in {"patient_ai", "doctor_ai"}:
+        return default_id
+    owned = await chat_service.get_owned_ai_session(user_id, role, provided)
+    return provided if owned is not None else default_id
 
 
 async def _extract_medicine_names_from_text(text: str) -> list[str]:
@@ -166,6 +188,8 @@ async def explain_report(
     report: UploadFile | None = File(default=None),
     medical_image: UploadFile | None = File(default=None),
     language: str = Form(default="en"),
+    ai_session_id: str = Form(default=""),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     upload = report or medical_image
     if upload is None:
@@ -173,6 +197,7 @@ async def explain_report(
 
     temp_path = await _file_to_path(upload)
     try:
+        reply = None
         if (upload.content_type or "").startswith("image/") or temp_path.suffix.lower() in {".jpg", ".jpeg", ".png", ".gif", ".webp"}:
             analysis = await xray_analysis_service.analyze_image(temp_path, language=language)
             reply = {
@@ -189,13 +214,35 @@ async def explain_report(
                 "warnings": analysis.get("warnings") or [],
                 "raw": analysis,
             }
-            return {"success": True, "reply": reply}
+        else:
+            extracted = await ocr_service.extract_text(temp_path, mime_type=upload.content_type or "application/pdf")
+            text = str(extracted.get("extracted_text") or "").strip()
+            if not text:
+                text = "No readable text could be extracted from the uploaded report."
+            reply = (await _analyze_text_document(text, language=language, title="Report summary")).get("reply")
 
-        extracted = await ocr_service.extract_text(temp_path, mime_type=upload.content_type or "application/pdf")
-        text = str(extracted.get("extracted_text") or "").strip()
-        if not text:
-            text = "No readable text could be extracted from the uploaded report."
-        return await _analyze_text_document(text, language=language, title="Report summary")
+        if ai_session_id and reply is not None:
+            try:
+                chat_service = ChatService()
+                resolved_id = await _resolve_analysis_session_id(
+                    chat_service, current_user.user_id, current_user.role, ai_session_id
+                )
+                await chat_service.ensure_ai_session(
+                    current_user.user_id,
+                    current_user.role,
+                    resolved_id,
+                    mode="PATIENT" if current_user.role == "patient" else "DOCTOR_GENERAL",
+                )
+                content = json.dumps(reply, ensure_ascii=False, default=str)
+                await chat_service.append_ai_chat_exchange(
+                    ai_session_id=resolved_id,
+                    user_message="",
+                    assistant_message=content,
+                )
+            except Exception:
+                pass
+
+        return {"success": True, "reply": reply}
     finally:
         try:
             temp_path.unlink(missing_ok=True)
@@ -263,22 +310,20 @@ async def analyze_document(
 
     if ai_session_id and result.get("success"):
         try:
-            session_id = str(ai_session_id).strip()
-            if current_user.role == "patient":
-                session_id = f"patient_ai_{current_user.user_id}"
-            elif current_user.role == "doctor":
-                session_id = f"doctor_ai_{current_user.user_id}"
             chat_service = ChatService()
+            resolved_id = await _resolve_analysis_session_id(
+                chat_service, current_user.user_id, current_user.role, ai_session_id
+            )
             await chat_service.ensure_ai_session(
                 current_user.user_id,
                 current_user.role,
-                session_id,
+                resolved_id,
                 mode="PATIENT" if current_user.role == "patient" else "DOCTOR_GENERAL",
             )
             reply = result.get("reply") or {}
             content = json.dumps(reply, ensure_ascii=False, default=str)
             await chat_service.append_ai_chat_exchange(
-                ai_session_id=session_id,
+                ai_session_id=resolved_id,
                 user_message="",
                 assistant_message=content,
             )

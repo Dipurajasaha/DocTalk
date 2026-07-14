@@ -9,6 +9,8 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from ...core.security import CurrentUser, get_current_user, decode_access_token
 from ...schemas.chat_schemas import (
+    AiSessionCreateRequest,
+    AiSessionResponse,
     ChatRequest,
     ConsultationCreateRequest,
     ConsultationResponse,
@@ -502,11 +504,19 @@ async def _run_ai_websocket(
     if current_user is None:
         return
 
-    # ISOLATION FIX: Scope generic ai_session_id by user_id
+    chat_service = get_chat_service()
+
+    # Scope/authorize the session id.
+    # Generic ids (patient_ai/doctor_ai) are scoped to the current user and
+    # auto-created. Explicit ids must be owned by the current user.
     if ai_session_id in {"patient_ai", "doctor_ai"}:
         ai_session_id = f"{ai_session_id}_{current_user.user_id}"
+    else:
+        owned = await chat_service.get_owned_ai_session(current_user.user_id, current_user.role, ai_session_id)
+        if owned is None:
+            await websocket.close(code=1008)
+            return
 
-    chat_service = get_chat_service()
     normalized_target_patient_id = str(target_patient_id or "").strip() or None
 
     try:
@@ -728,6 +738,10 @@ async def fetch_ai_chat_history(
     # ISOLATION FIX: Scope generic ai_session_id by user_id
     if session_id in {"patient_ai", "doctor_ai"}:
         session_id = f"{session_id}_{current_user.user_id}"
+    else:
+        owned = await chat_service.get_owned_ai_session(current_user.user_id, current_user.role, session_id)
+        if owned is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to access this session")
         
     messages = await chat_service.get_ai_chat_history(session_id)
     return {
@@ -736,16 +750,59 @@ async def fetch_ai_chat_history(
     }
 
 
+@router.get("/ai/sessions", response_model=list[AiSessionResponse])
+async def list_ai_sessions(
+    current_user: CurrentUser = Depends(get_current_user),
+    chat_service: ChatService = Depends(get_chat_service),
+) -> list[AiSessionResponse]:
+    # Ensure the default session exists so returning patients always see it.
+    await chat_service.ensure_ai_session(
+        current_user.user_id,
+        current_user.role,
+        f"{'doctor_ai' if current_user.role == 'doctor' else 'patient_ai'}_{current_user.user_id}",
+    )
+    sessions = await chat_service.list_ai_sessions(current_user.user_id, current_user.role)
+    return [AiSessionResponse.model_validate(item) for item in sessions]
+
+
+@router.post("/ai/sessions", response_model=AiSessionResponse)
+async def create_ai_session(
+    payload: AiSessionCreateRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    chat_service: ChatService = Depends(get_chat_service),
+) -> AiSessionResponse:
+    session = await chat_service.create_ai_session(
+        current_user.user_id,
+        current_user.role,
+        title=payload.title,
+    )
+    return AiSessionResponse.model_validate(session)
+
+
+@router.delete("/ai/sessions/{ai_session_id}")
+async def delete_ai_session(
+    ai_session_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    chat_service: ChatService = Depends(get_chat_service),
+) -> dict[str, Any]:
+    await chat_service.delete_ai_session(current_user.user_id, current_user.role, ai_session_id)
+    return {"success": True}
+
+
 @router.websocket("/ai/patient/ws")
 async def patient_ai_websocket(websocket: WebSocket) -> None:
-    await _run_ai_websocket(websocket, ai_session_id="patient_ai", expected_role="patient")
+    await _run_ai_websocket(
+        websocket,
+        ai_session_id=websocket.query_params.get("ai_session_id") or "patient_ai",
+        expected_role="patient",
+    )
 
 
 @router.websocket("/ai/doctor/ws")
 async def doctor_ai_websocket(websocket: WebSocket) -> None:
     await _run_ai_websocket(
         websocket,
-        ai_session_id="doctor_ai",
+        ai_session_id=websocket.query_params.get("ai_session_id") or "doctor_ai",
         expected_role="doctor",
         target_patient_id=websocket.query_params.get("target_patient_id"),
     )
