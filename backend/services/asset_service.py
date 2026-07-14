@@ -33,7 +33,7 @@ AuthRole = Literal["patient", "doctor"]
 AssetCategory = Literal["REPORT", "PRESCRIPTION", "XRAY"]
 AssetSourceType = Literal["report", "prescription", "xray"]
 PAGE_W, PAGE_H = A4
-WATERMARK = HexColor("#f1efe8")
+WATERMARK = HexColor("#d4d4d4")
 
 
 @dataclass(frozen=True, slots=True)
@@ -449,7 +449,7 @@ class AssetService:
                 path.unlink()
 
 
-async def process_asset_background(asset_id: str, file_path: str, mimetype: str, db: Prisma) -> None:
+async def process_asset_background(asset_id: str, file_path: str, mimetype: str, db: Prisma, source: str = "uploaded") -> None:
     source_path = Path(file_path)
     mime_type = (mimetype or "").lower()
     extracted_text = ""
@@ -609,7 +609,7 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
         
         # 8. Final document rendering before encryption.
         plaintext_bytes = destination_path.read_bytes()
-        if category == "PRESCRIPTION" and mime_type == "application/pdf":
+        if category == "PRESCRIPTION" and mime_type == "application/pdf" and source == "generated":
             plaintext_bytes = _apply_pdf_watermark(plaintext_bytes, "DOCTALK HEALTH")
             destination_path.write_bytes(plaintext_bytes)
 
@@ -671,7 +671,7 @@ def _apply_pdf_watermark(pdf_bytes: bytes, text: str) -> bytes:
     pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
         for page in pdf_doc:
-            page.show_pdf_page(page.rect, overlay_doc, 0, overlay=True)
+            page.show_pdf_page(page.rect, overlay_doc, 0, overlay=False)
         return pdf_doc.tobytes(deflate=True)
     finally:
         overlay_doc.close()

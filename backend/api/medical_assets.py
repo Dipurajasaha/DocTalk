@@ -36,6 +36,7 @@ async def upload_asset(
         str(result.get("file_path") or ""),
         file.content_type or result.get("file_type") or "",
         service.client,
+        source="uploaded",
     )
     return AssetUploadResponse(id=result.get("id"))
 

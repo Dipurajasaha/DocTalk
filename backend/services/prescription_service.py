@@ -119,6 +119,7 @@ class PrescriptionService:
             str(pdf_asset.get("file_path") or ""),
             str(pdf_asset.get("file_type") or "application/pdf"),
             self.client,
+            source="generated",
         )
         await self.client.prescription.update(
             where={"id": created.id},
