@@ -117,7 +117,7 @@ export default function XrayAnalyzerPanel() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', fontFamily: '"Inter", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>
-            X-Ray Analysis
+            Med Image Analysis
           </h2>
           <p style={{ margin: 0, fontSize: '11px', color: '#8B7EFF', fontWeight: '500' }}>
             Educational comparison and defect highlighting only.
@@ -140,7 +140,7 @@ export default function XrayAnalyzerPanel() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 340px) minmax(0, 1fr)', gap: '24px', flex: 1, minHeight: 0 }}>
         <div style={{ background: '#FFF', borderRadius: '16px', padding: '24px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8' }}>
-          <h4 style={{ margin: '0 0 14px', fontSize: '13px', color: '#6C5CE7', fontWeight: 'bold' }}>Upload X-Ray Image</h4>
+          <h4 style={{ margin: '0 0 14px', fontSize: '13px', color: '#6C5CE7', fontWeight: 'bold' }}>Upload Medical Image</h4>
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <label style={{ border: '2px dashed #CBD5E1', borderRadius: '16px', padding: '28px 16px', textAlign: 'center', background: '#F8FAFC', cursor: 'pointer', color: '#475569', fontSize: '12px', fontWeight: '600' }}>
               <input
@@ -149,7 +149,7 @@ export default function XrayAnalyzerPanel() {
                 onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
                 style={{ display: 'none' }}
               />
-              {selectedFile ? selectedFile.name : 'Choose an X-ray image'}
+              {selectedFile ? selectedFile.name : 'Choose a medical image'}
             </label>
 
             <div style={{ fontSize: '11px', color: '#64748B' }}>
@@ -172,7 +172,7 @@ export default function XrayAnalyzerPanel() {
                 fontSize: '12px',
               }}
             >
-              {isSubmitting ? 'Analyzing...' : 'Analyze X-Ray'}
+              {isSubmitting ? 'Analyzing...' : 'Analyze Medical Image'}
             </button>
 
             {errorMsg && (
@@ -188,7 +188,7 @@ export default function XrayAnalyzerPanel() {
 
           {!result ? (
             <div style={{ fontSize: '11px', color: '#64748B', background: '#F8FAFC', border: '1px dashed #CBD5E1', borderRadius: '12px', padding: '20px' }}>
-              Upload an X-ray image to view the defect summary, highlighted image, and healthy comparison.
+              Upload a medical image to view the defect summary, highlighted image, and healthy comparison.
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

@@ -2422,9 +2422,9 @@ export default function PatientDashboard() {
                           <div className="styled-dropzone" style={{ border: '2px dashed #CBD5E1', borderRadius: '16px', padding: '48px 24px', textAlign: 'center', background: '#F8FAFC', position: 'relative', transition: 'all 0.2s', cursor: 'pointer', width: '100%', boxSizing: 'border-box' }} onMouseEnter={(e) => e.currentTarget.style.borderColor='#8B7EFF'} onMouseLeave={(e) => e.currentTarget.style.borderColor='#CBD5E1'}>
                             <label style={{ cursor: 'pointer', display: 'block', width: '100%', height: '100%' }}>
                               <div style={{ fontSize: '32px', marginBottom: '12px' }}>+</div>
-                              <div style={{ fontSize: '12px', fontWeight: '600', color: '#475569', marginBottom: '6px' }}>Upload Medical File</div>
-                              <div style={{ fontSize: '10px', color: '#64748B' }}>Any supported document or image</div>
-                              <input type="file" ref={explainUploadInputRef} accept=".pdf,.jpg,.jpeg,.png" onChange={handleAddExplainFile} style={{ position: 'absolute', top:0, left:0, width:'100%', height:'100%', opacity:0, cursor: 'pointer' }} />
+                               <div style={{ fontSize: '12px', fontWeight: '600', color: '#475569', marginBottom: '6px' }}>Upload Medical File</div>
+                               <div style={{ fontSize: '10px', color: '#64748B' }}>Any supported document or image</div>
+                               <input type="file" ref={explainUploadInputRef} accept=".pdf,.jpg,.jpeg,.png" onChange={handleAddExplainFile} style={{ position: 'absolute', top:0, left:0, width:'100%', height:'100%', opacity:0, cursor: 'pointer' }} />
                             </label>
                           </div>
                         </div>
@@ -2456,7 +2456,7 @@ export default function PatientDashboard() {
                             <label style={{ cursor: 'pointer', display: 'block' }}>
                               <div style={{ fontSize: '20px', color: '#8B7EFF', fontWeight: 'bold' }}>+</div>
                               <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>Add More Files</div>
-                              <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={handleAddExplainFile} style={{ position: 'absolute', top:0, left:0, width:'100%', height:'100%', opacity:0, cursor: 'pointer' }} />
+                               <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={handleAddExplainFile} style={{ position: 'absolute', top:0, left:0, width:'100%', height:'100%', opacity:0, cursor: 'pointer' }} />
                             </label>
                           </div>
                           

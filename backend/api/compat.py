@@ -15,6 +15,7 @@ from ..ai.core_services.ocr import ocr_service
 from ..ai.prompts.templates import medical_prompt_service
 from ..core.security import CurrentUser, get_current_user
 from ..services.asset_service import AssetService, AssetConfig
+from ..services.document_analyzer import document_analyzer
 from ..services.user_service import UserService
 from ..services.xray_analysis_service import xray_analysis_service
 from ..services.patient_history_service import patient_history_service
@@ -25,6 +26,46 @@ from ..core.database import prisma
 
 
 router = APIRouter()
+
+EXPLAIN_REPORT_MAX_SIZE_BYTES = 25 * 1024 * 1024
+ANALYZE_XRAY_MAX_SIZE_BYTES = 20 * 1024 * 1024
+
+
+def _validate_file_size(upload: UploadFile, max_bytes: int) -> None:
+    if upload.size is not None and upload.size > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds the maximum allowed size of {max_bytes // (1024 * 1024)} MB",
+        )
+
+
+async def _classify_document(temp_path: Path, mime_type: str, file_name: str) -> tuple[str, str]:
+    suffix = temp_path.suffix.lower()
+    if mime_type.startswith("image/") or suffix in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff"}:
+        return "XRAY", ""
+
+    text = ""
+    try:
+        extracted = await ocr_service.extract_text(temp_path, mime_type=mime_type or "application/pdf")
+        text = str(extracted.get("extracted_text") or "").strip()
+    except Exception:
+        text = ""
+
+    if not text:
+        text = file_name
+
+    try:
+        index_data = await document_analyzer.analyze_document(
+            asset_id="temp_classify",
+            patient_id="temp_classify",
+            file_name=file_name,
+            category="UNCLASSIFIED",
+            extracted_text=text,
+        )
+        category = index_data.get("_fileCategory") or "REPORT"
+        return category if category in {"REPORT", "PRESCRIPTION", "XRAY"} else "REPORT", text
+    except Exception:
+        return "REPORT", text
 
 
 def _user_service() -> UserService:
@@ -195,31 +236,25 @@ async def explain_report(
     if upload is None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A report or medical_image file is required")
 
+    _validate_file_size(upload, EXPLAIN_REPORT_MAX_SIZE_BYTES)
+
     temp_path = await _file_to_path(upload)
     try:
+        category, extracted_text = await _classify_document(temp_path, upload.content_type or "application/octet-stream", upload.filename or "upload")
+        if category == "XRAY":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="This file appears to be a medical image (X-ray/scan). Please use the 'Medical Image Analysis' section to analyze X-ray images.",
+            )
+
         reply = None
-        if (upload.content_type or "").startswith("image/") or temp_path.suffix.lower() in {".jpg", ".jpeg", ".png", ".gif", ".webp"}:
-            analysis = await xray_analysis_service.analyze_image(temp_path, language=language)
-            reply = {
-                "title": "Image analysis",
-                "description": analysis.get("summary") or analysis.get("analysis") or "",
-                "key_points": _listify_text(analysis.get("findings") or analysis.get("analysis")),
-                "key_findings": _listify_text(analysis.get("findings") or analysis.get("analysis")),
-                "observations": _listify_text(analysis.get("findings") or analysis.get("analysis")),
-                "recommendations": _listify_text(analysis.get("recommendations")),
-                "notes": _listify_text(analysis.get("warnings")),
-                "risks": _listify_text(analysis.get("warnings")),
-                "summary": analysis.get("summary") or analysis.get("analysis") or "",
-                "findings": analysis.get("findings") or analysis.get("analysis") or "",
-                "warnings": analysis.get("warnings") or [],
-                "raw": analysis,
-            }
-        else:
+        text = extracted_text.strip()
+        if not text:
             extracted = await ocr_service.extract_text(temp_path, mime_type=upload.content_type or "application/pdf")
             text = str(extracted.get("extracted_text") or "").strip()
-            if not text:
-                text = "No readable text could be extracted from the uploaded report."
-            reply = (await _analyze_text_document(text, language=language, title="Report summary")).get("reply")
+        if not text:
+            text = "No readable text could be extracted from the uploaded report."
+        reply = (await _analyze_text_document(text, language=language, title="Report summary")).get("reply")
 
         if ai_session_id and reply is not None:
             try:
@@ -339,8 +374,17 @@ async def analyze_xray(
     language: str = Form(default="en"),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
+    _validate_file_size(xray, ANALYZE_XRAY_MAX_SIZE_BYTES)
+
     temp_path = await _file_to_path(xray)
     try:
+        category, _ = await _classify_document(temp_path, xray.content_type or "application/octet-stream", xray.filename or "upload")
+        if category in {"REPORT", "PRESCRIPTION"}:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="This file appears to be a prescription or report. Please use the 'Analyze Report' section to analyze prescriptions and reports.",
+            )
+
         analysis = await xray_analysis_service.analyze_image(temp_path, language=language)
         return {
             "success": True,
