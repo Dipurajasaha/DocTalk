@@ -1,3 +1,4 @@
+import copy
 import json
 import traceback
 from typing import Any
@@ -29,12 +30,13 @@ RULES:
 3. AVOID HALLUCINATION: ONLY output capabilities that exactly match the list above. Never make up capability names.
 4. MULTI-CAPABILITY: For queries spanning multiple topics (e.g. "Summarize my previous consultations and latest blood report"), output multiple tasks. Do NOT create unnecessary tasks.
 5. If the user asks for appointment slots (e.g. "Is there any appointment slots available for Dr. X?"), use APPOINTMENT_SEARCH_SLOTS.
-6. If the user selects a slot (e.g. "Book the first available slot"), use APPOINTMENT_SEARCH_SLOTS again to retrieve the context, but update the workflow status to "waiting_confirmation" and set "booking_ordinal" in metadata.
+6. If the user selects a slot (e.g. "Book the first available slot"), use APPOINTMENT_BOOK directly and set "booking_ordinal" or "booking_datetime" in metadata.
 7. If the user confirms a booking (e.g. "Yes, please book it"), use APPOINTMENT_BOOK.
 8. If the user asks to cancel an appointment (e.g. "Cancel my appointment"), use APPOINTMENT_CANCEL.
 9. For general greetings (e.g. "Hello", "Hi"), return NO tasks and "query_type": "general". DO NOT include workflow or appointment metadata.
 10. For general medical knowledge (e.g. "Tell me about anemia", "What is diabetes?"), return NO tasks and "query_type": "knowledge". DO NOT include workflow or appointment metadata.
 11. Always preserve the active_workflow if we are in the middle of a booking, UNLESS the query is unrelated (general or knowledge) or cancelled. For unrelated queries, omit workflow metadata entirely to prevent context pollution.
+11a. If the user says payment was successful, paid, or completed while a booking is waiting for payment confirmation, treat it as confirmation of the existing appointment. Do NOT search slots again, do NOT reserve a new slot, and do NOT create a fresh booking.
 12. If PREVIOUS PLANNER METADATA contains `recommended_specialty` and the user accepts it (e.g. "Yes", "Find one", "Book it"), use APPOINTMENT_SEARCH_SLOTS. If there is a `recommended_doctor_name`, set "doctor_name" in metadata. Otherwise set "specialty" in metadata to the `recommended_specialty`.
 13. CONTEXT-AWARE FOLLOW-UPS: If the user's message is a follow-up or ambiguous (e.g., "what are the symptoms?", "what did they say?"), look at PREVIOUS PLANNER METADATA. If the previous `query_type` was "rag" or related to a document/prescription, use ASSET_INDEX. If the previous `query_type` was "consultation" or related to a doctor visit, use CONSULTATION.
 
@@ -92,10 +94,13 @@ USER: "Is there any appointment slots available for Dr. DocDipu?"
 OUTPUT: {"confidence":0.92,"reasoning":"Search slots for specific doctor","query_type":"workflow","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"APPOINTMENT_SEARCH_SLOTS","depends_on":[]}],"metadata":{"doctor_name":"DocDipu"}}
 
 USER: "Book the first available slot." (Context: Waiting for selection)
-OUTPUT: {"confidence":0.90,"reasoning":"Selecting first ordinal slot","query_type":"workflow","tasks":[{"task_id":"t1","task_type":"retrieve","retriever":"APPOINTMENT_SEARCH_SLOTS","depends_on":[]}],"workflow":{"type":"appointment_booking","status":"waiting_confirmation"},"metadata":{"booking_ordinal":"first"}}
+OUTPUT: {"confidence":0.90,"reasoning":"Selecting first ordinal slot","query_type":"workflow","tasks":[{"task_id":"t1","task_type":"action","action_handler":"APPOINTMENT_BOOK","depends_on":[]}],"workflow":{"type":"appointment_booking","status":"confirmed"},"metadata":{"booking_ordinal":"first"}}
 
 USER: "Yes, please book it." (Context: Waiting for confirmation)
 OUTPUT: {"confidence":0.95,"reasoning":"Confirming booking","query_type":"workflow","tasks":[{"task_id":"t1","task_type":"action","action_handler":"APPOINTMENT_BOOK","depends_on":[]}],"workflow":{"type":"appointment_booking","status":"confirmed"},"metadata":{}}
+
+USER: "Payment successful." (Context: Waiting for payment confirmation)
+OUTPUT: {"confidence":1.0,"reasoning":"Payment completed for the pending appointment","query_type":"workflow","tasks":[{"task_id":"t1","task_type":"action","action_handler":"APPOINTMENT_BOOK","depends_on":[]}],"workflow":{"type":"appointment_booking","status":"confirmed"},"metadata":{"payment_successful":true}}
 
 USER: "Cancel my appointment."
 OUTPUT: {"confidence":0.98,"reasoning":"Canceling appointment","query_type":"workflow","tasks":[{"task_id":"t1","task_type":"action","action_handler":"APPOINTMENT_CANCEL","depends_on":[]}],"metadata":{}}
@@ -108,15 +113,107 @@ class LLMPlanningEngine:
     def __init__(self, state: UnifiedChatState):
         self.state = state
         self.text = latest_message_text(state.get("messages") or [])
-        self.previous_metadata = state.get("planner_metadata") or {}
-        
+        self.previous_metadata = copy.deepcopy(state.get("planner_metadata") or {})
+        incoming_active_workflow = state.get("active_workflow")
+        if isinstance(incoming_active_workflow, dict):
+            self.previous_metadata["active_workflow"] = copy.deepcopy(incoming_active_workflow)
+        incoming_payment_order = state.get("payment_order")
+        if isinstance(incoming_payment_order, dict):
+            self.previous_metadata["payment_order"] = copy.deepcopy(incoming_payment_order)
+        self.previous_metadata.pop("payment_successful", None)
+        self.current_payment_successful = bool(
+            (state.get("context_payload") or {}).get("payment_successful")
+            or "payment successful" in self.text.lower()
+            or "payment complete" in self.text.lower()
+            or "payment completed" in self.text.lower()
+            or "paid successfully" in self.text.lower()
+        )
+
+    def _is_payment_confirmation_turn(self) -> bool:
+        text = self.text.lower()
+        active_wf = ActiveWorkflow.from_dict(self.previous_metadata.get("active_workflow") or {})
+        if not active_wf or active_wf.status not in ("waiting_confirmation", "waiting_payment_confirmation"):
+            return False
+
+        return self.current_payment_successful and any(
+            phrase in text
+            for phrase in (
+                "payment successful",
+                "payment complete",
+                "payment completed",
+                "paid successfully",
+                "payment is successful",
+                "paid",
+            )
+        )
+
+    def _build_payment_confirmation_plan(self) -> ExecutionPlan:
+        plan = ExecutionPlan()
+        plan.reasoning = "Payment completed for the pending appointment"
+        plan.confidence = 1.0
+
+        task = PlannerTask.create_action(
+            action_handler="APPOINTMENT_BOOK",
+            task_id="t1",
+            depends_on=[],
+        )
+
+        active_wf = ActiveWorkflow.from_dict(self.previous_metadata.get("active_workflow") or {})
+        wf_ctx = active_wf.context if active_wf else {}
+        payment_order = self.previous_metadata.get("payment_order") or {}
+
+        if self.previous_metadata.get("doctor_name") or wf_ctx.get("doctor_name"):
+            task.parameters["doctor_name"] = self.previous_metadata.get("doctor_name") or wf_ctx.get("doctor_name")
+        if self.previous_metadata.get("booking_datetime") or wf_ctx.get("appointment_time") or wf_ctx.get("selected_slot"):
+            task.parameters["booking_datetime"] = (
+                self.previous_metadata.get("booking_datetime")
+                or wf_ctx.get("appointment_time")
+                or wf_ctx.get("selected_slot")
+            )
+        if self.previous_metadata.get("booking_ordinal") or wf_ctx.get("selection_type") or wf_ctx.get("booking_ordinal"):
+            task.parameters["booking_ordinal"] = (
+                self.previous_metadata.get("booking_ordinal")
+                or wf_ctx.get("selection_type")
+                or wf_ctx.get("booking_ordinal")
+            )
+        if wf_ctx.get("appointment_id") or payment_order.get("appointment_id"):
+            task.parameters["appointment_id"] = wf_ctx.get("appointment_id") or payment_order.get("appointment_id")
+        if wf_ctx.get("slot_id") or payment_order.get("slot_id"):
+            task.parameters["slot_id"] = wf_ctx.get("slot_id") or payment_order.get("slot_id")
+        task.parameters["payment_successful"] = True
+
+        plan.tasks.append(task)
+        plan.metadata = copy.deepcopy(self.previous_metadata)
+        plan.metadata["query_type"] = "workflow"
+        plan.metadata["payment_successful"] = True
+        plan.metadata["active_workflow"] = {
+            "type": "appointment_booking",
+            "status": "confirmed",
+            "context": {
+                **dict(wf_ctx or {}),
+                "appointment_id": wf_ctx.get("appointment_id") or payment_order.get("appointment_id"),
+                "slot_id": wf_ctx.get("slot_id") or payment_order.get("slot_id"),
+                "doctor_id": wf_ctx.get("doctor_id") or payment_order.get("doctor_id"),
+                "amount": wf_ctx.get("amount") or payment_order.get("amount"),
+                "currency": wf_ctx.get("currency") or payment_order.get("currency"),
+                "payment_stage": "confirmed",
+            },
+        }
+        plan.metadata["retrieval_strategy"] = "APPOINTMENT_SEARCH_SLOTS"
+        return plan
+
     async def execute(self) -> ExecutionPlan:
+        if self._is_payment_confirmation_turn():
+            return self._build_payment_confirmation_plan()
+
         prompt = LLM_PLANNER_PROMPT + f"\n\nUSER MESSAGE: {self.text}\nPREVIOUS PLANNER METADATA: {json.dumps(self.previous_metadata)}\n\nOUTPUT:"
         
         response_text = await complete_text([{"role": "system", "content": prompt}], max_output_tokens=1000)
         
         parsed = _extract_json(response_text)
         if not parsed:
+            from backend.utils.logger import log_error
+            log_error(f"LLM Planner JSON extraction failed. Raw output:\n{response_text}")
             raise ValueError("LLM returned invalid or empty JSON")
             
         confidence = parsed.get("confidence", 1.0)

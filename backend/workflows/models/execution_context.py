@@ -79,6 +79,16 @@ class ExecutionContext:
                 if k in self.shared_context:
                     self.consumed_data[k] = self.shared_context[k]
 
+        # 5a. Promote important structured payloads from result.data into the
+        # shared context so the final websocket response can forward them.
+        if isinstance(result.data, dict):
+            if "payment_order" in result.data and result.data["payment_order"] is not None:
+                self.shared_context["payment_order"] = result.data["payment_order"]
+                self.metadata["payment_order"] = result.data["payment_order"]
+            if "active_workflow" in result.data and result.data["active_workflow"] is not None:
+                self.shared_context["active_workflow"] = result.data["active_workflow"]
+                self.metadata["active_workflow"] = result.data["active_workflow"]
+
         # 5. Handle evidence collection & deduplication
         if result.evidence:
             for ev in result.evidence:

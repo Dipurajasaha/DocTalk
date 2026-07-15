@@ -91,6 +91,9 @@ class AppointmentService:
         return [self._serialize_slot(slot) for slot in refreshed]
 
     async def get_available_slots(self, doctor_id: str) -> list[dict[str, Any]]:
+        from .payment_service import PaymentService
+
+        await PaymentService(self.client).release_expired_payment_holds()
         slots = await self.client.doctorslot.find_many(
             where={"doctorId": doctor_id, "isBooked": False, "isActive": True},
             order={"startTime": "asc"},
@@ -283,6 +286,20 @@ class AppointmentService:
         if getattr(appointment, "slotId", None):
             slot_update = self._slot_reset_payload(actor_role)
             await self.client.doctorslot.update(where={"id": appointment.slotId}, data=slot_update)
+
+        # Keep the payment state aligned with the cancelled appointment so the
+        # UI does not continue to show "Payment Pending" for a cancelled slot.
+        payment = getattr(appointment, "payment", None)
+        if payment:
+            payment_status = str(getattr(payment, "status", "") or "").upper()
+            if payment_status != "CAPTURED":
+                await self.client.payment.update(
+                    where={"id": payment.id},
+                    data={
+                        "status": "FAILED",
+                        "razorpayPaymentId": getattr(payment, "razorpayPaymentId", None),
+                    },
+                )
 
         updated = await self.client.appointment.update(
             where={"id": appointment_id},

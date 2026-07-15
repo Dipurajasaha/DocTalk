@@ -18,6 +18,8 @@ async def llm_orchestrator_node(state: WorkflowState) -> dict[str, Any]:
         return {
             "messages": [ai_msg],
             "final_response": action_direct_response,
+            "payment_order": state.get("payment_order"),
+            "active_workflow": state.get("active_workflow") or state.get("planner_metadata", {}).get("active_workflow"),
             "context_payload": {
                 **payload,
                 "route": "action_direct_composer",

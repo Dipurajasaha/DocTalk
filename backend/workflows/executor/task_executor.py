@@ -156,7 +156,17 @@ async def task_executor_node(state: UnifiedChatState) -> dict[str, Any]:
     if ctx.metadata.get("clear_doctor_availability"):
         result_dict["doctor_availability_context"] = []
         pmeta = dict(state.get("planner_metadata") or {})
-        pmeta.pop("active_workflow", None)
+        result_dict["planner_metadata"] = pmeta
+
+    if ctx.metadata.get("payment_order"):
+        result_dict["payment_order"] = ctx.metadata["payment_order"]
+    elif ctx.metadata.get("clear_payment_order"):
+        result_dict["payment_order"] = None
+
+    if ctx.metadata.get("active_workflow"):
+        result_dict["active_workflow"] = ctx.metadata["active_workflow"]
+        pmeta = dict(state.get("planner_metadata") or {})
+        pmeta["active_workflow"] = ctx.metadata["active_workflow"]
         result_dict["planner_metadata"] = pmeta
         
     result_dict["evidence"] = ctx.evidence

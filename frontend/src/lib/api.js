@@ -82,6 +82,16 @@ export const paymentApi = {
     ),
 
   /**
+   * Cancel a pending Razorpay order and release its slot immediately.
+   */
+  cancelOrder: (appointmentId) =>
+    apiClient.post(
+      '/api/payments/cancel-order',
+      { appointment_id: appointmentId },
+      { retries: 0, auth: true }
+    ),
+
+  /**
    * Verify the payment signature returned by Razorpay checkout.
    * Returns { success, appointment_id, status }.
    */

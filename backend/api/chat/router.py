@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.parse
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, HTTPException, status
@@ -26,6 +27,63 @@ from ...workflows.unified_chat_graph import unified_chat_graph
 router = APIRouter(tags=["chat"])
 
 _WHITESPACE_RE = re.compile(r"\s+")
+_PAYMENT_PAYLOAD_RE = re.compile(r"\[PAYMENT_PAYLOAD:([^\]]*)\]")
+_PAYMENT_PAYLOAD_PREFIX = "[PAYMENT_PAYLOAD:"
+
+
+def _extract_payment_order(text: str) -> tuple[str, dict[str, Any] | None]:
+    """Remove the internal payment marker and return its structured order data."""
+    if not text:
+        return "", None
+
+    match = _PAYMENT_PAYLOAD_RE.search(text)
+    if not match:
+        return text, None
+
+    visible_text = _PAYMENT_PAYLOAD_RE.sub("", text)
+    visible_text = re.sub(r"\n{3,}", "\n\n", visible_text).strip()
+    try:
+        parsed = json.loads(urllib.parse.unquote(match.group(1)))
+    except (ValueError, json.JSONDecodeError):
+        return visible_text, None
+
+    return visible_text, parsed if isinstance(parsed, dict) else None
+
+
+class _StreamingPaymentPayloadBuffer:
+    """Prevent an internal payment marker from ever being emitted as a token."""
+
+    def __init__(self) -> None:
+        self._buffer = ""
+
+    def feed(self, chunk: str) -> str:
+        self._buffer += chunk
+        visible_parts: list[str] = []
+
+        while self._buffer:
+            marker_index = self._buffer.find(_PAYMENT_PAYLOAD_PREFIX)
+            if marker_index >= 0:
+                visible_parts.append(self._buffer[:marker_index])
+                payload_end = self._buffer.find("]", marker_index)
+                if payload_end == -1:
+                    self._buffer = self._buffer[marker_index:]
+                    break
+                self._buffer = self._buffer[payload_end + 1 :]
+                continue
+
+            # Keep only a possible split prefix; emit all other safe text.
+            keep = 0
+            max_suffix = min(len(self._buffer), len(_PAYMENT_PAYLOAD_PREFIX) - 1)
+            for size in range(max_suffix, 0, -1):
+                if _PAYMENT_PAYLOAD_PREFIX.startswith(self._buffer[-size:]):
+                    keep = size
+                    break
+            safe_end = len(self._buffer) - keep
+            visible_parts.append(self._buffer[:safe_end])
+            self._buffer = self._buffer[safe_end:]
+            break
+
+        return "".join(visible_parts)
 
 
 def _sanitize_ai_message(text: str) -> str:
@@ -567,11 +625,17 @@ async def _run_ai_websocket(
             # specific response language.
             user_text = raw_text
             language = "en"
+            extra_payload: dict[str, Any] = {}
             try:
                 parsed_payload = json.loads(raw_text)
                 if isinstance(parsed_payload, dict):
                     parsed_message = str(parsed_payload.get("message") or "").strip()
                     parsed_language = str(parsed_payload.get("language") or "").strip().lower()
+                    extra_payload = {
+                        k: v
+                        for k, v in parsed_payload.items()
+                        if k not in {"message", "language"}
+                    }
                     if parsed_message:
                         user_text = parsed_message
                     if parsed_language:
@@ -602,22 +666,41 @@ async def _run_ai_websocket(
                 "ai_session_id": ai_session_id,
                 "language": language,
                 "target_patient_id": normalized_target_patient_id,
+                "payment_order": None,
+                "payment_successful": False,
+                "payment_failed": False,
                 "context_payload": {
                     "ai_session_id": ai_session_id,
                     "user_id": current_user.user_id,
                     "target_patient_id": normalized_target_patient_id,
                     "role": current_user.role,
+                    **(
+                        dict(extra_payload.get("context_payload") or {})
+                        if isinstance(extra_payload.get("context_payload"), dict)
+                        else {}
+                    ),
                 },
                 "final_response": "",
                 "session_risk_score": 0,
                 "input_guardrail_context": {},
                 "output_guardrail_context": {},
             }
+            if isinstance(extra_payload.get("active_workflow"), dict):
+                input_state["active_workflow"] = extra_payload["active_workflow"]
+            if isinstance(extra_payload.get("payment_order"), dict):
+                input_state["payment_order"] = extra_payload["payment_order"]
+            if "payment_successful" in extra_payload:
+                input_state["payment_successful"] = extra_payload["payment_successful"]
+                if extra_payload["payment_successful"]:
+                    input_state["payment_order"] = None
+            if "payment_failed" in extra_payload:
+                input_state["payment_failed"] = extra_payload["payment_failed"]
 
             final_response = ""
             streamed_token = False
             ai_config = {"configurable": {"thread_id": namespace}}
             metadata_buffer = _StreamingMetadataBuffer()
+            payment_payload_buffer = _StreamingPaymentPayloadBuffer()
 
             try:
                 async for event in unified_chat_graph.astream_events(input_state, config=ai_config, version="v2"):
@@ -658,11 +741,17 @@ async def _run_ai_websocket(
                             if emit_text:
                                 sanitized_chunk = _sanitize_ai_message(emit_text)
                                 final_response += sanitized_chunk
-                                try:
-                                    await websocket.send_json({"type": "token", "content": sanitized_chunk})
-                                except Exception:
-                                    raise
-                                streamed_token = True
+                                visible_chunk = payment_payload_buffer.feed(sanitized_chunk)
+                                if visible_chunk:
+                                    try:
+                                        await websocket.send_json({"type": "token", "content": visible_chunk})
+                                    except WebSocketDisconnect as wsd:
+                                        print(f"[DEBUG][WS] Client disconnected during token streaming: {wsd.code}")
+                                        return
+                                    except Exception as e:
+                                        print(f"[DEBUG][WS] Error sending token: {repr(e)}")
+                                        raise
+                                    streamed_token = True
 
                 final_state = unified_chat_graph.get_state(ai_config).values
                 if not final_response:
@@ -671,6 +760,15 @@ async def _run_ai_websocket(
                     final_response = _role_scaffold_message(current_user.role)
 
                 final_response = _sanitize_ai_message(final_response)
+                final_response, payment_order = _extract_payment_order(final_response)
+                if not payment_order:
+                    payment_order = final_state.get("payment_order") or None
+                print(
+                    "[DEBUG][WS][FINAL_STATE] "
+                    f"has_payment_order={bool(payment_order)} "
+                    f"has_final_response={bool(final_response)} "
+                    f"final_state_keys={sorted(list(final_state.keys()))[:20]}"
+                )
 
 
 
@@ -688,6 +786,9 @@ async def _run_ai_websocket(
                         "target_patient_id": normalized_target_patient_id,
                         "content": final_response,
                     }
+                    if payment_order:
+                        payload["payment_order"] = payment_order
+                        print(f"[DEBUG][WS] Sending structured payment order for appointment {payment_order.get('appointment_id')}")
                     await websocket.send_json(payload)
                     
                     total_time = (time.time() - request_start_time) * 1000
@@ -700,11 +801,14 @@ async def _run_ai_websocket(
                     log_key_value("Total", format_duration(total_time))
                     
 
-                except Exception:
+                except Exception as e:
+                    print(f"[DEBUG][WS] Error sending final response: {repr(e)}")
                     raise
-            except WebSocketDisconnect:
+            except WebSocketDisconnect as wsd:
+                print(f"[DEBUG][WS] Client disconnected normally during execution loop: {wsd.code}")
                 return
             except Exception as exc:
+                print(f"[DEBUG][WS] Unexpected exception during graph execution: {repr(exc)}")
                 try:
                     await websocket.send_json(
                         {
@@ -717,9 +821,11 @@ async def _run_ai_websocket(
                     )
                 except Exception:
                     pass
-    except WebSocketDisconnect:
+    except WebSocketDisconnect as wsd:
+        print(f"[DEBUG][WS] Outer WebSocketDisconnect caught: {wsd.code}")
         return
-    except Exception:
+    except Exception as exc:
+        print(f"[DEBUG][WS] Outer unexpected exception: {repr(exc)}")
         try:
             await websocket.close(code=1011)
         except Exception:

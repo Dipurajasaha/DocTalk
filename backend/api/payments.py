@@ -9,6 +9,8 @@ POST /api/payments/webhook        – Razorpay sends server-side payment events
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
 from ..core.security import CurrentUser, get_current_user
@@ -54,6 +56,25 @@ async def create_order(
         note=payload.note,
     )
     return CreateOrderResponse.model_validate(result)
+
+
+@router.post("/cancel-order")
+async def cancel_order(
+    payload: RetryOrderRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    payment_service: PaymentService = Depends(get_payment_service),
+) -> dict[str, Any]:
+    """
+    Cancel an existing pending order.
+    Releases the slot instantly.
+    """
+    if current_user.role != "patient":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Patient access required")
+
+    return await payment_service.cancel_pending_order(
+        appointment_id=payload.appointment_id,
+        patient_id=current_user.user_id,
+    )
 
 
 @router.post("/retry-order", response_model=CreateOrderResponse)

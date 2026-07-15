@@ -102,19 +102,26 @@ async def input_guardrail_node(state: UnifiedChatState) -> dict[str, Any]:
     # 2. Semantic Cache Domain Validation
     if decision != "BLOCK":
         words = re.findall(r'\b[a-z0-9]+\b', text.lower())
-        stopwords = {"explain", "analyze", "show", "tell", "me", "about", "what", "is", "how", "does", "the", "for", "to", "or", "and", "my", "this", "a", "an", "of", "in", "write", "create", "generate", "solve", "can", "you", "i", "want"}
-        tokens = [w for w in words if w not in stopwords]
         
-        if not tokens and words:
-            # If the user only typed stopwords (e.g. "what is this"), don't blindly block.
-            # Revert to the original words so the LLM fallback can evaluate the context!
-            tokens = words
-            
-        if not tokens:
-            domain = "UNSUPPORTED"
-            decision = "BLOCK"
+        ALLOWED_MEDICAL_TERMS = {"consultation", "consultations", "appointment", "appointments", "blood", "report", "record", "records", "history"}
+        if any(w in words for w in ALLOWED_MEDICAL_TERMS):
+            domain = "MEDICAL"
+            decision = "ALLOW"
+            logger.info(f"\n[DEBUG] Guardrail automatically allowed based on core medical terms.")
         else:
-            logger.info(f"\n[DEBUG] Guardrail checking tokens against Semantic Cache: {tokens}")
+            stopwords = {"explain", "analyze", "show", "tell", "me", "about", "what", "is", "how", "does", "the", "for", "to", "or", "and", "my", "this", "a", "an", "of", "in", "write", "create", "generate", "solve", "can", "you", "i", "want"}
+            tokens = [w for w in words if w not in stopwords]
+            
+            if not tokens and words:
+                # If the user only typed stopwords (e.g. "what is this"), don't blindly block.
+                # Revert to the original words so the LLM fallback can evaluate the context!
+                tokens = words
+                
+            if not tokens:
+                domain = "UNSUPPORTED"
+                decision = "BLOCK"
+            else:
+                logger.info(f"\n[DEBUG] Guardrail checking tokens against Semantic Cache: {tokens}")
             cache_result = await cache_manager.check_tokens(tokens)
             
             if cache_result == "BLOCKED":
