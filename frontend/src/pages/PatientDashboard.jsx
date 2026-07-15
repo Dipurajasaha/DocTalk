@@ -39,71 +39,6 @@ const tryParseJson = (text) => {
   }
 };
 
-const PAYMENT_PAYLOAD_PREFIX = '[PAYMENT_PAYLOAD:';
-
-const stripPaymentPayload = (text) => {
-  const source = String(text || '');
-  if (!source) return '';
-
-  const sanitized = source.replace(/\[PAYMENT_PAYLOAD:[^\]]*\]?/g, '');
-  const fallbackIndex = sanitized.indexOf(PAYMENT_PAYLOAD_PREFIX);
-  const visibleText = fallbackIndex === -1 ? sanitized : sanitized.slice(0, fallbackIndex);
-
-  return visibleText
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .trim();
-};
-
-const extractPaymentOrderFromText = (text) => {
-  const source = String(text || '');
-  const match = source.match(/\[PAYMENT_PAYLOAD:([^\]]+)\]/);
-  if (!match || !match[1]) return null;
-
-  try {
-    return JSON.parse(decodeURIComponent(match[1]));
-  } catch (err) {
-    console.error('Failed to parse AI payment payload', err);
-    return null;
-  }
-};
-
-const getVisibleFinalText = (streamedText, finalChunk) => {
-  const streamed = stripPaymentPayload(streamedText).trim();
-  const final = stripPaymentPayload(finalChunk).trim();
-  const rawFinal = String(finalChunk || '');
-  const hasEncodedResidue = /%[0-9a-fA-F]{2}/.test(rawFinal);
-
-  if (streamed && (!final || hasEncodedResidue)) {
-    return streamed;
-  }
-
-  if (!streamed) return final;
-  if (!final) return streamed;
-  return final.length >= streamed.length ? final : streamed;
-};
-
-const formatRupeeAmount = (amountInPaise) => {
-  const paise = Number(amountInPaise);
-  if (!Number.isFinite(paise)) return '₹0';
-  const rupees = paise / 100;
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(rupees);
-};
-
-const getAiPaymentOrderKey = (order) => {
-  const source = order && typeof order === 'object' ? order : {};
-  return [
-    String(source.order_id || source.orderId || ''),
-    String(source.key_id || source.keyId || ''),
-    String(source.appointment_id || source.appointmentId || ''),
-  ].join(':');
-};
-
 const getCleanAnalysisText = (analysis) => {
   if (!analysis) return '';
   const trimmed = analysis.trim();
@@ -276,11 +211,6 @@ export default function PatientDashboard() {
   const [bookingInProgress, setBookingInProgress] = useState(false);
   // ── Razorpay payment state ───────────────────────────────────────────────
   const [pendingOrder, setPendingOrder] = useState(null);  // active Razorpay order
-  const [pendingAiOrder, setPendingAiOrder] = useState(null); // AI-initiated Razorpay order
-  const [pendingAiOrderNonce, setPendingAiOrderNonce] = useState(0);
-  const pendingAiOrderKeyRef = useRef('');
-  const lastAiPaymentOrderRef = useRef(null);
-  const [aiPaymentFollowUp, setAiPaymentFollowUp] = useState(null);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
 
   const [activeDocChat, setActiveDocChat] = useState(null);
@@ -720,7 +650,7 @@ export default function PatientDashboard() {
       setMessages(items.map((item) => ({
         senderId: item?.sender_id || item?.senderId || (String(item?.role || '').toLowerCase() === 'assistant' ? 'doctalk-ai' : 'user'),
         sender: String(item?.role || '').toLowerCase() === 'assistant' ? 'model' : 'user',
-        text: stripPaymentPayload(item?.message || item?.content || item?.text || ''),
+        text: item?.message || item?.content || item?.text || '',
         id: item?.id || `${item?.timestamp || Date.now()}-${Math.random().toString(16).slice(2)}`,
         timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
       })));
@@ -1149,10 +1079,7 @@ export default function PatientDashboard() {
   };
 
   /** Step 2b: Razorpay checkout failed or was dismissed */
-  const handlePaymentFailure = async (err) => {
-    if (pendingOrder?.appointment_id) {
-      try { await paymentApi.cancelOrder(pendingOrder.appointment_id); } catch (e) { console.error('Failed to cancel order:', e); }
-    }
+  const handlePaymentFailure = (err) => {
     setPendingOrder(null);
     setPaymentProcessing(false);
     try { addNotification({ type: 'error', message: 'Payment failed: ' + (err?.message || 'unknown error') }); } catch (e) {}
@@ -1163,10 +1090,7 @@ export default function PatientDashboard() {
     loadAppointments();
   };
 
-  const handlePaymentDismiss = async () => {
-    if (pendingOrder?.appointment_id) {
-      try { await paymentApi.cancelOrder(pendingOrder.appointment_id); } catch (e) { console.error('Failed to cancel order:', e); }
-    }
+  const handlePaymentDismiss = () => {
     setPendingOrder(null);
     setPaymentProcessing(false);
     try { addNotification({ type: 'info', message: 'Payment cancelled. Your appointment request was not confirmed.' }); } catch (e) {}
@@ -1190,174 +1114,6 @@ export default function PatientDashboard() {
     } catch (err) {
       setPaymentProcessing(false);
       try { addNotification({ type: 'error', message: 'Could not initiate payment: ' + (err?.message || 'server error') }); } catch (e) {}
-    }
-  };
-
-  // ── AI Payment Handlers ──────────────────────────────────────────────────
-  const applyPendingAiOrder = (orderData) => {
-    if (!orderData || typeof orderData !== 'object') return;
-
-    const nextKey = getAiPaymentOrderKey(orderData);
-    if (!nextKey) return;
-
-    console.debug('[AI_PAYMENT][RECEIVED]', {
-      order_id: orderData.order_id,
-      key_id_present: Boolean(orderData.key_id),
-      appointment_id: orderData.appointment_id,
-      amount: orderData.amount,
-      currency: orderData.currency,
-      nextKey,
-    });
-
-    // The AI workflow can surface the same order more than once via streamed
-    // tokens, final payloads, and structured events. Keep the first mount so
-    // the checkout overlay does not get torn down and recreated mid-open.
-    if (pendingAiOrder && pendingAiOrderKeyRef.current === nextKey) {
-      return;
-    }
-
-    setAiPaymentFollowUp(null);
-    pendingAiOrderKeyRef.current = nextKey;
-    setPendingAiOrder(orderData);
-    setPendingAiOrderNonce((prev) => prev + 1);
-  };
-
-  useEffect(() => {
-    const handleAiClick = (e) => {
-      try {
-        const orderData = typeof e.detail === 'string' ? JSON.parse(e.detail) : e.detail;
-        console.debug('[AI_PAYMENT][CLICK_EVENT]', orderData);
-        applyPendingAiOrder(orderData);
-      } catch (err) {
-        console.error("Failed to parse AI payment order", err);
-      }
-    };
-    window.addEventListener('ai-payment-click', handleAiClick);
-    return () => window.removeEventListener('ai-payment-click', handleAiClick);
-  }, []);
-
-  const handleAiPaymentSuccess = async (result) => {
-    const order = pendingAiOrder;
-    lastAiPaymentOrderRef.current = order || lastAiPaymentOrderRef.current;
-    pendingAiOrderKeyRef.current = '';
-    setPendingAiOrder(null);
-
-    try {
-      const verification = await paymentApi.verifyPayment(
-        result?.razorpay_order_id || order?.order_id,
-        result?.razorpay_payment_id,
-        result?.razorpay_signature,
-        result?.appointment_id || order?.appointment_id,
-      );
-
-      if (!verification?.success) {
-        throw new Error(verification?.message || 'Payment verification failed');
-      }
-
-      setAiPaymentFollowUp(null);
-      loadAppointments();
-      await handleChatSubmit(null, 'payment successful', {
-        payment_successful: true,
-        active_workflow: order?.appointment_id
-          ? {
-              type: 'appointment_booking',
-              status: 'waiting_payment_confirmation',
-              context: {
-                appointment_id: order.appointment_id,
-                doctor_id: order.doctor_id,
-                slot_id: order.slot_id,
-                amount: order.amount,
-                currency: order.currency,
-                payment_stage: 'payment_captured',
-              },
-            }
-          : null,
-      });
-    } catch (err) {
-      console.error('AI payment verification failed', err);
-      await handleAiPaymentFailure(err, order);
-    }
-  };
-
-  const handleAiPaymentFailure = async (err, orderOverride = null) => {
-    const sourceOrder = orderOverride || pendingAiOrder || lastAiPaymentOrderRef.current;
-    lastAiPaymentOrderRef.current = sourceOrder || lastAiPaymentOrderRef.current;
-    const appointmentId = sourceOrder?.appointment_id;
-    if (appointmentId) {
-      try { await paymentApi.cancelOrder(appointmentId); } catch (e) { console.error('Failed to cancel ai order:', e); }
-    }
-    pendingAiOrderKeyRef.current = '';
-    setPendingAiOrder(null);
-    loadAppointments();
-    setAiPaymentFollowUp({
-      outcome: 'failure',
-      title: 'Payment failed',
-      message: 'The payment did not go through. Retry payment, or choose Continue to ask the assistant for the next step.',
-    });
-  };
-
-  const handleAiPaymentDismiss = async () => {
-    const sourceOrder = pendingAiOrder || lastAiPaymentOrderRef.current;
-    lastAiPaymentOrderRef.current = sourceOrder || lastAiPaymentOrderRef.current;
-    const appointmentId = sourceOrder?.appointment_id;
-    if (appointmentId) {
-      try { await paymentApi.cancelOrder(appointmentId); } catch (e) { console.error('Failed to cancel ai order:', e); }
-    }
-    pendingAiOrderKeyRef.current = '';
-    setPendingAiOrder(null);
-    loadAppointments();
-    setAiPaymentFollowUp({
-      outcome: 'failure',
-      title: 'Payment cancelled',
-      message: 'The payment was closed. Retry payment, or choose Continue to ask the assistant for the next step.',
-    });
-  };
-
-  const handleAiPaymentContinue = async () => {
-    const outcome = aiPaymentFollowUp?.outcome;
-    setAiPaymentFollowUp(null);
-    if (outcome === 'success') {
-      await handleChatSubmit(null, 'payment successful');
-    } else {
-      await handleChatSubmit(null, 'payment not successful', {
-        payment_failed: true,
-      });
-    }
-  };
-
-  const handleAiPaymentRetry = async () => {
-    const sourceOrder = lastAiPaymentOrderRef.current || pendingAiOrder;
-    const appointmentId = sourceOrder?.appointment_id;
-    const doctorId = sourceOrder?.doctor_id;
-    const slotId = sourceOrder?.slot_id;
-
-    if (!doctorId || !slotId) {
-      if (!appointmentId) {
-        try { addNotification({ type: 'error', message: 'No payment order is available to retry.' }); } catch (e) {}
-        return;
-      }
-    }
-
-    if (!appointmentId && (!doctorId || !slotId)) {
-      try { addNotification({ type: 'error', message: 'No payment order is available to retry.' }); } catch (e) {}
-      return;
-    }
-
-    setAiPaymentFollowUp(null);
-
-    try {
-      const order = doctorId && slotId
-        ? await paymentApi.createOrder('direct', doctorId, slotId, 'Booked via AI Assistant', null)
-        : await paymentApi.retryOrder(appointmentId);
-      if (!order?.order_id) {
-        throw new Error('Could not recreate payment order');
-      }
-      lastAiPaymentOrderRef.current = order;
-      applyPendingAiOrder(order);
-      loadAppointments();
-    } catch (err) {
-      console.error('AI payment retry failed', err);
-      try { addNotification({ type: 'error', message: 'Could not retry payment: ' + (err?.message || 'server error') }); } catch (e) {}
     }
   };
 
@@ -1399,16 +1155,13 @@ export default function PatientDashboard() {
     }
   }, [messages]);
 
-  const handleChatSubmit = async (e, overrideText = null, extraPayload = null) => {
-    if (e) e.preventDefault();
-    const textToSend = overrideText || inputMsg;
-    if (!textToSend.trim()) return;
+  const handleChatSubmit = async (e) => {
+    e.preventDefault();
+    if (!inputMsg.trim()) return;
 
-    const newMsg = { sender: 'user', text: textToSend, id: Date.now() };
+    const newMsg = { sender: 'user', text: inputMsg, id: Date.now() };
     setMessages(prev => [...prev, newMsg]);
-    if (!overrideText) {
-      setInputMsg('');
-    }
+    setInputMsg('');
     setIsAiProcessing(true);
     setProcessingState(null);
 
@@ -1476,14 +1229,10 @@ export default function PatientDashboard() {
           reject(error);
         };
 
-      socket.onopen = () => {
-        resetInactivityTimeout();
-        const outbound = { message: textToSend, language };
-        if (extraPayload && typeof extraPayload === 'object') {
-          Object.assign(outbound, extraPayload);
-        }
-        socket.send(JSON.stringify(outbound));
-      };
+        socket.onopen = () => {
+          resetInactivityTimeout();
+          socket.send(JSON.stringify({ message: inputMsg, language }));
+        };
 
         socket.onmessage = (event) => {
           let payload = null;
@@ -1497,18 +1246,8 @@ export default function PatientDashboard() {
 
           const eventType = String(payload?.type || payload?.status || '').toLowerCase();
           const chunkText = String(payload?.content || payload?.text || payload?.chunk || '');
-          const structuredPaymentOrder = payload?.payment_order || payload?.paymentOrder || null;
-
-          if (structuredPaymentOrder && typeof structuredPaymentOrder === 'object' && eventType !== 'final') {
-            console.debug('[AI_PAYMENT][WS_STRUCTURED_ORDER]', structuredPaymentOrder);
-            applyPendingAiOrder(structuredPaymentOrder);
-          }
 
           if (eventType === 'history') {
-            return;
-          }
-
-          if (eventType === 'payment_order') {
             return;
           }
 
@@ -1520,11 +1259,10 @@ export default function PatientDashboard() {
           if ((eventType === 'token' || eventType === 'message') && chunkText) {
             finalText += chunkText;
             if (isMounted) {
-              const safeStreamText = stripPaymentPayload(finalText);
               setMessages(prev => {
                 const filtered = prev.filter(m => m.id !== 'loading');
                 const existingIndex = filtered.findIndex(m => m.id === 'assistant-stream');
-                const nextMessage = { sender: 'model', text: safeStreamText, id: 'assistant-stream' };
+                const nextMessage = { sender: 'model', text: finalText, id: 'assistant-stream' };
                 if (existingIndex >= 0) {
                   const clone = [...filtered];
                   clone[existingIndex] = nextMessage;
@@ -1539,13 +1277,7 @@ export default function PatientDashboard() {
             if (isMounted) {
               setIsAiProcessing(false);
               setProcessingState(null);
-              const finalSourceText = String(chunkText || '');
-              const orderData = structuredPaymentOrder || extractPaymentOrderFromText(finalText) || extractPaymentOrderFromText(finalSourceText);
-              if (orderData) {
-                console.debug('[AI_PAYMENT][WS_FINAL_ORDER]', orderData);
-                applyPendingAiOrder(orderData);
-              }
-              const textReply = getVisibleFinalText(finalText, finalSourceText) || "I'm sorry, I was unable to generate a response. Please try again.";
+              const textReply = String(chunkText || finalText || '').trim() || "I'm sorry, I was unable to generate a response. Please try again.";
               setMessages(prev => {
                 const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
                 return [...filtered, { sender: 'model', text: textReply, id: Date.now() }];
@@ -1576,15 +1308,9 @@ export default function PatientDashboard() {
           }
           if (finalText) {
             if (isMounted) {
-              const orderData = extractPaymentOrderFromText(finalText);
-              if (orderData) {
-                console.debug('[AI_PAYMENT][WS_CLOSE_ORDER]', orderData);
-                applyPendingAiOrder(orderData);
-              }
-              const closedText = stripPaymentPayload(finalText).trim();
               setMessages(prev => {
                 const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
-                return [...filtered, { sender: 'model', text: closedText, id: Date.now() }];
+                return [...filtered, { sender: 'model', text: finalText, id: Date.now() }];
               });
             }
             resolveOnce();
@@ -3095,324 +2821,6 @@ export default function PatientDashboard() {
             </div>
           )}
 
-          {activePanel === 'explain' && (
-            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }}>
-                  <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>AI Health Assistant</h2>
-                  <p style={{ margin: '6px 0 0 0', fontSize: '11px', color: '#8B7EFF', fontWeight: '500', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif' }}>*Not a substitute for professional medical advice*</p>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ minWidth: '200px' }}>
-                    <select
-                      value={activeAiSessionId || ''}
-                      onChange={handleSelectSession}
-                      title="Select chat"
-                      style={{ width: '100%', padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', fontSize: '11px', backgroundColor: '#FFF', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
-                    >
-                      {aiSessions.length === 0 ? (
-                        <option value="patient_ai">New Chat</option>
-                      ) : (
-                        aiSessions.map((s) => (
-                          <option key={s.id} value={s.id}>{s.title || 'New Chat'}</option>
-                        ))
-                      )}
-                    </select>
-                  </div>
-                  <button
-                    onClick={() => handleDeleteSession(activeAiSessionId)}
-                    disabled={isActiveDefault}
-                    title="Delete chat"
-                    aria-label="Delete chat"
-                    style={{
-                      width: '38px',
-                      height: '38px',
-                      flexShrink: 0,
-                      background: 'transparent',
-                      color: isActiveDefault ? '#CBD5E1' : '#ef4444',
-                      border: '1px solid',
-                      borderColor: isActiveDefault ? '#CBD5E1' : '#fecaca',
-                      borderRadius: '10px',
-                      fontSize: '16px',
-                      cursor: isActiveDefault ? 'default' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    ×
-                  </button>
-                  <div style={{ width: '160px' }}>
-                    <select
-                      value={language}
-                      onChange={(e) => setLanguage(e.target.value)}
-                      style={{ width: '100%', padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', fontSize: '11px', backgroundColor: '#FFF', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
-                    >
-                      <option value="en">English</option>
-                      <option value="es">Español</option>
-                      <option value="hi">Hindi</option>
-                      <option value="bn">Bengali</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="analyze-view-container" style={{ display: 'flex', flex: 1, gap: '24px', minHeight: 0 }}>
-                <div className="ai-chat-column" style={{ position: 'relative', flex: 7, display: 'flex', flexDirection: 'column', overflow: 'visible', minHeight: 0, gap: '0' }}>
-                  <div className="chat-box-container" style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', background: '#FFF', borderRadius: '16px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', overflow: 'hidden', minHeight: 0 }}>
-                    <div className="chat-box" style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 100px 24px', minHeight: 0 }}>
-                      {messages.length === 0 && !isAiProcessing && <div style={{textAlign: "center", color: "#6B6B6B", marginTop: "20px"}}>Start chatting with your AI Medical Assistant!</div>}
-                      {messages.map((msg, idx) => (
-                        <div key={idx} className={`chat-message ${isOutgoingChatMessage(msg) ? 'user' : 'model'}`} style={{ marginBottom: '16px', display: 'flex', alignItems: 'flex-start', justifyContent: isOutgoingChatMessage(msg) ? 'flex-end' : 'flex-start' }}>
-                          {!isOutgoingChatMessage(msg) && <div className="emoji" style={{ marginRight: '8px', fontSize: '18px' }}></div>}
-                          <div className="bubble" style={{ background: isOutgoingChatMessage(msg) ? '#8B7EFF' : '#F1F5F9', color: isOutgoingChatMessage(msg) ? '#FFF' : '#1E293B', padding: '12px 16px', borderRadius: '16px', maxWidth: '80%', boxShadow: '0 8px 16px rgba(0,0,0,0.08), 0 4px 6px rgba(0,0,0,0.04)' }}>
-                            {isOutgoingChatMessage(msg) ? (
-                              <div className="content" style={{ whiteSpace: 'pre-wrap' }}>{msg.text || ''}</div>
-                            ) : msg.structured ? (
-                              <div className="content"><StructuredReply data={msg.structured} /></div>
-                            ) : isJsonLike(msg.text) && tryParseJson(msg.text) ? (
-                              <div className="content"><StructuredReply data={tryParseJson(msg.text)} /></div>
-                            ) : isJsonLike(msg.text) ? (
-                              <div className="content"><MarkdownMessage text={getCleanAnalysisText(msg.text)} /></div>
-                            ) : (
-                              <div className="content"><MarkdownMessage text={msg.text || ''} /></div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                      {isAiProcessing && <AiProcessingCard active={isAiProcessing} status={processingState} />}
-                      <div ref={chatEndRef} />
-                    </div>
-                    {aiPaymentFollowUp?.outcome === 'failure' && (
-                      <div style={{ position: 'absolute', left: '50%', bottom: '92px', transform: 'translateX(-50%)', width: 'calc(90% - 48px)', maxWidth: '720px', zIndex: 11 }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: '#FFF7ED', border: '1px solid #FDBA74', color: '#9A3412', borderRadius: '18px', padding: '14px 16px', boxShadow: '0 12px 24px rgba(249, 115, 22, 0.14)' }}>
-                          <div style={{ fontSize: '12px', fontWeight: '800', letterSpacing: '0.02em' }}>{aiPaymentFollowUp.title || 'Payment update'}</div>
-                          <div style={{ fontSize: '11px', lineHeight: 1.5 }}>{aiPaymentFollowUp.message}</div>
-                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                            {aiPaymentFollowUp.outcome === 'failure' && (
-                              <button
-                                type="button"
-                                onClick={handleAiPaymentRetry}
-                                style={{ padding: '8px 14px', borderRadius: '999px', border: 'none', background: 'linear-gradient(135deg, #f97316, #ea580c)', color: '#FFF', fontSize: '10px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 4px 12px rgba(249,115,22,0.25)' }}
-                              >
-                                Retry payment
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={handleAiPaymentContinue}
-                              style={{ padding: '8px 14px', borderRadius: '999px', border: '1px solid #FDBA74', background: '#FFF', color: '#9A3412', fontSize: '10px', fontWeight: '700', cursor: 'pointer' }}
-                            >
-                              {aiPaymentFollowUp.outcome === 'failure' ? 'Continue chat' : 'Continue booking'}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    <form id="chatInputForm" style={{ position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)', width: 'calc(90% - 48px)', maxWidth: '720px', display: 'flex', alignItems: 'center', padding: '6px 6px 6px 12px', background: '#ffffff', borderRadius: '50px', boxShadow: '0 16px 32px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', zIndex: 10 }} onSubmit={handleChatSubmit}>
-                      <span style={{ color: '#64748b', fontSize: '22px', marginRight: '16px', cursor: 'pointer' }}>+</span>
-                      <input
-                        type="text"
-                        placeholder="Ask AI Health Assistant..."
-                        value={inputMsg}
-                        onChange={e => setInputMsg(e.target.value)}
-                        style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '15px', color: '#1E293B', fontWeight: '500' }}
-                      />
-                      <button type="submit" disabled={!inputMsg.trim()} style={{ marginLeft: '12px', width: '40px', height: '40px', borderRadius: '50%', background: !inputMsg.trim() ? '#E2E8F0' : 'linear-gradient(to right, #D67CFF, #6B5CE7)', color: !inputMsg.trim() ? '#94A3B8' : '#FFF', border: 'none', cursor: !inputMsg.trim() ? 'default' : 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: !inputMsg.trim() ? 'none' : '0 4px 12px rgba(214, 124, 255, 0.4)' }}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="22" y1="2" x2="11" y2="13"></line>
-                          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                        </svg>
-                      </button>  
-                    </form>
-                  </div>
-                </div>
-
-                <div className="action-panel-column" style={{ flex: 3, display: 'flex', flexDirection: 'column', gap: '16px', minHeight: 0 }}>
-                  <div className="floating-box panel" style={{ background: '#FFF', padding: '24px', borderRadius: '16px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', gap: '12px' }}>
-                      <h4 style={{ margin: 0, fontSize: '13px', color: '#6C5CE7', fontWeight: 'bold', flex: 1 }}>Analyze Medical Files</h4>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button 
-                          onClick={() => { setAnalysisMode('upload'); setUploadedFiles([]); setSelectedDocForAnalysis(null); }}
-                          style={{ padding: '6px 12px', fontSize: '10px', fontWeight: '600', borderRadius: '50px', border: '1px solid', background: analysisMode === 'upload' ? '#6C5CE7' : '#F1F5F9', color: analysisMode === 'upload' ? '#FFF' : '#475569', cursor: 'pointer', transition: '0.2s' }}
-                        >
-                          Upload New
-                        </button>
-                        <button 
-                          onClick={() => { setAnalysisMode('select'); setUploadedFiles([]); setSelectedDocForAnalysis(null); setAnalysisCurrentFolder(null); loadAssets(); }}
-                          style={{ padding: '6px 12px', fontSize: '10px', fontWeight: '600', borderRadius: '50px', border: '1px solid', background: analysisMode === 'select' ? '#6C5CE7' : '#F1F5F9', color: analysisMode === 'select' ? '#FFF' : '#475569', cursor: 'pointer', transition: '0.2s' }}
-                        >
-                          My Documents
-                        </button>
-                      </div>
-                    </div>
-
-                    {analysisMode === 'upload' ? (
-                      uploadedFiles.length === 0 ? (
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: '16px' }}>
-                          <div className="styled-dropzone" style={{ border: '2px dashed #CBD5E1', borderRadius: '16px', padding: '48px 24px', textAlign: 'center', background: '#F8FAFC', position: 'relative', transition: 'all 0.2s', cursor: 'pointer', width: '100%', boxSizing: 'border-box' }} onMouseEnter={(e) => e.currentTarget.style.borderColor='#8B7EFF'} onMouseLeave={(e) => e.currentTarget.style.borderColor='#CBD5E1'}>
-                            <label style={{ cursor: 'pointer', display: 'block', width: '100%', height: '100%' }}>
-                              <div style={{ fontSize: '32px', marginBottom: '12px' }}>+</div>
-                               <div style={{ fontSize: '12px', fontWeight: '600', color: '#475569', marginBottom: '6px' }}>Upload Medical File</div>
-                               <div style={{ fontSize: '10px', color: '#64748B' }}>Any supported document or image</div>
-                               <input type="file" ref={explainUploadInputRef} accept=".pdf,.jpg,.jpeg,.png" onChange={handleAddExplainFile} style={{ position: 'absolute', top:0, left:0, width:'100%', height:'100%', opacity:0, cursor: 'pointer' }} />
-                            </label>
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
-                          <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {uploadedFiles.map((fileObj) => (
-                              <div key={fileObj.id} style={{ display: 'flex', alignItems: 'center', padding: '12px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', gap: '12px' }}>
-                                <div style={{ width: '36px', height: '36px', background: '#EEF2FF', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6366F1', flexShrink: 0 }}>
-                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
-                                </div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontWeight: '600', fontSize: '12px', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileObj.name}</div>
-                                  <div style={{ fontSize: '10px', color: '#64748B', marginTop: '2px' }}>{(fileObj.file.size / 1024 / 1024).toFixed(2)} MB</div>
-                                </div>
-                                <button 
-                                  onClick={() => handleRemoveExplainFile(fileObj.id)} 
-                                  style={{ padding: '6px 12px', background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '50px', fontSize: '10px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', flexShrink: 0 }}
-                                  onMouseEnter={(e) => { e.target.style.background = '#ef4444'; e.target.style.color = '#FFF'; }}
-                                  onMouseLeave={(e) => { e.target.style.background = '#fee2e2'; e.target.style.color = '#ef4444'; }}
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                          
-                          <div className="styled-dropzone" style={{ border: '2px dashed #CBD5E1', borderRadius: '12px', padding: '16px', textAlign: 'center', background: '#F8FAFC', position: 'relative', transition: 'all 0.2s', cursor: 'pointer', marginTop: '8px' }} onMouseEnter={(e) => e.currentTarget.style.borderColor='#8B7EFF'} onMouseLeave={(e) => e.currentTarget.style.borderColor='#CBD5E1'}>
-                            <label style={{ cursor: 'pointer', display: 'block' }}>
-                              <div style={{ fontSize: '20px', color: '#8B7EFF', fontWeight: 'bold' }}>+</div>
-                              <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>Add More Files</div>
-                               <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={handleAddExplainFile} style={{ position: 'absolute', top:0, left:0, width:'100%', height:'100%', opacity:0, cursor: 'pointer' }} />
-                            </label>
-                          </div>
-                          
-                          <button 
-                            onClick={handleExplainUpload} 
-                            style={{ width: '100%', padding: '14px', borderRadius: '50px', background: 'linear-gradient(to right, #D67CFF, #6B5CE7)', color: '#FFF', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', boxShadow: '0 3px 5px rgba(0,0,0,0.3)', transition: 'all 0.3s ease', marginTop: '8px' }}
-                            onMouseEnter={(e) => e.target.style.boxShadow = '0 6px 12px rgba(214, 124, 255, 0.4)'}
-                            onMouseLeave={(e) => e.target.style.boxShadow = '0 3px 5px rgba(0,0,0,0.3)'}
-                          >
-                            Analyze {uploadedFiles.length} File{uploadedFiles.length !== 1 ? 's' : ''}
-                          </button>
-                        </div>
-                      )
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
-                        {analysisCurrentFolder !== null && (
-                          <span onClick={() => setAnalysisCurrentFolder(null)} style={{ color: '#8B7EFF', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>
-                            ← Back to Root
-                          </span>
-                        )}
-
-                        {analysisCurrentFolder === null && assets.folders.length === 0 && assets.files.length === 0 ? (
-                          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B', textAlign: 'center', padding: '32px 16px' }}>
-                            <div>
-                              <div style={{ fontSize: '32px', marginBottom: '12px' }}>📁</div>
-                              <div style={{ fontSize: '12px' }}>No documents uploaded yet.</div>
-                              <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '8px' }}>Upload files using the "Upload New" tab or "My Documents" page.</div>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <div style={{ fontSize: '11px', color: '#64748B', marginBottom: '8px', fontWeight: '600' }}>
-                              Select a document to analyze: {analysisCurrentFolder === null ? 'Root' : getFolderDisplayName(analysisCurrentFolder)}
-                            </div>
-                            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', padding: '2px' }}>
-                              {analysisCurrentFolder === null && assets.folders.map((folderName, i) => (
-                                <div
-                                  key={'analysis-folder-' + i}
-                                  onClick={() => setAnalysisCurrentFolder(folderName.path)}
-                                  style={{ display: 'flex', alignItems: 'center', padding: '8px 10px', background: '#FAFAFA', borderRadius: '10px', border: '1px solid #E2E8F0', gap: '8px', cursor: 'pointer' }}
-                                  onMouseEnter={(e) => { e.currentTarget.style.background = '#F1F5F9'; }}
-                                  onMouseLeave={(e) => { e.currentTarget.style.background = '#FAFAFA'; }}
-                                >
-                                  <div style={{ width: '24px', height: '24px', background: '#E2E8F0', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8B7EFF', flexShrink: 0, fontSize: '12px' }}>
-                                    📁
-                                  </div>
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: '600', fontSize: '10px', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{folderName.label}</div>
-                                    <div style={{ fontSize: '8px', color: '#94A3B8', marginTop: '1px' }}>Folder</div>
-                                  </div>
-                                </div>
-                              ))}
-
-                              {assets.files
-                                .filter((f) => (f.folder || '') === (analysisCurrentFolder || ''))
-                                .map((doc) => (
-                                <div 
-                                  key={doc.id}
-                                  onClick={() => setSelectedDocForAnalysis(doc.id)}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    padding: '8px 10px',
-                                    background: selectedDocForAnalysis === doc.id ? '#EEF2FF' : '#F8FAFC',
-                                    borderRadius: '10px',
-                                    border: selectedDocForAnalysis === doc.id ? '2px solid #6C5CE7' : '1px solid #E2E8F0',
-                                    gap: '8px',
-                                    cursor: 'pointer',
-                                    transition: '0.2s',
-                                    minHeight: '42px'
-                                  }}
-                                  onMouseEnter={(e) => { if (selectedDocForAnalysis !== doc.id) e.currentTarget.style.background = '#F1F5F9'; }}
-                                  onMouseLeave={(e) => { if (selectedDocForAnalysis !== doc.id) e.currentTarget.style.background = '#F8FAFC'; }}
-                                >
-                                  <div style={{ width: '24px', height: '24px', background: '#EEF2FF', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6366F1', flexShrink: 0, fontSize: '12px' }}>
-                                    {String(doc?.name || '').toLowerCase().endsWith('.pdf') ? '📄' : '🖼️'}
-                                  </div>
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: '600', fontSize: '10px', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.name}</div>
-                                    <div style={{ fontSize: '8px', color: '#94A3B8', marginTop: '1px', lineHeight: '1.2' }}>{doc.folder || 'Root'} • {doc.uploaded_at || 'Unknown'}</div>
-                                  </div>
-                                  <input
-                                    type="radio"
-                                    checked={selectedDocForAnalysis === doc.id}
-                                    onChange={() => setSelectedDocForAnalysis(doc.id)}
-                                    style={{
-                                      width: '14px',
-                                      height: '14px',
-                                      margin: 0,
-                                      padding: 0,
-                                      flex: '0 0 auto',
-                                      cursor: 'pointer',
-                                      accentColor: '#6C5CE7'
-                                    }}
-                                  />
-                                </div>
-                              ))}
-
-                              {assets.files.filter((f) => (f.folder || '') === (analysisCurrentFolder || '')).length === 0 && (
-                                <div style={{ padding: '24px', textAlign: 'center', color: '#64748B', fontSize: '11px' }}>
-                                  No files found in this folder.
-                                </div>
-                              )}
-                            </div>
-                            
-                            <button 
-                              onClick={handleAnalyzeSelected}
-                              disabled={!selectedDocForAnalysis}
-                              style={{ width: '100%', padding: '14px', borderRadius: '50px', background: selectedDocForAnalysis ? 'linear-gradient(to right, #D67CFF, #6B5CE7)' : '#E2E8F0', color: selectedDocForAnalysis ? '#FFF' : '#94A3B8', border: 'none', fontWeight: 'bold', cursor: selectedDocForAnalysis ? 'pointer' : 'default', fontSize: '14px', boxShadow: selectedDocForAnalysis ? '0 3px 5px rgba(0,0,0,0.3)' : 'none', transition: 'all 0.3s ease', marginTop: '8px' }}
-                              onMouseEnter={(e) => { if (selectedDocForAnalysis) e.target.style.boxShadow = '0 6px 12px rgba(214, 124, 255, 0.4)'; }}
-                              onMouseLeave={(e) => { if (selectedDocForAnalysis) e.target.style.boxShadow = '0 3px 5px rgba(0,0,0,0.3)'; }}
-                            >
-                              Analyze Selected
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
           {activePanel === 'documents' && (
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
@@ -3569,13 +2977,7 @@ export default function PatientDashboard() {
                                   <span>💳</span>
                                   <span>₹{(appt.amount_paise / 100).toFixed(0)} · </span>
                                   <span style={{ fontWeight: '700', color: appt.payment_status === 'CAPTURED' ? '#16a34a' : appt.payment_status === 'FAILED' ? '#ef4444' : '#f97316' }}>
-                                    {String(appt.status || '').toUpperCase() === 'CANCELLED'
-                                      ? 'Cancelled'
-                                      : appt.payment_status === 'CAPTURED'
-                                        ? 'Paid'
-                                        : appt.payment_status === 'FAILED'
-                                          ? 'Failed'
-                                          : 'Payment Pending'}
+                                    {appt.payment_status === 'CAPTURED' ? 'Paid' : appt.payment_status === 'FAILED' ? 'Failed' : 'Payment Pending'}
                                   </span>
                                 </div>
                               )}
@@ -3703,21 +3105,6 @@ export default function PatientDashboard() {
               onSuccess={handlePaymentSuccess}
               onFailure={handlePaymentFailure}
               onDismiss={handlePaymentDismiss}
-              autoOpen={true}
-            />
-          )}
-
-          {/* ── AI Razorpay Checkout Modal ──────────────────────────── */}
-          {pendingAiOrder && (
-            <RazorpayCheckout
-              key={`${pendingAiOrder.order_id || pendingAiOrder.appointment_id || 'ai-order'}-${pendingAiOrderNonce}`}
-              order={pendingAiOrder}
-              patientName={user?.name || user?.display_name || ''}
-              patientEmail={user?.email || ''}
-              patientPhone={user?.mobile || user?.phone || ''}
-              onSuccess={handleAiPaymentSuccess}
-              onFailure={handleAiPaymentFailure}
-              onDismiss={handleAiPaymentDismiss}
               autoOpen={true}
             />
           )}
