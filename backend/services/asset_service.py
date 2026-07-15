@@ -14,13 +14,15 @@ from uuid import uuid4
 import fitz
 from fastapi import HTTPException, UploadFile, status
 from PIL import Image as PILImage
-from prisma import Prisma
+from prisma import Prisma, Json
 
 from ..ai.core_services.llm_client import complete_json
 from ..ai.core_services.ocr import ocr_service
 from ..ai.vectorstore.pgvector_service import pgvector_service
 from ..core.config import DATA_ROOT, settings
 from ..core.database import prisma
+from ..schemas.patient_history import CreatePatientHistoryRecord
+from ..services.patient_history_record_service import _wrap_json_fields
 from .xray_analysis_service import xray_analysis_service
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.colors import HexColor
@@ -538,7 +540,9 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
         from .patient_history_extractor import patient_history_extractor
         from .patient_history_service import patient_history_service
         from .lab_result_extractor import lab_result_extractor
-        
+        from .patient_history_record_extractor import patient_history_record_extractor
+        from .patient_history_record_service import patient_history_record_service
+
         doc_type = index_data.get("documentType") if isinstance(index_data, dict) else getattr(index_data, "documentType", "")
         print("[DEBUG][DOCUMENT_CLASSIFICATION]", {"document_type": doc_type})
         
@@ -569,6 +573,28 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
                 await patient_history_service.create_entry(entry)
         except Exception as exc:
             logger.exception("PatientMedicalHistory extraction failed", extra={"asset_id": asset_id, "error": str(exc)})
+
+        # 6b. Extract structured patient history record (vitals + conditions/medications/allergies)
+        try:
+            record_payload = await patient_history_record_extractor.extract_record(
+                asset_id=asset_id,
+                patient_id=str(asset.userId),
+                file_name=str(asset.fileName),
+                document_type=doc_type,
+                report_type=index_data.get("reportType") if isinstance(index_data, dict) else getattr(index_data, "reportType", ""),
+                extracted_text=extracted_text,
+                created_at=asset.createdAt,
+            )
+            if record_payload is not None:
+                await _upsert_patient_history_record(
+                    db=db,
+                    patient_id=str(asset.userId),
+                    payload=record_payload,
+                    record_date=asset.createdAt,
+                    asset_id=asset_id,
+                )
+        except Exception as exc:
+            logger.exception("PatientHistoryRecord extraction failed", extra={"asset_id": asset_id, "error": str(exc)})
         
         # 7. RAG Vector Ingestion
         from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -636,6 +662,103 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
             )
         except Exception:
             logger.warning("Unable to mark asset processing as failed", extra={"component": "asset_processing", "asset_id": asset_id})
+
+
+async def _upsert_patient_history_record(
+    db: Prisma,
+    patient_id: str,
+    payload: CreatePatientHistoryRecord,
+    record_date: datetime,
+    asset_id: str,
+) -> None:
+    """Create or merge a structured PatientHistoryRecord for a patient.
+
+    A single latest record is maintained per patient: newly extracted vitals
+    overwrite empty/older values and conditions/medications/allergies are
+    appended (deduplicated by id) so document processing never blanks existing
+    data that the dashboard's "current" view depends on.
+    """
+
+    data = payload.model_dump(exclude_none=True)
+    if not data:
+        return
+
+    data.pop("recordDate", None)
+    data["recordDate"] = record_date
+
+    existing = await db.patienthistoryrecord.find_first(
+        where={"patientId": patient_id},
+        order=[{"recordDate": "desc"}, {"createdAt": "desc"}],
+    )
+
+    if existing is None:
+        data["patientId"] = patient_id
+        await db.patienthistoryrecord.create(data=_wrap_json_fields(data))
+        return
+
+    update: dict[str, Any] = {}
+    for field in (
+        "bloodGroup",
+        "weight",
+        "bmi",
+        "bloodPressure",
+        "heartRate",
+        "spo2",
+        "temperature",
+        "bloodSugarFasting",
+        "bloodSugarPP",
+    ):
+        if field in data:
+            update[field] = data[field]
+
+    merged_conditions = _merge_record_list(
+        getattr(existing, "conditions", None), data.get("conditions"), asset_id
+    )
+    merged_medications = _merge_record_list(
+        getattr(existing, "medications", None), data.get("medications"), asset_id
+    )
+    merged_allergies = _merge_record_list(
+        getattr(existing, "allergies", None), data.get("allergies"), asset_id
+    )
+
+    if merged_conditions is not None:
+        update["conditions"] = Json(merged_conditions)
+    if merged_medications is not None:
+        update["medications"] = Json(merged_medications)
+    if merged_allergies is not None:
+        update["allergies"] = Json(merged_allergies)
+
+    if update:
+        update["recordDate"] = record_date
+        await db.patienthistoryrecord.update(where={"id": existing.id}, data=update)
+
+
+def _merge_record_list(
+    existing: Any,
+    new_items: list[dict[str, Any]] | None,
+    asset_id: str,
+) -> list[dict[str, Any]] | None:
+    """Append new structured items to an existing list, deduplicating by id.
+
+    Returns ``None`` when there are no new items so existing data is preserved.
+    """
+
+    if not new_items:
+        return None
+
+    merged: list[dict[str, Any]] = list(existing) if isinstance(existing, list) else []
+    seen_ids = {e.get("id") for e in merged if isinstance(e, dict)}
+
+    for item in new_items:
+        if not isinstance(item, dict):
+            item = {"value": str(item)}
+        key = item.get("condition") or item.get("allergen") or item.get("name") or str(len(merged))
+        item_id = item.get("id") or f"{asset_id}:{key}"
+        if item_id not in seen_ids:
+            merged.append({**item, "id": item_id, "sourceId": asset_id})
+            seen_ids.add(item_id)
+
+    return merged
 
 
 async def _extract_asset_text(source_path: Path, mimetype: str) -> str:
