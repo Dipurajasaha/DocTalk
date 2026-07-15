@@ -462,7 +462,7 @@ model Payment {
   @@index([razorpayPaymentId])
   @@index([appointmentId])
   @@map("payments")
-  }
+}
 
 model SemanticCacheWord {
   id        String   @id @default(cuid())

@@ -39,6 +39,71 @@ const tryParseJson = (text) => {
   }
 };
 
+const PAYMENT_PAYLOAD_PREFIX = '[PAYMENT_PAYLOAD:';
+
+const stripPaymentPayload = (text) => {
+  const source = String(text || '');
+  if (!source) return '';
+
+  const sanitized = source.replace(/\[PAYMENT_PAYLOAD:[^\]]*\]?/g, '');
+  const fallbackIndex = sanitized.indexOf(PAYMENT_PAYLOAD_PREFIX);
+  const visibleText = fallbackIndex === -1 ? sanitized : sanitized.slice(0, fallbackIndex);
+
+  return visibleText
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
+};
+
+const extractPaymentOrderFromText = (text) => {
+  const source = String(text || '');
+  const match = source.match(/\[PAYMENT_PAYLOAD:([^\]]+)\]/);
+  if (!match || !match[1]) return null;
+
+  try {
+    return JSON.parse(decodeURIComponent(match[1]));
+  } catch (err) {
+    console.error('Failed to parse AI payment payload', err);
+    return null;
+  }
+};
+
+const getVisibleFinalText = (streamedText, finalChunk) => {
+  const streamed = stripPaymentPayload(streamedText).trim();
+  const final = stripPaymentPayload(finalChunk).trim();
+  const rawFinal = String(finalChunk || '');
+  const hasEncodedResidue = /%[0-9a-fA-F]{2}/.test(rawFinal);
+
+  if (streamed && (!final || hasEncodedResidue)) {
+    return streamed;
+  }
+
+  if (!streamed) return final;
+  if (!final) return streamed;
+  return final.length >= streamed.length ? final : streamed;
+};
+
+const formatRupeeAmount = (amountInPaise) => {
+  const paise = Number(amountInPaise);
+  if (!Number.isFinite(paise)) return '₹0';
+  const rupees = paise / 100;
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(rupees);
+};
+
+const getAiPaymentOrderKey = (order) => {
+  const source = order && typeof order === 'object' ? order : {};
+  return [
+    String(source.order_id || source.orderId || ''),
+    String(source.key_id || source.keyId || ''),
+    String(source.appointment_id || source.appointmentId || ''),
+  ].join(':');
+};
+
 const getCleanAnalysisText = (analysis) => {
   if (!analysis) return '';
   const trimmed = analysis.trim();
@@ -203,6 +268,11 @@ export default function PatientDashboard() {
   const [bookingInProgress, setBookingInProgress] = useState(false);
   // ── Razorpay payment state ───────────────────────────────────────────────
   const [pendingOrder, setPendingOrder] = useState(null);  // active Razorpay order
+  const [pendingAiOrder, setPendingAiOrder] = useState(null); // AI-initiated Razorpay order
+  const [pendingAiOrderNonce, setPendingAiOrderNonce] = useState(0);
+  const pendingAiOrderKeyRef = useRef('');
+  const lastAiPaymentOrderRef = useRef(null);
+  const [aiPaymentFollowUp, setAiPaymentFollowUp] = useState(null);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
 
   const [activeDocChat, setActiveDocChat] = useState(null);
@@ -620,7 +690,7 @@ export default function PatientDashboard() {
       setMessages(items.map((item) => ({
         senderId: item?.sender_id || item?.senderId || (String(item?.role || '').toLowerCase() === 'assistant' ? 'doctalk-ai' : 'user'),
         sender: String(item?.role || '').toLowerCase() === 'assistant' ? 'model' : 'user',
-        text: item?.message || item?.content || item?.text || '',
+        text: stripPaymentPayload(item?.message || item?.content || item?.text || ''),
         id: item?.id || `${item?.timestamp || Date.now()}-${Math.random().toString(16).slice(2)}`,
         timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
       })));
@@ -1049,7 +1119,10 @@ export default function PatientDashboard() {
   };
 
   /** Step 2b: Razorpay checkout failed or was dismissed */
-  const handlePaymentFailure = (err) => {
+  const handlePaymentFailure = async (err) => {
+    if (pendingOrder?.appointment_id) {
+      try { await paymentApi.cancelOrder(pendingOrder.appointment_id); } catch (e) { console.error('Failed to cancel order:', e); }
+    }
     setPendingOrder(null);
     setPaymentProcessing(false);
     try { addNotification({ type: 'error', message: 'Payment failed: ' + (err?.message || 'unknown error') }); } catch (e) {}
@@ -1060,7 +1133,10 @@ export default function PatientDashboard() {
     loadAppointments();
   };
 
-  const handlePaymentDismiss = () => {
+  const handlePaymentDismiss = async () => {
+    if (pendingOrder?.appointment_id) {
+      try { await paymentApi.cancelOrder(pendingOrder.appointment_id); } catch (e) { console.error('Failed to cancel order:', e); }
+    }
     setPendingOrder(null);
     setPaymentProcessing(false);
     try { addNotification({ type: 'info', message: 'Payment cancelled. Your appointment request was not confirmed.' }); } catch (e) {}
@@ -1084,6 +1160,174 @@ export default function PatientDashboard() {
     } catch (err) {
       setPaymentProcessing(false);
       try { addNotification({ type: 'error', message: 'Could not initiate payment: ' + (err?.message || 'server error') }); } catch (e) {}
+    }
+  };
+
+  // ── AI Payment Handlers ──────────────────────────────────────────────────
+  const applyPendingAiOrder = (orderData) => {
+    if (!orderData || typeof orderData !== 'object') return;
+
+    const nextKey = getAiPaymentOrderKey(orderData);
+    if (!nextKey) return;
+
+    console.debug('[AI_PAYMENT][RECEIVED]', {
+      order_id: orderData.order_id,
+      key_id_present: Boolean(orderData.key_id),
+      appointment_id: orderData.appointment_id,
+      amount: orderData.amount,
+      currency: orderData.currency,
+      nextKey,
+    });
+
+    // The AI workflow can surface the same order more than once via streamed
+    // tokens, final payloads, and structured events. Keep the first mount so
+    // the checkout overlay does not get torn down and recreated mid-open.
+    if (pendingAiOrder && pendingAiOrderKeyRef.current === nextKey) {
+      return;
+    }
+
+    setAiPaymentFollowUp(null);
+    pendingAiOrderKeyRef.current = nextKey;
+    setPendingAiOrder(orderData);
+    setPendingAiOrderNonce((prev) => prev + 1);
+  };
+
+  useEffect(() => {
+    const handleAiClick = (e) => {
+      try {
+        const orderData = typeof e.detail === 'string' ? JSON.parse(e.detail) : e.detail;
+        console.debug('[AI_PAYMENT][CLICK_EVENT]', orderData);
+        applyPendingAiOrder(orderData);
+      } catch (err) {
+        console.error("Failed to parse AI payment order", err);
+      }
+    };
+    window.addEventListener('ai-payment-click', handleAiClick);
+    return () => window.removeEventListener('ai-payment-click', handleAiClick);
+  }, []);
+
+  const handleAiPaymentSuccess = async (result) => {
+    const order = pendingAiOrder;
+    lastAiPaymentOrderRef.current = order || lastAiPaymentOrderRef.current;
+    pendingAiOrderKeyRef.current = '';
+    setPendingAiOrder(null);
+
+    try {
+      const verification = await paymentApi.verifyPayment(
+        result?.razorpay_order_id || order?.order_id,
+        result?.razorpay_payment_id,
+        result?.razorpay_signature,
+        result?.appointment_id || order?.appointment_id,
+      );
+
+      if (!verification?.success) {
+        throw new Error(verification?.message || 'Payment verification failed');
+      }
+
+      setAiPaymentFollowUp(null);
+      loadAppointments();
+      await handleChatSubmit(null, 'payment successful', {
+        payment_successful: true,
+        active_workflow: order?.appointment_id
+          ? {
+              type: 'appointment_booking',
+              status: 'waiting_payment_confirmation',
+              context: {
+                appointment_id: order.appointment_id,
+                doctor_id: order.doctor_id,
+                slot_id: order.slot_id,
+                amount: order.amount,
+                currency: order.currency,
+                payment_stage: 'payment_captured',
+              },
+            }
+          : null,
+      });
+    } catch (err) {
+      console.error('AI payment verification failed', err);
+      await handleAiPaymentFailure(err, order);
+    }
+  };
+
+  const handleAiPaymentFailure = async (err, orderOverride = null) => {
+    const sourceOrder = orderOverride || pendingAiOrder || lastAiPaymentOrderRef.current;
+    lastAiPaymentOrderRef.current = sourceOrder || lastAiPaymentOrderRef.current;
+    const appointmentId = sourceOrder?.appointment_id;
+    if (appointmentId) {
+      try { await paymentApi.cancelOrder(appointmentId); } catch (e) { console.error('Failed to cancel ai order:', e); }
+    }
+    pendingAiOrderKeyRef.current = '';
+    setPendingAiOrder(null);
+    loadAppointments();
+    setAiPaymentFollowUp({
+      outcome: 'failure',
+      title: 'Payment failed',
+      message: 'The payment did not go through. Retry payment, or choose Continue to ask the assistant for the next step.',
+    });
+  };
+
+  const handleAiPaymentDismiss = async () => {
+    const sourceOrder = pendingAiOrder || lastAiPaymentOrderRef.current;
+    lastAiPaymentOrderRef.current = sourceOrder || lastAiPaymentOrderRef.current;
+    const appointmentId = sourceOrder?.appointment_id;
+    if (appointmentId) {
+      try { await paymentApi.cancelOrder(appointmentId); } catch (e) { console.error('Failed to cancel ai order:', e); }
+    }
+    pendingAiOrderKeyRef.current = '';
+    setPendingAiOrder(null);
+    loadAppointments();
+    setAiPaymentFollowUp({
+      outcome: 'failure',
+      title: 'Payment cancelled',
+      message: 'The payment was closed. Retry payment, or choose Continue to ask the assistant for the next step.',
+    });
+  };
+
+  const handleAiPaymentContinue = async () => {
+    const outcome = aiPaymentFollowUp?.outcome;
+    setAiPaymentFollowUp(null);
+    if (outcome === 'success') {
+      await handleChatSubmit(null, 'payment successful');
+    } else {
+      await handleChatSubmit(null, 'payment not successful', {
+        payment_failed: true,
+      });
+    }
+  };
+
+  const handleAiPaymentRetry = async () => {
+    const sourceOrder = lastAiPaymentOrderRef.current || pendingAiOrder;
+    const appointmentId = sourceOrder?.appointment_id;
+    const doctorId = sourceOrder?.doctor_id;
+    const slotId = sourceOrder?.slot_id;
+
+    if (!doctorId || !slotId) {
+      if (!appointmentId) {
+        try { addNotification({ type: 'error', message: 'No payment order is available to retry.' }); } catch (e) {}
+        return;
+      }
+    }
+
+    if (!appointmentId && (!doctorId || !slotId)) {
+      try { addNotification({ type: 'error', message: 'No payment order is available to retry.' }); } catch (e) {}
+      return;
+    }
+
+    setAiPaymentFollowUp(null);
+
+    try {
+      const order = doctorId && slotId
+        ? await paymentApi.createOrder('direct', doctorId, slotId, 'Booked via AI Assistant', null)
+        : await paymentApi.retryOrder(appointmentId);
+      if (!order?.order_id) {
+        throw new Error('Could not recreate payment order');
+      }
+      lastAiPaymentOrderRef.current = order;
+      applyPendingAiOrder(order);
+      loadAppointments();
+    } catch (err) {
+      console.error('AI payment retry failed', err);
+      try { addNotification({ type: 'error', message: 'Could not retry payment: ' + (err?.message || 'server error') }); } catch (e) {}
     }
   };
 
@@ -1125,13 +1369,16 @@ export default function PatientDashboard() {
     }
   }, [messages]);
 
-  const handleChatSubmit = async (e) => {
-    e.preventDefault();
-    if (!inputMsg.trim()) return;
+  const handleChatSubmit = async (e, overrideText = null, extraPayload = null) => {
+    if (e) e.preventDefault();
+    const textToSend = overrideText || inputMsg;
+    if (!textToSend.trim()) return;
 
-    const newMsg = { sender: 'user', text: inputMsg, id: Date.now() };
+    const newMsg = { sender: 'user', text: textToSend, id: Date.now() };
     setMessages(prev => [...prev, newMsg]);
-    setInputMsg('');
+    if (!overrideText) {
+      setInputMsg('');
+    }
     setIsAiProcessing(true);
     setProcessingState(null);
 
@@ -1199,10 +1446,14 @@ export default function PatientDashboard() {
           reject(error);
         };
 
-        socket.onopen = () => {
-          resetInactivityTimeout();
-          socket.send(JSON.stringify({ message: inputMsg, language }));
-        };
+      socket.onopen = () => {
+        resetInactivityTimeout();
+        const outbound = { message: textToSend, language };
+        if (extraPayload && typeof extraPayload === 'object') {
+          Object.assign(outbound, extraPayload);
+        }
+        socket.send(JSON.stringify(outbound));
+      };
 
         socket.onmessage = (event) => {
           let payload = null;
@@ -1216,8 +1467,18 @@ export default function PatientDashboard() {
 
           const eventType = String(payload?.type || payload?.status || '').toLowerCase();
           const chunkText = String(payload?.content || payload?.text || payload?.chunk || '');
+          const structuredPaymentOrder = payload?.payment_order || payload?.paymentOrder || null;
+
+          if (structuredPaymentOrder && typeof structuredPaymentOrder === 'object' && eventType !== 'final') {
+            console.debug('[AI_PAYMENT][WS_STRUCTURED_ORDER]', structuredPaymentOrder);
+            applyPendingAiOrder(structuredPaymentOrder);
+          }
 
           if (eventType === 'history') {
+            return;
+          }
+
+          if (eventType === 'payment_order') {
             return;
           }
 
@@ -1229,10 +1490,11 @@ export default function PatientDashboard() {
           if ((eventType === 'token' || eventType === 'message') && chunkText) {
             finalText += chunkText;
             if (isMounted) {
+              const safeStreamText = stripPaymentPayload(finalText);
               setMessages(prev => {
                 const filtered = prev.filter(m => m.id !== 'loading');
                 const existingIndex = filtered.findIndex(m => m.id === 'assistant-stream');
-                const nextMessage = { sender: 'model', text: finalText, id: 'assistant-stream' };
+                const nextMessage = { sender: 'model', text: safeStreamText, id: 'assistant-stream' };
                 if (existingIndex >= 0) {
                   const clone = [...filtered];
                   clone[existingIndex] = nextMessage;
@@ -1247,7 +1509,13 @@ export default function PatientDashboard() {
             if (isMounted) {
               setIsAiProcessing(false);
               setProcessingState(null);
-              const textReply = String(chunkText || finalText || '').trim() || "I'm sorry, I was unable to generate a response. Please try again.";
+              const finalSourceText = String(chunkText || '');
+              const orderData = structuredPaymentOrder || extractPaymentOrderFromText(finalText) || extractPaymentOrderFromText(finalSourceText);
+              if (orderData) {
+                console.debug('[AI_PAYMENT][WS_FINAL_ORDER]', orderData);
+                applyPendingAiOrder(orderData);
+              }
+              const textReply = getVisibleFinalText(finalText, finalSourceText) || "I'm sorry, I was unable to generate a response. Please try again.";
               setMessages(prev => {
                 const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
                 return [...filtered, { sender: 'model', text: textReply, id: Date.now() }];
@@ -1278,9 +1546,15 @@ export default function PatientDashboard() {
           }
           if (finalText) {
             if (isMounted) {
+              const orderData = extractPaymentOrderFromText(finalText);
+              if (orderData) {
+                console.debug('[AI_PAYMENT][WS_CLOSE_ORDER]', orderData);
+                applyPendingAiOrder(orderData);
+              }
+              const closedText = stripPaymentPayload(finalText).trim();
               setMessages(prev => {
                 const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
-                return [...filtered, { sender: 'model', text: finalText, id: Date.now() }];
+                return [...filtered, { sender: 'model', text: closedText, id: Date.now() }];
               });
             }
             resolveOnce();
@@ -2377,6 +2651,32 @@ export default function PatientDashboard() {
                       {isAiProcessing && <AiProcessingCard active={isAiProcessing} status={processingState} />}
                       <div ref={chatEndRef} />
                     </div>
+                    {aiPaymentFollowUp?.outcome === 'failure' && (
+                      <div style={{ position: 'absolute', left: '50%', bottom: '92px', transform: 'translateX(-50%)', width: 'calc(90% - 48px)', maxWidth: '720px', zIndex: 11 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: '#FFF7ED', border: '1px solid #FDBA74', color: '#9A3412', borderRadius: '18px', padding: '14px 16px', boxShadow: '0 12px 24px rgba(249, 115, 22, 0.14)' }}>
+                          <div style={{ fontSize: '12px', fontWeight: '800', letterSpacing: '0.02em' }}>{aiPaymentFollowUp.title || 'Payment update'}</div>
+                          <div style={{ fontSize: '11px', lineHeight: 1.5 }}>{aiPaymentFollowUp.message}</div>
+                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                            {aiPaymentFollowUp.outcome === 'failure' && (
+                              <button
+                                type="button"
+                                onClick={handleAiPaymentRetry}
+                                style={{ padding: '8px 14px', borderRadius: '999px', border: 'none', background: 'linear-gradient(135deg, #f97316, #ea580c)', color: '#FFF', fontSize: '10px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 4px 12px rgba(249,115,22,0.25)' }}
+                              >
+                                Retry payment
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={handleAiPaymentContinue}
+                              style={{ padding: '8px 14px', borderRadius: '999px', border: '1px solid #FDBA74', background: '#FFF', color: '#9A3412', fontSize: '10px', fontWeight: '700', cursor: 'pointer' }}
+                            >
+                              {aiPaymentFollowUp.outcome === 'failure' ? 'Continue chat' : 'Continue booking'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     <form id="chatInputForm" style={{ position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)', width: 'calc(90% - 48px)', maxWidth: '720px', display: 'flex', alignItems: 'center', padding: '6px 6px 6px 12px', background: '#ffffff', borderRadius: '50px', boxShadow: '0 16px 32px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', zIndex: 10 }} onSubmit={handleChatSubmit}>
                       <span style={{ color: '#64748b', fontSize: '22px', marginRight: '16px', cursor: 'pointer' }}>+</span>
                       <input
@@ -2737,7 +3037,13 @@ export default function PatientDashboard() {
                                   <span>💳</span>
                                   <span>₹{(appt.amount_paise / 100).toFixed(0)} · </span>
                                   <span style={{ fontWeight: '700', color: appt.payment_status === 'CAPTURED' ? '#16a34a' : appt.payment_status === 'FAILED' ? '#ef4444' : '#f97316' }}>
-                                    {appt.payment_status === 'CAPTURED' ? 'Paid' : appt.payment_status === 'FAILED' ? 'Failed' : 'Payment Pending'}
+                                    {String(appt.status || '').toUpperCase() === 'CANCELLED'
+                                      ? 'Cancelled'
+                                      : appt.payment_status === 'CAPTURED'
+                                        ? 'Paid'
+                                        : appt.payment_status === 'FAILED'
+                                          ? 'Failed'
+                                          : 'Payment Pending'}
                                   </span>
                                 </div>
                               )}
@@ -2865,6 +3171,21 @@ export default function PatientDashboard() {
               onSuccess={handlePaymentSuccess}
               onFailure={handlePaymentFailure}
               onDismiss={handlePaymentDismiss}
+              autoOpen={true}
+            />
+          )}
+
+          {/* ── AI Razorpay Checkout Modal ──────────────────────────── */}
+          {pendingAiOrder && (
+            <RazorpayCheckout
+              key={`${pendingAiOrder.order_id || pendingAiOrder.appointment_id || 'ai-order'}-${pendingAiOrderNonce}`}
+              order={pendingAiOrder}
+              patientName={user?.name || user?.display_name || ''}
+              patientEmail={user?.email || ''}
+              patientPhone={user?.mobile || user?.phone || ''}
+              onSuccess={handleAiPaymentSuccess}
+              onFailure={handleAiPaymentFailure}
+              onDismiss={handleAiPaymentDismiss}
               autoOpen={true}
             />
           )}

@@ -128,6 +128,15 @@ TEST_PROMPTS = [
 # HELPERS
 # ==============================================================================
 
+REVERSE_GRAPH_NODES = {
+    "Analyzing your request...": "planner_node",
+    "Gathering medical records...": "task_executor_node",
+    "Evaluating options...": "recommendation_engine_node",
+    "Composing response...": "response_composer_node",
+    "Consulting medical AI...": "llm_orchestrator_node",
+    "Verifying medical safety...": "guardrail_node"
+}
+
 def login_patient() -> str | None:
     """Authenticate as a patient and return the access token."""
     try:
@@ -159,9 +168,9 @@ def setup_doctor_slots(doc_token: str) -> None:
     try:
         headers = {"Authorization": f"Bearer {doc_token}"}
         slots = [
-            {"startTime": "2026-07-07T16:00:00+05:30", "endTime": "2026-07-07T16:30:00+05:30"},
-            {"startTime": "2026-07-07T16:30:00+05:30", "endTime": "2026-07-07T17:00:00+05:30"},
-            {"startTime": "2026-07-07T21:30:00+05:30", "endTime": "2026-07-07T22:00:00+05:30"}
+            {"startTime": "2026-08-07T16:00:00+05:30", "endTime": "2026-08-07T16:30:00+05:30"},
+            {"startTime": "2026-08-07T16:30:00+05:30", "endTime": "2026-08-07T17:00:00+05:30"},
+            {"startTime": "2026-08-07T21:30:00+05:30", "endTime": "2026-08-07T22:00:00+05:30"}
         ]
         res = requests.post(f"{API_BASE}/appointments/slots", json=slots, headers=headers)
         if res.status_code in (200, 201):
@@ -186,55 +195,85 @@ def clear_chats() -> None:
     import sys
     subprocess.run([sys.executable, "-B", "backend/clear_ai_chats.py"], capture_output=True)
 
-async def test_single_prompt(query: str, ws_url: str) -> tuple[str, str, int]:
+async def test_single_prompt(query: str, ws_url: str) -> tuple[str, str, int, list]:
     """
     Test a single prompt via websocket.
-    Returns: (output_text, status, execution_time_ms)
+    Returns: (output_text, status, execution_time_ms, state_timings)
     """
     final_response = "ERROR: Unknown"
     status_ok = False
     start_time = time.time()
+    state_timings = []
     
     try:
         async with websockets.connect(ws_url) as ws:
             # wait for history payload which is sent initially on connection
+            connect_start = time.time()
             while True:
                 msg = await asyncio.wait_for(ws.recv(), timeout=10.0)
                 data = json.loads(msg)
                 if data.get("type") == "history":
+                    state_timings.append(("connect_and_history", time.time() - connect_start))
                     break
                     
             await ws.send(query)
+            last_msg_time = time.time()
+            token_count = 0
+            token_total_time = 0.0
             
             while True:
                 try:
                     msg = await asyncio.wait_for(ws.recv(), timeout=180.0)
+                    current_time = time.time()
+                    elapsed_since_last = current_time - last_msg_time
+                    last_msg_time = current_time
                     
                     try:
                         data = json.loads(msg)
                     except json.JSONDecodeError:
+                        if token_count > 0:
+                            state_timings.append((f"token_stream ({token_count} chunks)", token_total_time))
+                        state_timings.append(("raw_text_response", elapsed_since_last))
                         final_response = msg
                         status_ok = True
                         break
                     
                     if isinstance(data, dict):
-                        if data.get("type") == "final":
+                        msg_type = data.get("type", "unknown")
+                        if msg_type == "token":
+                            token_count += 1
+                            token_total_time += elapsed_since_last
+                        else:
+                            if token_count > 0:
+                                state_timings.append((f"token_stream ({token_count} chunks)", token_total_time))
+                                token_count = 0
+                                token_total_time = 0.0
+                                
+                            # Try to extract a specific state if the backend sends it
+                            raw_state = data.get("node") or data.get("state") or data.get("status") or msg_type
+                            msg_state = REVERSE_GRAPH_NODES.get(raw_state, raw_state)
+                            state_timings.append((msg_state, elapsed_since_last))
+                        
+                        if msg_type == "final":
                             final_response = data.get("content", "")
                             status_ok = True
                             break
-                        elif data.get("type") == "error":
+                        elif msg_type == "error":
                             final_response = f"SERVER ERROR: {data.get('content', '')}"
                             status_ok = False
                             break
                     else:
+                        state_timings.append(("non_dict_response", elapsed_since_last))
                         final_response = msg
                         status_ok = True
                         break
                 except asyncio.TimeoutError:
+                    state_timings.append(("TIMEOUT", time.time() - last_msg_time))
                     final_response = "TIMEOUT"
                     status_ok = False
                     break
                 except Exception as e:
+                    state_timings.append((f"ERROR: {e}", time.time() - last_msg_time))
                     final_response = f"ERROR: {e}"
                     status_ok = False
                     break
@@ -245,7 +284,7 @@ async def test_single_prompt(query: str, ws_url: str) -> tuple[str, str, int]:
     end_time = time.time()
     exec_time_ms = int((end_time - start_time) * 1000)
     
-    return final_response, "PASS" if status_ok else "FAIL", exec_time_ms
+    return final_response, "PASS" if status_ok else "FAIL", exec_time_ms, state_timings
 
 def save_results(results: list[dict]) -> None:
     """Save results to CSV."""
@@ -311,10 +350,14 @@ async def main():
         if clear_chat_for_this_test:
             clear_chats()
             
-        output, status, exec_time = await test_single_prompt(query, ws_url)
+        output, status, exec_time, state_timings = await test_single_prompt(query, ws_url)
         
         log_print(f"Status:   {status}")
         log_print(f"Time:     {exec_time} ms")
+        if state_timings:
+            log_print("State Timings:")
+            for state, duration in state_timings:
+                log_print(f"  - {state}: {int(duration * 1000)} ms")
         log_print(f"\nFinal Response:\n{output}\n")
         
         total_time_ms += exec_time

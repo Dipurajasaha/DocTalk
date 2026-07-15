@@ -143,8 +143,28 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
         sys_content += f"\n\nYou have access to the following retrieved context. Summarize and use it to answer the user's query:\n{context_str}"
 
     sys_content += f"\n\n{_language_instruction(state)}"
+    
+    active_wf_dict = state.get("planner_metadata", {}).get("active_workflow", {})
+    if active_wf_dict and active_wf_dict.get("status") == "waiting_confirmation":
+        sys_content += "\n\nCRITICAL INSTRUCTION: The user has requested to book an appointment and a candidate slot has been found. You must explicitly ask the user to confirm if they would like to book this exact slot. Do NOT say you cannot book it directly."
 
     all_messages = _dedupe_messages(state.get("messages") or [])
+    all_messages = list(state.get("messages") or [])
+    latest_text = latest_message_text(all_messages).lower()
+    payment_failed = bool(
+        state.get("payment_failed")
+        or (state.get("context_payload") or {}).get("payment_failed")
+        or "payment not successful" in latest_text
+        or "payment failed" in latest_text
+        or "payment cancelled" in latest_text
+    )
+    if payment_failed:
+        sys_content += (
+            "\n\nIMPORTANT: The payment did not go through. "
+            "Do NOT search for a new slot or start a new booking. "
+            "Acknowledge the failed payment and ask the user whether they want to retry the payment."
+        )
+
     ai_message_count = sum(1 for m in all_messages if getattr(m, "type", "") == "ai")
 
     # Always keep the full conversation so the assistant can reference prior
@@ -267,7 +287,7 @@ async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
     
     sys_msg = SystemMessage(
         content=(
-            "You are a medical report interpreter, NOT a clinician. Answer the user's query using ONLY this retrieved data: "
+            "You are a helpful medical assistant. Answer the user's query using ONLY this retrieved data: "
             f"{context_str}. If empty, say no records exist.\n\n"
             "REQUIREMENTS:\n"
             "1. NEVER diagnose a condition unless the diagnosis is explicitly written in the uploaded report.\n"
@@ -276,16 +296,17 @@ async def patient_assistant_llm(state: UnifiedChatState) -> dict[str, Any]:
             "2. NEVER prescribe treatment or management. Do NOT recommend medications, dosage changes, diet plans, exercise plans, weight loss, follow-up investigations, or lifestyle modifications.\n"
             "3. If the report itself contains physician remarks or impressions, clearly attribute them under a heading exactly named '### Physician Remarks' and state they come directly from the uploaded report. Never rewrite them as your own medical opinion.\n"
             "4. Avoid speculative statements ('likely', 'probably', 'suggests because of', 'may indicate') unless those exact words appear in the report.\n"
-            "5. For every abnormal value, you MUST use exactly this structure:\n"
+            "5. For every abnormal value in a lab report, you MUST use exactly this structure:\n"
             "   [Parameter Name]\n"
             "   Your Value: [Measured Value]\n"
             "   Reference: [Reference Range]\n"
             "   Status: [High/Low/Normal]\n"
             "   What this measures: [Brief explanation of what the parameter measures]\n"
             "   Why doctors order this test: [Brief explanation of why doctors commonly order this test]\n"
-            "6. If a 'care_recommendation' block is provided in the retrieved data, you MUST copy its content EXACTLY at the very end of your response, and then conclude with exactly this sentence:\n"
+            "6. If a 'care_recommendation' block is provided in the retrieved data, you MUST copy its content EXACTLY at the very end of your response.\n"
+            "7. ONLY IF you are interpreting a clinical medical report (e.g. lab results, imaging), you MUST conclude your response with EXACTLY this sentence:\n"
             "   'Please discuss these findings with your healthcare provider, who can interpret them together with your symptoms, medical history, physical examination, and any additional investigations.'\n"
-            "   If no 'care_recommendation' is provided, simply conclude with the sentence above."
+            "   DO NOT include this sentence for general inquiries, past consultation history, or administrative queries (like appointments)."
         )
     )
 

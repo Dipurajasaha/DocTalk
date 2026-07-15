@@ -46,6 +46,10 @@ class WorkflowState(TypedDict):
     timing_metrics: dict[str, float]
     conversation_memory: dict[str, Any]
     recommendation_context: dict[str, Any]
+    payment_order: dict[str, Any] | None
+    active_workflow: dict[str, Any] | None
+    payment_successful: bool | None
+    payment_failed: bool | None
     session_risk_score: Annotated[int, operator.add]
     input_guardrail_context: dict[str, Any]
     output_guardrail_context: dict[str, Any]
@@ -66,6 +70,9 @@ def create_workflow_state(
     triage_level: str = "routine",
     language: str = "en",
     final_response: str = "",
+    payment_order: dict[str, Any] | None = None,
+    payment_successful: bool | None = None,
+    payment_failed: bool | None = None,
 ) -> WorkflowState:
     normalized_user_id = str(user_id or "").strip()
     normalized_ai_session_id = str(ai_session_id or "").strip()
@@ -104,6 +111,10 @@ def create_workflow_state(
         timing_metrics={},
         conversation_memory={},
         recommendation_context={},
+        payment_order=dict(payment_order or {}) or None,
+        active_workflow=None,
+        payment_successful=payment_successful,
+        payment_failed=payment_failed,
         session_risk_score=0,
         input_guardrail_context={},
         output_guardrail_context={},
@@ -122,6 +133,9 @@ def create_unified_chat_state(
     triage_level: str = "routine",
     language: str = "en",
     final_response: str = "",
+    payment_order: dict[str, Any] | None = None,
+    payment_successful: bool | None = None,
+    payment_failed: bool | None = None,
 ) -> WorkflowState:
     return create_workflow_state(
         messages=messages,
@@ -134,4 +148,7 @@ def create_unified_chat_state(
         triage_level=triage_level,
         language=language,
         final_response=final_response,
+        payment_order=payment_order,
+        payment_successful=payment_successful,
+        payment_failed=payment_failed,
     )

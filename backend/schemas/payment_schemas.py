@@ -28,6 +28,8 @@ class CreateOrderResponse(BaseModel):
     currency: str
     key_id: str             # Public key — safe to send to frontend
     appointment_id: str     # DB appointment ID created alongside the order
+    doctor_id: str | None = None
+    slot_id: str | None = None
 
 
 class RetryOrderRequest(BaseModel):

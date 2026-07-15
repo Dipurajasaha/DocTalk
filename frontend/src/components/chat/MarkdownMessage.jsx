@@ -1,4 +1,4 @@
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 /**
@@ -21,9 +21,39 @@ export default function MarkdownMessage({ text }) {
     .replace(/\n?```\s*$/, '')
     .trim();
 
+  const components = {
+    a: ({ node, ...props }) => {
+      if (props.href && props.href.startsWith('doctalk-payment://')) {
+        return (
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              const payload = decodeURIComponent(props.href.replace('doctalk-payment://', ''));
+              window.dispatchEvent(new CustomEvent('ai-payment-click', { detail: payload }));
+            }}
+            style={{ fontWeight: 'bold', color: '#6C5CE7', textDecoration: 'underline' }}
+          >
+            {props.children}
+          </a>
+        );
+      }
+      return <a {...props} target="_blank" rel="noopener noreferrer" />;
+    }
+  };
+
   return (
     <div className="markdown-body chat-markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+      <ReactMarkdown 
+        remarkPlugins={[remarkGfm]} 
+        components={components}
+        urlTransform={(value) => {
+          if (value && value.startsWith('doctalk-payment://')) {
+            return value;
+          }
+          return defaultUrlTransform(value);
+        }}
+      >
         {cleanedText}
       </ReactMarkdown>
     </div>

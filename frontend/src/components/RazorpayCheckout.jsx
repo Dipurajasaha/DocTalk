@@ -51,21 +51,73 @@ export default function RazorpayCheckout({
   autoOpen = true,
 }) {
   const rzpInstanceRef = useRef(null);
+  const openingForOrderRef = useRef('');
+  const openedForOrderRef = useRef('');
+  const settledRef = useRef(false);
 
-  async function openCheckout() {
+  const closeCheckout = () => {
+    try {
+      rzpInstanceRef.current?.close?.();
+    } catch (err) {
+      // Ignore close errors from Razorpay internals.
+    } finally {
+      rzpInstanceRef.current = null;
+    }
+  };
+
+  const settleCheckout = (outcome, value) => {
+    if (settledRef.current) return;
+
+    // Razorpay can call ondismiss after close(). Mark it handled first so a
+    // successful payment cannot also cancel its provisional appointment.
+    settledRef.current = true;
+    openingForOrderRef.current = '';
+    console.debug('[RAZORPAY][SETTLE]', { outcome, order_id: order?.order_id, appointment_id: order?.appointment_id });
+    closeCheckout();
+
+    if (outcome === 'success') onSuccess?.(value);
+    if (outcome === 'failure') onFailure?.(value);
+    if (outcome === 'dismiss') onDismiss?.();
+  };
+
+  async function openCheckout(isActive, orderKey) {
+    if (!isActive()) return;
+
     if (!order?.order_id || !order?.key_id) {
-      onFailure?.(new Error('Invalid order data'));
+      settleCheckout('failure', new Error('Invalid order data'));
       return;
     }
+
+    if (settledRef.current || openedForOrderRef.current === orderKey || openingForOrderRef.current === orderKey) {
+      console.debug('[RAZORPAY][SKIP_OPEN]', {
+        order_id: order?.order_id,
+        orderKey,
+        settled: settledRef.current,
+        openedForOrder: openedForOrderRef.current,
+        openingForOrder: openingForOrderRef.current,
+      });
+      return;
+    }
+
+    openingForOrderRef.current = orderKey;
+    console.debug('[RAZORPAY][OPEN_START]', {
+      order_id: order?.order_id,
+      appointment_id: order?.appointment_id,
+      orderKey,
+      has_key_id: Boolean(order?.key_id),
+    });
 
     try {
       await loadRazorpayScript();
     } catch (err) {
-      onFailure?.(err);
+      if (isActive()) settleCheckout('failure', err);
       return;
     }
 
-    const amountInRupees = ((order.amount || 0) / 100).toFixed(2);
+    if (!isActive() || settledRef.current) {
+      openingForOrderRef.current = '';
+      return;
+    }
 
     const options = {
       key: order.key_id,
@@ -88,14 +140,14 @@ export default function RazorpayCheckout({
       },
       modal: {
         ondismiss: () => {
-          onDismiss?.();
+          settleCheckout('dismiss');
         },
         escape: true,
         backdropclose: false,
       },
       handler: (response) => {
         // Called by Razorpay on successful payment
-        onSuccess?.({
+        settleCheckout('success', {
           razorpay_order_id: response.razorpay_order_id,
           razorpay_payment_id: response.razorpay_payment_id,
           razorpay_signature: response.razorpay_signature,
@@ -107,23 +159,55 @@ export default function RazorpayCheckout({
     // eslint-disable-next-line no-undef
     const rzp = new window.Razorpay(options);
     rzp.on('payment.failed', (response) => {
-      onFailure?.(new Error(response?.error?.description || 'Payment failed'));
+      settleCheckout('failure', new Error(response?.error?.description || 'Payment failed'));
     });
 
     rzpInstanceRef.current = rzp;
-    rzp.open();
+    try {
+      if (isActive() && !settledRef.current) {
+        console.debug('[RAZORPAY][OPEN_CALL]', {
+          order_id: order?.order_id,
+          appointment_id: order?.appointment_id,
+        });
+        rzp.open();
+        openedForOrderRef.current = orderKey;
+      }
+    } catch (err) {
+      console.error('[RAZORPAY][OPEN_ERROR]', err);
+      settleCheckout('failure', err);
+    } finally {
+      openingForOrderRef.current = '';
+    }
   }
 
   useEffect(() => {
-    if (autoOpen && order?.order_id) {
-      openCheckout();
-    }
+    const orderKey = `${order?.order_id || ''}:${order?.key_id || ''}`;
+    let active = true;
+    settledRef.current = false;
+
+    if (!autoOpen || openedForOrderRef.current === orderKey) return undefined;
+
+    // React Strict Mode intentionally tears down the first effect pass in dev.
+    // Do not mark this order opened until the active effect actually opens it.
+    const timer = window.setTimeout(() => {
+      console.debug('[RAZORPAY][AUTO_OPEN_TIMER]', {
+        order_id: order?.order_id,
+        appointment_id: order?.appointment_id,
+        orderKey,
+      });
+      openCheckout(() => active, orderKey);
+    }, 0);
+
     return () => {
-      // Close popup if component unmounts while open
-      rzpInstanceRef.current?.close?.();
+      active = false;
+      window.clearTimeout(timer);
+      // Suppress programmatic cleanup from being reported as a user dismissal.
+      openingForOrderRef.current = '';
+      settledRef.current = true;
+      closeCheckout();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order?.order_id]);
+  }, [autoOpen, order?.order_id, order?.key_id]);
 
   // This component renders nothing — it's purely behavioural
   return null;

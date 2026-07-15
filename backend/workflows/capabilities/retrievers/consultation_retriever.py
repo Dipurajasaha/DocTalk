@@ -22,16 +22,21 @@ async def retrieve_consultations(
 
     consultations = await prisma.consultation.find_many(
         where=where_clause,
-        include={"messages": {"take": 5, "orderBy": {"timestamp": "desc"}}, "appointment": True},
+        include={"messages": {"take": 5, "orderBy": {"timestamp": "desc"}}, "appointment": {"include": {"doctor": True}}},
         order={"createdAt": "desc"},
         take=limit,
     )
 
     results: list[dict[str, Any]] = []
     for c in consultations:
+        doctor_name = "Unknown Doctor"
         status = "UNKNOWN"
         if getattr(c, "appointment", None):
             status = str(c.appointment.status)
+            if getattr(c.appointment, "doctor", None):
+                doctor_name = str(getattr(c.appointment.doctor, "name", "Unknown Doctor"))
+        elif getattr(c, "doctorId", None):
+            doctor_name = str(c.doctorId)
 
         recent_messages: list[dict[str, Any]] = []
         messages = getattr(c, "messages", [])
@@ -47,6 +52,7 @@ async def retrieve_consultations(
         results.append({
             "consultation_id": c.id,
             "created_at": c.createdAt,
+            "doctor_name": doctor_name,
             "status": status,
             "recent_messages": recent_messages,
         })
