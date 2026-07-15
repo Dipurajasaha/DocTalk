@@ -275,6 +275,17 @@ async def explain_report(
             text = "No readable text could be extracted from the uploaded report."
         reply = (await _analyze_text_document(text, language=language, title="Report summary", asset_category=asset_category)).get("reply")
 
+        effective_category = asset_category if file_id and asset_category in {"REPORT", "PRESCRIPTION", "XRAY"} else category
+        if effective_category == "PRESCRIPTION" and reply is not None:
+            medicine_names = await _extract_medicine_names_from_text(text)
+            if medicine_names:
+                try:
+                    medicine_prices = await search_medicine_prices(medicine_names)
+                    if medicine_prices:
+                        reply["medicines"] = medicine_prices
+                except Exception:
+                    pass
+
         if ai_session_id and reply is not None:
             try:
                 chat_service = ChatService()
@@ -350,10 +361,20 @@ async def analyze_document(
         text = str(extracted.get("extracted_text") or "").strip()
         if not text:
             text = f"No readable text could be extracted from {file_name}."
+
+        effective_category = asset_category
+        if effective_category == "UNCLASSIFIED":
+            try:
+                classified_category, _ = await _classify_document(temp_file_path, mime_type, file_name)
+                if classified_category in {"REPORT", "PRESCRIPTION", "XRAY"}:
+                    effective_category = classified_category
+            except Exception:
+                pass
+
         temp_file_path.unlink(missing_ok=True)
         result = await _analyze_text_document(text, language=language, title=file_name, asset_category=asset_category)
 
-        if asset_category == "PRESCRIPTION" and result.get("success"):
+        if effective_category == "PRESCRIPTION" and result.get("success"):
             medicine_names = await _extract_medicine_names_from_text(text)
             if medicine_names:
                 try:

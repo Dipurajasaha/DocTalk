@@ -1458,38 +1458,15 @@ export default function PatientDashboard() {
         });
         const data = await response.json();
 
-        setMessages(prev => {
-          const filtered = prev.filter(m => m.id !== 'loading');
-          if (data.success) {
-            const reply = data.reply;
-            let textReply = '';
-            if (typeof reply === 'object' && reply) {
-              const parts = [];
-              if (reply.summary) parts.push(reply.summary);
-              if (reply.key_findings && Array.isArray(reply.key_findings)) {
-                parts.push('Key Findings: ' + reply.key_findings.join(', '));
-              }
-              if (reply.observations && Array.isArray(reply.observations)) {
-                parts.push('Observations: ' + reply.observations.join(', '));
-              }
-              if (reply.risks && Array.isArray(reply.risks)) {
-                parts.push('Risks: ' + reply.risks.join(', '));
-              }
-              if (reply.recommendations && Array.isArray(reply.recommendations)) {
-                parts.push('Recommendations: ' + reply.recommendations.join(', '));
-              }
-              if (reply.notes) {
-                const notesText = Array.isArray(reply.notes) ? reply.notes.join('. ') : reply.notes;
-                parts.push('Notes: ' + notesText);
-              }
-              textReply = parts.filter(p => p).join('\n\n');
-            } else {
-              textReply = String(reply);
+          setMessages(prev => {
+            const filtered = prev.filter(m => m.id !== 'loading');
+            if (data.success) {
+              const reply = data.reply;
+              if (reply && typeof reply === 'object') return [...filtered, { sender: 'model', structured: reply }];
+              return [...filtered, { sender: 'model', text: String(reply) }];
             }
-            return [...filtered, { sender: 'model', text: textReply }];
-          }
-        return [...filtered, { sender: 'model', text: 'Error analyzing ' + fileObj.name + ': ' + (data.error || data.detail || data.message || 'Unknown error') }];
-        });
+            return [...filtered, { sender: 'model', text: 'Error analyzing ' + fileObj.name + ': ' + (data.error || data.detail || data.message || 'Unknown error') }];
+          });
       }
 
       setUploadedFiles([]);
