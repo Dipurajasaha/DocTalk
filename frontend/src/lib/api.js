@@ -38,11 +38,10 @@ export const patientApi = {
     formData.append('file', file);
     return apiClient.post('/api/assets/upload', formData, { retries: 0, auth: true });
   },
-  getAsset: (assetId) => apiClient.get(`/api/assets/${encodeURIComponent(assetId)}`, { retries: 1, auth: true }),
-  deleteAsset: (assetId) => apiClient.delete(`/api/assets/${encodeURIComponent(assetId)}`, { retries: 0, auth: true }),
-  renameAsset: (assetId, newName) => apiClient.patch(`/api/assets/${encodeURIComponent(assetId)}/rename`, { new_name: newName }, { retries: 0, auth: true }),
+  getAsset: (assetId) => apiClient.get(`/api/assets/${assetId}`, { retries: 1, auth: true }),
+  deleteAsset: (assetId) => apiClient.delete(`/api/assets/${assetId}`, { retries: 0, auth: true }),
+  renameAsset: (assetId, newName) => apiClient.patch(`/api/assets/${assetId}/rename`, { new_name: newName }, { retries: 0, auth: true }),
   listConsultations: () => apiClient.get('/api/chat/consultations', { retries: 1, auth: true }),
-  getConsultation: (consultationId) => apiClient.get(`/api/chat/consultations/${encodeURIComponent(consultationId)}`, { retries: 1, auth: true }),
   getConsultationMessages: (consultationId, page = 1, limit = 20, role = '') => {
     const roleQuery = role ? `&role=${encodeURIComponent(role)}` : '';
     return apiClient.get(`/api/chat/consultations/${encodeURIComponent(consultationId)}/messages?page=${page}&limit=${limit}${roleQuery}`, { retries: 1, auth: true });
@@ -55,8 +54,13 @@ export const patientApi = {
   },
   listAiSessions: () => apiClient.get('/api/chat/ai/sessions', { retries: 1, auth: true }),
   createAiSession: (title = '') => apiClient.post('/api/chat/ai/sessions', { title }, { retries: 0, auth: true }),
-  deleteAiSession: (id) => apiClient.delete(`/api/chat/ai/sessions/${encodeURIComponent(id)}`, { retries: 0, auth: true }),
+  deleteAiSession: (id) => apiClient.delete(`/api/chat/ai/sessions/${id}`, { retries: 0, auth: true }),
   requestAppointment: (body) => apiClient.post('/api/appointment_request', body, { retries: 0, auth: true }),
+
+  getCurrentHistory: () => apiClient.get('/api/patient/history/current', { retries: 1, auth: true }),
+  listHistory: () => apiClient.get('/api/patient/history', { retries: 1, auth: true }),
+  createHistoryRecord: (payload) => apiClient.post('/api/patient/history', payload, { retries: 0, auth: true }),
+  updateHistoryRecord: (recordId, payload) => apiClient.put(`/api/patient/history/${encodeURIComponent(recordId)}`, payload, { retries: 0, auth: true }),
 };
 
 export const paymentApi = {

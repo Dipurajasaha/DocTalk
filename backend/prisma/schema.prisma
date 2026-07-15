@@ -437,6 +437,30 @@ model PatientMedicalHistory {
   @@map("patient_medical_histories")
 }
 
+model PatientHistoryRecord {
+  id                 String    @id @default(cuid())
+  patientId          String    @map("patient_id")
+  bloodGroup         String?   @map("blood_group")
+  weight             String?
+  bmi                String?
+  bloodPressure      String?   @map("blood_pressure")
+  heartRate          String?   @map("heart_rate")
+  spo2               String?
+  temperature        String?
+  bloodSugarFasting  String?   @map("blood_sugar_fasting")
+  bloodSugarPP       String?   @map("blood_sugar_pp")
+  conditions         Json?     @db.JsonB
+  medications        Json?     @db.JsonB
+  allergies          Json?     @db.JsonB
+  recordDate         DateTime? @map("record_date")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([patientId])
+  @@index([patientId, recordDate])
+  @@map("patient_history_records")
+}
+
 enum PaymentStatus {
   CREATED
   CAPTURED

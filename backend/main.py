@@ -12,6 +12,7 @@ from .api.chat import router as chat_router
 from .api.appointments import router as appointments_router
 from .api.medical_assets import router as assets_router
 from .api.admin import router as admin_router
+from .api.patient_history import router as patient_history_router
 from .api.users import doctor_router as user_doctor_router, router as users_router
 from .api.image_analysis import router as image_analysis_router
 from .api.stats import router as stats_router
@@ -83,6 +84,7 @@ app.include_router(user_doctor_router, prefix="/api/doctor", tags=["users"])
 app.include_router(appointments_router, prefix="/api/appointments", tags=["appointments"])
 app.include_router(assets_router, prefix="/api/assets", tags=["assets"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+app.include_router(patient_history_router, prefix="/api", tags=["patient-history"])
 app.include_router(image_analysis_router, prefix="/api", tags=["images"])
 app.include_router(stats_router, prefix="/api/public", tags=["public"])
 app.include_router(prescriptions_router, prefix="/api/prescriptions", tags=["prescriptions"])

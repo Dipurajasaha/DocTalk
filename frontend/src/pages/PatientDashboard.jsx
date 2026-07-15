@@ -242,6 +242,55 @@ export default function PatientDashboard() {
   const saveMed = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch (_) {} };
 
   const [medTab, setMedTab] = useState('overview');
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const saveHistoryToApi = async (record) => {
+    try {
+      const current = await patientApi.getCurrentHistory();
+      const currentRecord = current?.record;
+      if (currentRecord?.id) {
+        await patientApi.updateHistoryRecord(currentRecord.id, record);
+      } else {
+        await patientApi.createHistoryRecord(record);
+      }
+    } catch (e) {
+      console.error('Failed to save history to API', e);
+    }
+  };
+
+  const loadHistoryFromApi = async () => {
+    setHistoryLoading(true);
+    try {
+      const data = await patientApi.getCurrentHistory();
+      const record = data?.record || null;
+      if (record) {
+        const v = {
+          height: record.weight || '',
+          weight: record.weight || '',
+          blood_group: record.bloodGroup || '',
+          bmi: record.bmi || '',
+          blood_pressure: record.bloodPressure || '',
+          heart_rate: record.heartRate || '',
+          blood_sugar_fasting: record.bloodSugarFasting || '',
+          blood_sugar_pp: record.bloodSugarPP || '',
+          spo2: record.spo2 || '',
+          temperature: record.temperature || '',
+        };
+        setVitals(v);
+        saveMed('dtalk_vitals', v);
+        setConditions(Array.isArray(record.conditions) ? record.conditions : []);
+        saveMed('dtalk_conditions', Array.isArray(record.conditions) ? record.conditions : []);
+        setMedications(Array.isArray(record.medications) ? record.medications : []);
+        saveMed('dtalk_medications', Array.isArray(record.medications) ? record.medications : []);
+        setAllergies(Array.isArray(record.allergies) ? record.allergies : []);
+        saveMed('dtalk_allergies', Array.isArray(record.allergies) ? record.allergies : []);
+      }
+    } catch (e) {
+      console.error('Failed loading history from API', e);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   // ── Patient Dashboard view state ──────────────────────────────────────────
   const [healthView, setHealthView] = useState('dashboard'); // 'dashboard' | 'record'
@@ -269,7 +318,7 @@ export default function PatientDashboard() {
   }));
   const [editingVitals, setEditingVitals] = useState(false);
   const [vitalsForm, setVitalsForm] = useState(vitals);
-  const saveVitals = (v) => { setVitals(v); saveMed('dtalk_vitals', v); };
+  const saveVitals = (v) => { setVitals(v); saveMed('dtalk_vitals', v); saveHistoryToApi({ ...v, recordDate: new Date().toISOString() }); };
   const bmiCalc = (h, w) => {
     const hm = parseFloat(h) / 100; const wk = parseFloat(w);
     if (!hm || !wk) return '';
@@ -282,7 +331,7 @@ export default function PatientDashboard() {
   const [showCondForm, setShowCondForm] = useState(false);
   const [editCondId, setEditCondId] = useState(null);
   const [condFilter, setCondFilter] = useState('all');
-  const saveConditions = (r) => { setConditions(r); saveMed('dtalk_conditions', r); };
+  const saveConditions = (r) => { setConditions(r); saveMed('dtalk_conditions', r); saveHistoryToApi({ conditions: r, recordDate: new Date().toISOString() }); };
   const submitCondition = (e) => {
     e.preventDefault();
     const entry = { ...condForm, id: editCondId || Date.now().toString(), updated_at: new Date().toISOString(), created_at: editCondId ? (conditions.find(c=>c.id===editCondId)?.created_at||new Date().toISOString()) : new Date().toISOString() };
@@ -296,7 +345,7 @@ export default function PatientDashboard() {
   const [medForm, setMedForm] = useState({ name:'', dosage:'', frequency:'', route:'oral', prescribed_by:'', prescribed_date:'', start_date:'', end_date:'', reason:'', is_ongoing:true, side_effects:'', notes:'' });
   const [showMedForm, setShowMedForm] = useState(false);
   const [editMedId, setEditMedId] = useState(null);
-  const saveMedications = (r) => { setMedications(r); saveMed('dtalk_medications', r); };
+  const saveMedications = (r) => { setMedications(r); saveMed('dtalk_medications', r); saveHistoryToApi({ medications: r, recordDate: new Date().toISOString() }); };
   const submitMedication = (e) => {
     e.preventDefault();
     const entry = { ...medForm, id: editMedId || Date.now().toString(), created_at: editMedId ? (medications.find(m=>m.id===editMedId)?.created_at||new Date().toISOString()) : new Date().toISOString() };
@@ -310,7 +359,7 @@ export default function PatientDashboard() {
   const [allergyForm, setAllergyForm] = useState({ allergen:'', type:'drug', reaction:'', severity:'moderate', onset_date:'', notes:'' });
   const [showAllergyForm, setShowAllergyForm] = useState(false);
   const [editAllergyId, setEditAllergyId] = useState(null);
-  const saveAllergies = (r) => { setAllergies(r); saveMed('dtalk_allergies', r); };
+  const saveAllergies = (r) => { setAllergies(r); saveMed('dtalk_allergies', r); saveHistoryToApi({ allergies: r, recordDate: new Date().toISOString() }); };
   const submitAllergy = (e) => {
     e.preventDefault();
     const entry = { ...allergyForm, id: editAllergyId || Date.now().toString(), created_at: editAllergyId ? (allergies.find(a=>a.id===editAllergyId)?.created_at||new Date().toISOString()) : new Date().toISOString() };
@@ -324,7 +373,7 @@ export default function PatientDashboard() {
   const [surgForm, setSurgForm] = useState({ procedure:'', date:'', surgeon:'', hospital:'', anesthesia:'general', outcome:'successful', complications:'', notes:'' });
   const [showSurgForm, setShowSurgForm] = useState(false);
   const [editSurgId, setEditSurgId] = useState(null);
-  const saveSurgeries = (r) => { setSurgeries(r); saveMed('dtalk_surgeries', r); };
+  const saveSurgeries = (r) => { setSurgeries(r); saveMed('dtalk_surgeries', r); saveHistoryToApi({ conditions: [...(loadMed('dtalk_conditions', [])), ...r.map(s => ({ condition: s.procedure, status: 'resolved', ...s }))], recordDate: new Date().toISOString() }); };
   const submitSurgery = (e) => {
     e.preventDefault();
     const entry = { ...surgForm, id: editSurgId || Date.now().toString(), created_at: editSurgId ? (surgeries.find(s=>s.id===editSurgId)?.created_at||new Date().toISOString()) : new Date().toISOString() };
@@ -456,6 +505,7 @@ export default function PatientDashboard() {
     if (activePanel === 'history') {
       loadAppointments();
       loadPrescriptions();
+      loadHistoryFromApi();
     }
   }, [activePanel]);
 
