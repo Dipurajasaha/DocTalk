@@ -701,16 +701,35 @@ export default function PatientDashboard() {
       const sessionId = activeAiSessionId || 'patient_ai';
       const data = await patientApi.getAiChatHistory(sessionId);
       const items = Array.isArray(data?.messages) ? data.messages : [];
-      setMessages(items.map((item) => ({
-        senderId: item?.sender_id || item?.senderId || (String(item?.role || '').toLowerCase() === 'assistant' ? 'doctalk-ai' : 'user'),
-        sender: String(item?.role || '').toLowerCase() === 'assistant' ? 'model' : 'user',
-        text: item?.message || item?.content || item?.text || '',
-        id: item?.id || `${item?.timestamp || Date.now()}-${Math.random().toString(16).slice(2)}`,
-        timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
-      })));
+      const backendMessages = items.map((item) => {
+        const rawText = item?.message || item?.content || item?.text || '';
+        let structured = null;
+        if (rawText) {
+          try {
+            const parsed = JSON.parse(rawText);
+            if (parsed && typeof parsed === 'object' && (parsed.summary || parsed.medicines || parsed.key_points || parsed.title)) {
+              structured = parsed;
+            }
+          } catch {
+            structured = null;
+          }
+        }
+        return {
+          senderId: item?.sender_id || item?.senderId || (String(item?.role || '').toLowerCase() === 'assistant' ? 'doctalk-ai' : 'user'),
+          sender: String(item?.role || '').toLowerCase() === 'assistant' ? 'model' : 'user',
+          text: rawText,
+          structured,
+          id: item?.id || `${item?.timestamp || Date.now()}-${Math.random().toString(16).slice(2)}`,
+          timestamp: item?.timestamp || item?.created_at || item?.createdAt || null,
+        };
+      });
+      setMessages(prev => {
+        const backendIds = new Set(backendMessages.map(m => m.id));
+        const localMessages = prev.filter(m => !backendIds.has(m.id));
+        return [...backendMessages, ...localMessages];
+      });
     } catch (e) {
       console.error(e);
-      setMessages([]);
     }
   };
 
@@ -1470,7 +1489,6 @@ export default function PatientDashboard() {
       }
 
       setUploadedFiles([]);
-      loadAiSessions();
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== 'loading'));
       try { addNotification({ type: 'error', message: 'Analysis failed: ' + err.message }); } catch (e) {}

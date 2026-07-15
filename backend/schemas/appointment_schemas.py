@@ -63,6 +63,8 @@ class AppointmentResponse(BaseModel):
     doctor: str
     patient_display: str | None = None
     doctor_display: str | None = None
+    doctor_name: str | None = None
+    specialty: str | None = None
     slot_id: str | None = None
     appointmentDate: datetime | None = None
     scheduled_time: datetime | None = None
@@ -74,8 +76,8 @@ class AppointmentResponse(BaseModel):
     doctor_message: str | None = None
     isActive: bool = True
     status: str
-    payment_status: str | None = None  # CREATED | CAPTURED | FAILED | REFUNDED | None
-    amount_paise: int | None = None    # consultation fee charged
+    payment_status: str | None = None
+    amount_paise: int | None = None
     requested_at: datetime
     created_at: datetime
     updated_at: datetime | None = None

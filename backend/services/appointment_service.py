@@ -408,6 +408,8 @@ class AppointmentService:
             "doctor_id": data.get("doctorId"),
             "doctor": data.get("doctorId"),
             "doctor_display": doctor_data.get("displayName") or doctor_data.get("name"),
+            "doctor_name": doctor_data.get("displayName") or doctor_data.get("name"),
+            "specialty": doctor_data.get("specialization"),
             "slot_id": data.get("slotId") or slot_data.get("id"),
             "appointmentDate": appointment_date,
             "scheduled_time": appointment_date,

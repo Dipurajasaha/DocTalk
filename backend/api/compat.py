@@ -275,7 +275,6 @@ async def explain_report(
             text = "No readable text could be extracted from the uploaded report."
         reply = (await _analyze_text_document(text, language=language, title="Report summary", asset_category=asset_category)).get("reply")
 
-        effective_category = asset_category if file_id and asset_category in {"REPORT", "PRESCRIPTION", "XRAY"} else category
         if effective_category == "PRESCRIPTION" and reply is not None:
             medicine_names = await _extract_medicine_names_from_text(text)
             if medicine_names:
