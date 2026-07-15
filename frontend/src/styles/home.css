@@ -10,7 +10,7 @@ html { scroll-behavior: smooth; }
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
   background: #fafbff;
   color: #1e293b;
   overflow-x: hidden;

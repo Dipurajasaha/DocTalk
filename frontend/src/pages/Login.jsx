@@ -146,7 +146,7 @@ export default function Login() {
         try { localStorage.setItem('doctalk_token', token); localStorage.setItem('doctalk_session', JSON.stringify(sess)); } catch (_) {}
         if (login) await login({ token, sessionHint: sess });
         if (category === 'admin') navigate('/admin/dashboard');
-        else if (data.role === 'patient' || category === 'patient') navigate('/patient/dashboard');
+        else if (data.role === 'patient' || category === 'patient') navigate('/patient/dashboard?panel=overview');
         else navigate('/doctor/dashboard');
       } else {
         setErrorMsg((data && (data.detail || data.error)) || 'Invalid credentials');
@@ -238,7 +238,7 @@ export default function Login() {
         setView('login'); setErrorMsg(null);
         alert('Registration successful! You are logged in.');
         if (category === 'admin') navigate('/admin/dashboard');
-        else if (data.role === 'patient') navigate('/patient/dashboard');
+        else if (data.role === 'patient') navigate('/patient/dashboard?panel=overview');
         else navigate('/doctor/dashboard');
       } else {
         setErrorMsg((data && (data.detail || data.error)) || 'Registration failed');

@@ -114,9 +114,9 @@ export default function XrayAnalyzerPanel() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '20px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap', paddingRight: '80px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', fontFamily: '"Inter", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>
+          <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', fontFamily: '"Poppins", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>
             Med Image Analysis
           </h2>
           <p style={{ margin: 0, fontSize: '11px', color: '#8B7EFF', fontWeight: '500' }}>
@@ -128,7 +128,7 @@ export default function XrayAnalyzerPanel() {
           <select
             value={language}
             onChange={(event) => setLanguage(event.target.value)}
-            style={{ width: '100%', padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', fontSize: '11px', backgroundColor: '#FFF', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
+            style={{ width: '100%', padding: '10px 16px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', fontSize: '11px', backgroundColor: '#FFF', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
           >
             <option value="en">English</option>
             <option value="es">Spanish</option>

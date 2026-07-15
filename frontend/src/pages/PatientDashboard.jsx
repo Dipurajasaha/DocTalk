@@ -11,6 +11,7 @@ import FileViewer from '../components/FileViewer';
 import AiProcessingCard from '../components/AiProcessingCard';
 import StructuredReply from '../components/StructuredReply';
 import RazorpayCheckout from '../components/RazorpayCheckout';
+import PatientOverview from '../components/PatientOverview';
 
 const GENERAL_UPLOADS_FOLDER_PATH = '/my_documents/general_uploads/';
 const LEGACY_UNCLASSIFIED_FOLDER_PATH = '/my_documents/unclassified/';
@@ -124,14 +125,14 @@ export default function PatientDashboard() {
   const [language, setLanguage] = useState('en');
   const [aiSessions, setAiSessions] = useState([]);
   const [activeAiSessionId, setActiveAiSessionId] = useState('patient_ai');
-  const VALID_PANELS = ['explain', 'documents', 'xray', 'appointments', 'docchat', 'history', 'profile'];
+  const VALID_PANELS = ['overview', 'explain', 'documents', 'xray', 'appointments', 'docchat', 'history', 'profile'];
 
   const [activePanel, setActivePanel] = useState(() => {
     try {
       const panel = new URLSearchParams(window.location.search).get('panel');
-      return VALID_PANELS.includes(panel) ? panel : 'explain';
+      return VALID_PANELS.includes(panel) ? panel : 'overview';
     } catch (e) {
-      return 'explain';
+      return 'overview';
     }
   });
 
@@ -436,6 +437,9 @@ export default function PatientDashboard() {
     if(activePanel === 'documents') {
       loadAssets();
       setCurrentFolder(null);
+    }
+    if (activePanel === 'overview') {
+      loadAppointments();
     }
     if(activePanel === 'explain') {
       loadAssets();
@@ -1508,7 +1512,7 @@ export default function PatientDashboard() {
         <div style={{ flex: 1 }} />
         <button 
           onClick={handleLogout} 
-          style={{ background: '#fff', color: '#ff4b5c', border: '1px solid #ff4b5c', padding: '8px 20px', borderRadius: '50px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', fontSize: '11px', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
+          style={{ background: '#fff', color: '#ff4b5c', border: '1px solid #ff4b5c', padding: '8px 20px', borderRadius: '50px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', fontSize: '11px', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.15)' }}
           onMouseEnter={(e) => { e.target.style.background = '#ff4b5c'; e.target.style.color = '#fff'; }}
           onMouseLeave={(e) => { e.target.style.background = '#fff'; e.target.style.color = '#ff4b5c'; }}
         >
@@ -1524,6 +1528,14 @@ export default function PatientDashboard() {
           </button>
 
           <div className="neu-sidebar-nav">
+            <button
+              className={`neu-sidebar-item ${activePanel === 'overview' ? 'active' : ''}`}
+              onClick={() => setActivePanelFromNav('overview')}
+              title="Home"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+              <span className="tooltip">Home</span>
+            </button>
             <button
               className={`neu-sidebar-item ${activePanel === 'explain' ? 'active' : ''}`}
               onClick={() => setActivePanelFromNav('explain')}
@@ -1667,6 +1679,15 @@ export default function PatientDashboard() {
 
         {/* Main Content */}
         <div className="main-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#F5F5F7' }}>
+          {activePanel === 'overview' && (
+            <PatientOverview
+              user={user}
+              appointments={appointments}
+              vitals={vitals}
+              lifestyle={lifestyle}
+              onNavigate={setActivePanelFromNav}
+            />
+          )}
           {activePanel === 'explain' && (
             <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
               {/* Chat Area */}
@@ -1965,7 +1986,7 @@ export default function PatientDashboard() {
               { id:'lifestyle',     label:'Lifestyle',         icon:'🌿' },
             ];
 
-            if (healthView === 'record') {
+            if (false) {
             return (
               <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, gap:'0' }}>
                 {/* ── Page header ── */}
@@ -2618,6 +2639,26 @@ export default function PatientDashboard() {
             link:       { fontSize:'12px', fontWeight:'700', color:'#7C5CFF', cursor:'pointer', background:'none', border:'none', display:'inline-flex', alignItems:'center', gap:'4px', padding:'0' },
             countPill:  { fontSize:'12px', fontWeight:'800', color:'#5B21B6', background:'#F0ECFF', padding:'2px 10px', borderRadius:'50px' },
           };
+          const Ico = (name, size = 18, color = '#6C5CE7') => {
+            const s = { width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 };
+            const icons = {
+              heart: <svg style={s} viewBox="0 0 24 24" fill={color}><path d="M12 21s-7-4.5-8-10a4 4 0 0 1 7-2.7A4 4 0 0 1 20 11c-1 5.5-8 10-8 10z"/></svg>,
+              pulse: <svg style={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>,
+              pill: <svg style={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.5 1.5L13.5 4.5L4.5 13.5L1.5 10.5L10.5 1.5z"/><path d="M13.5 10.5L10.5 13.5L19.5 4.5L22.5 7.5L13.5 10.5z"/></svg>,
+              alert: <svg style={s} viewBox="0 0 24 24" fill={color}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>,
+              calendar: <svg style={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
+              doc: <svg style={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
+              download: <svg style={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+              check: <svg style={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+              leaf: <svg style={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.6C15.5 4 20 10.5 20 17c0 2.5-1 5-3 7-1.5 1.5-3.5 2-5.5 1.5-1.5-.5-2.5-1.5-3-2.5-.5-1.5-1.5-2.5-2.5-3.5"/></svg>,
+              thermometer: <svg style={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg>,
+              droplet: <svg style={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>,
+              ruler: <svg style={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 3H3v18h18V3z"/><path d="M21 9H3M21 15H3M9 3v18M15 3v18" strokeWidth="1.5"/></svg>,
+              calc: <svg style={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="8" y2="10.01"/><line x1="12" y1="10" x2="12" y2="10.01"/><line x1="16" y1="10" x2="16" y2="10.01"/></svg>,
+              edit: <svg style={s} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+            };
+            return icons[name] || null;
+          };
           const apptStatusStyle = (s) => {
             const st = String(s||'').toUpperCase();
             if (st==='CONFIRMED'||st==='SCHEDULED') return { bg:'#EDE9FE', color:'#5B21B6' };
@@ -2628,14 +2669,14 @@ export default function PatientDashboard() {
           const fmtTime = (t) => { try { return new Date(t).toLocaleString('en-IN',{ day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }); } catch { return '—'; } };
 
           const vitalsStats = [
-            { icon:'🩸', label:'Blood Group', value: vitals.blood_group || '—' },
-            { icon:'📏', label:'Height / Weight', value: vitals.height && vitals.weight ? `${vitals.height} cm · ${vitals.weight} kg` : '—' },
-            { icon:'🧮', label:'BMI', value: vitals.bmi || (vitals.height&&vitals.weight ? bmiCalc(vitals.height,vitals.weight) : '—'), note: parseFloat(vitals.bmi||bmiCalc(vitals.height,vitals.weight))>=30?'Obese':parseFloat(vitals.bmi||bmiCalc(vitals.height,vitals.weight))>=25?'Overweight':parseFloat(vitals.bmi||bmiCalc(vitals.height,vitals.weight))>=18.5?'Normal':vitals.height?'Underweight':'' },
-            { icon:'💓', label:'Blood Pressure', value: vitals.blood_pressure || '—' },
-            { icon:'❤️', label:'Heart Rate', value: vitals.heart_rate ? `${vitals.heart_rate} bpm` : '—' },
-            { icon:'🔵', label:'SpO₂', value: vitals.spo2 ? `${vitals.spo2}%` : '—' },
-            { icon:'🌡️', label:'Temperature', value: vitals.temperature ? `${vitals.temperature}°F` : '—' },
-            { icon:'🍬', label:'Sugar (F / PP)', value: [vitals.blood_sugar_fasting, vitals.blood_sugar_pp].filter(Boolean).join(' / ') || '—' },
+            { icon:'droplet', label:'Blood Group', value: vitals.blood_group || '—' },
+            { icon:'ruler', label:'Height / Weight', value: vitals.height && vitals.weight ? `${vitals.height} cm · ${vitals.weight} kg` : '—' },
+            { icon:'calc', label:'BMI', value: vitals.bmi || (vitals.height&&vitals.weight ? bmiCalc(vitals.height,vitals.weight) : '—'), note: parseFloat(vitals.bmi||bmiCalc(vitals.height,vitals.weight))>=30?'Obese':parseFloat(vitals.bmi||bmiCalc(vitals.height,vitals.weight))>=25?'Overweight':parseFloat(vitals.bmi||bmiCalc(vitals.height,vitals.weight))>=18.5?'Normal':vitals.height?'Underweight':'' },
+            { icon:'pulse', label:'Blood Pressure', value: vitals.blood_pressure || '—' },
+            { icon:'heart', label:'Heart Rate', value: vitals.heart_rate ? `${vitals.heart_rate} bpm` : '—' },
+            { icon:'droplet', label:'SpO₂', value: vitals.spo2 ? `${vitals.spo2}%` : '—' },
+            { icon:'thermometer', label:'Temperature', value: vitals.temperature ? `${vitals.temperature}°F` : '—' },
+            { icon:'droplet', label:'Sugar (F / PP)', value: [vitals.blood_sugar_fasting, vitals.blood_sugar_pp].filter(Boolean).join(' / ') || '—' },
           ];
           const upcomingAppts = appointments
             .filter(a => ['scheduled','confirmed'].includes(String(a.status||'').toLowerCase()))
@@ -2649,14 +2690,13 @@ export default function PatientDashboard() {
           const highlightCard = (icon, title, count, items, renderItem) => (
             <div style={NS.card}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px' }}>
-                <h3 style={{ ...NS.sectionTitle, margin:0 }}>{icon} {title}</h3>
+                <h3 style={{ ...NS.sectionTitle, margin:0 }}>{Ico(icon, 18)} {title}</h3>
                 <span style={NS.countPill}>{count}</span>
               </div>
               {items.length === 0
                 ? <p style={{ fontSize:'12px', color:'#6E6E73', margin:0 }}>Nothing recorded yet</p>
                 : <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
                     {items.map(renderItem)}
-                    <button style={{ ...NS.link, marginTop:'4px' }} onClick={()=>setHealthView('record')}>Manage ▸</button>
                   </div>}
             </div>
           );
@@ -2665,24 +2705,22 @@ export default function PatientDashboard() {
             <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0 }}>
               {/* header */}
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'22px', flexShrink:0 }}>
-                <div>
-                  <h2 style={{ margin:0, fontSize:'20px', color:'#1C1C1E', fontWeight:'800', letterSpacing:'-0.5px' }}>Patient Dashboard</h2>
-                  <p style={{ margin:'4px 0 0', fontSize:'12px', color:'#6E6E73' }}>Your health at a glance</p>
-                </div>
-                <button style={NS.ghostBtn} onClick={()=>setHealthView('record')}>Manage Record ▸</button>
+                 <div>
+                   <h2 style={{ margin:0, fontSize:'20px', color:'#1C1C1E', fontWeight:'800', letterSpacing:'-0.5px' }}>Medical History</h2>
+                   <p style={{ margin:'4px 0 0', fontSize:'12px', color:'#6E6E73' }}>Your health at a glance</p>
+                 </div>
               </div>
 
               <div style={NS.wrap}>
                 {/* ── 1. Health Overview (vitals only) ── */}
                 <div style={NS.card}>
                   <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'14px' }}>
-                    <h3 style={NS.sectionTitle}>🫀 Health Overview</h3>
-                    <button style={NS.link} onClick={()=>{ setVitalsForm(vitals); setEditingVitals(true); }}>✏️ Edit Vitals</button>
+                    <h3 style={NS.sectionTitle}><Ico name="heart" size={20} color="#ef4444" /> Health Overview</h3>
                   </div>
                   <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:'14px' }}>
                     {vitalsStats.map(v=>(
                       <div key={v.label} style={NS.statCard}>
-                        <div style={{ fontSize:'22px' }}>{v.icon}</div>
+                        <div style={{ display:'flex', alignItems:'center', justifyContent:'center' }}>{Ico(v.icon, 22, '#1C1C1E')}</div>
                         <div style={{ fontSize:'16px', fontWeight:'800', color:'#1C1C1E' }}>{v.value}</div>
                         {v.note && <div style={{ fontSize:'10px', fontWeight:'700', color:'#7C5CFF' }}>{v.note}</div>}
                         <div style={{ fontSize:'11px', color:'#6E6E73' }}>{v.label}</div>
@@ -2693,19 +2731,19 @@ export default function PatientDashboard() {
 
                 {/* ── 2. Highlights of Medical History ── */}
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))', gap:'16px' }}>
-                  {highlightCard('🩺', 'Active Conditions', conditions.filter(c=>c.status==='active'||c.status==='chronic').length, dashConditions, c=>(
+                  {highlightCard('pulse', 'Active Conditions', conditions.filter(c=>c.status==='active'||c.status==='chronic').length, dashConditions, c=>(
                     <div key={c.id} style={{ display:'flex', alignItems:'center', gap:'8px' }}>
                       <span style={{ width:'8px', height:'8px', borderRadius:'50%', background: statusColor[c.status]||'#7C5CFF', flexShrink:0 }}></span>
                       <span style={{ fontSize:'12px', fontWeight:'600', color:'#1C1C1E', flex:1 }}>{c.condition}</span>
                     </div>
                   ))}
-                  {highlightCard('💊', 'Current Medications', medications.filter(m=>m.is_ongoing).length, dashMeds, m=>(
+                  {highlightCard('pill', 'Current Medications', medications.filter(m=>m.is_ongoing).length, dashMeds, m=>(
                     <div key={m.id} style={{ padding:'2px 0' }}>
                       <div style={{ fontSize:'12px', fontWeight:'700', color:'#1C1C1E' }}>{m.name}</div>
                       <div style={{ fontSize:'11px', color:'#6E6E73' }}>{m.dosage}{m.frequency?` · ${m.frequency}`:''}</div>
                     </div>
                   ))}
-                  {highlightCard('⚠️', 'Allergies', allergies.length, dashAllergies, a=>(
+                  {highlightCard('alert', 'Allergies', allergies.length, dashAllergies, a=>(
                     <div key={a.id} style={{ display:'flex', alignItems:'center', gap:'8px' }}>
                       <span style={{ fontSize:'10px', fontWeight:'700', padding:'2px 8px', borderRadius:'50px', background: allergyColor[a.severity]||'#f97316', color:'#fff' }}>{a.severity}</span>
                       <span style={{ fontSize:'12px', fontWeight:'600', color:'#1C1C1E', flex:1 }}>{a.allergen}</span>
@@ -2717,12 +2755,12 @@ export default function PatientDashboard() {
                 {/* ── 3. Upcoming Appointments ── */}
                 <div style={NS.card}>
                   <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'14px' }}>
-                    <h3 style={NS.sectionTitle}>📅 Upcoming Appointments</h3>
+                    <h3 style={NS.sectionTitle}><Ico name="calendar" size={18} color="#6C5CE7" /> Upcoming Appointments</h3>
                     <button style={NS.primaryBtn} onClick={()=>setActivePanelFromNav('appointments')}>+ Book New</button>
                   </div>
                   {upcomingAppts.length === 0 ? (
                     <div style={{ textAlign:'center', padding:'22px', background:'linear-gradient(145deg,#FBFBFD,#ECECF1)', borderRadius:'16px', border:'1px dashed #C4B5FD' }}>
-                      <div style={{ fontSize:'30px', marginBottom:'8px' }}>🗓️</div>
+                      <div style={{ fontSize:'30px', marginBottom:'8px', display:'flex', alignItems:'center', justifyContent:'center' }}><Ico name="calendar" size={32} color="#6C5CE7" /></div>
                       <div style={{ fontSize:'13px', fontWeight:'700', color:'#1C1C1E' }}>No upcoming appointments</div>
                       <div style={{ fontSize:'12px', color:'#6E6E73', margin:'4px 0 14px' }}>Book a slot with a doctor to get started.</div>
                       <button style={NS.primaryBtn} onClick={()=>setActivePanelFromNav('appointments')}>Book Appointment</button>
@@ -2748,8 +2786,8 @@ export default function PatientDashboard() {
                 {latestRx ? (
                   <div style={NS.card}>
                     <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'14px' }}>
-                      <h3 style={NS.sectionTitle}>💊 Latest Prescription</h3>
-                      {latestRx.sickNote && <span style={{ fontSize:'11px', fontWeight:'700', padding:'4px 10px', borderRadius:'50px', background:'#FFF7ED', color:'#c2410c' }}>📝 Sick Note</span>}
+                      <h3 style={NS.sectionTitle}><Ico name="pill" size={18} color="#6C5CE7" /> Latest Prescription</h3>
+                      {latestRx.sickNote && <span style={{ fontSize:'11px', fontWeight:'700', padding:'4px 10px', borderRadius:'50px', background:'#FFF7ED', color:'#c2410c' }}><Ico name="doc" size={14} color="#c2410c" /> Sick Note</span>}
                     </div>
                     <div style={{ display:'flex', flexWrap:'wrap', gap:'10px 28px', marginBottom:'14px' }}>
                       <div><div style={{ fontSize:'10px', fontWeight:'700', color:'#6E6E73', textTransform:'uppercase', letterSpacing:'.5px' }}>Rx #</div><div style={{ fontSize:'13px', fontWeight:'700', color:'#1C1C1E' }}>{latestRx.prescriptionNumber}</div></div>
@@ -2767,14 +2805,14 @@ export default function PatientDashboard() {
                       {(latestRx.medicines||[]).length === 0 && <div style={{ fontSize:'12px', color:'#6E6E73' }}>No medicines listed</div>}
                     </div>
                     <div style={{ display:'flex', gap:'10px', flexWrap:'wrap' }}>
-                      <button style={NS.primaryBtn} onClick={()=>window.open(prescriptionApi.pdfUrl(latestRx.id), '_blank')}>⬇ Download PDF</button>
-                      {latestRx.qrToken && <button style={NS.ghostBtn} onClick={()=>navigate(`/verify/${latestRx.qrToken}`)}>✔ Verify</button>}
+                      <button style={NS.primaryBtn} onClick={()=>window.open(prescriptionApi.pdfUrl(latestRx.id), '_blank')}><Ico name="download" size={14} color="#fff" /> Download PDF</button>
+                      {latestRx.qrToken && <button style={NS.ghostBtn} onClick={()=>navigate(`/verify/${latestRx.qrToken}`)}><Ico name="check" size={14} color="#fff" /> Verify</button>}
                     </div>
                   </div>
                 ) : (
                   <div style={NS.card}>
                     <div style={{ display:'flex', alignItems:'center', gap:'14px' }}>
-                      <div style={{ fontSize:'30px' }}>🌿</div>
+                      <div style={{ fontSize:'30px', display:'flex', alignItems:'center', justifyContent:'center' }}><Ico name="leaf" size={32} color="#16a34a" /></div>
                       <div style={{ flex:1 }}>
                         <h3 style={{ ...NS.sectionTitle, margin:'0 0 4px' }}>Wellness</h3>
                         <p style={{ margin:0, fontSize:'12px', color:'#6E6E73' }}>Stay on top of your health — book a check-up or ask our AI assistant a question.</p>
@@ -2795,7 +2833,7 @@ export default function PatientDashboard() {
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }}>
-                  <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>Edit Profile</h2>
+                  <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Poppins", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>Edit Profile</h2>
                 </div>
               </div>
               
@@ -2823,9 +2861,9 @@ export default function PatientDashboard() {
 
           {activePanel === 'documents' && (
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', paddingRight: '70px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', fontFamily: '"Inter", sans-serif', letterSpacing: '-0.5px' }}>
+                  <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', fontFamily: '"Poppins", sans-serif', letterSpacing: '-0.5px' }}>
                     {currentFolder === null ? 'My Documents' : getFolderDisplayName(currentFolder)}
                   </h2>
                   {currentFolder !== null && (
@@ -2834,9 +2872,9 @@ export default function PatientDashboard() {
                     </span>
                   )}
                 </div>
-                <div style={{display: 'flex', gap: '8px'}}>
+                 <div style={{display: 'flex', gap: '10px'}}>
                   <input type="file" id="upload-doc-v2" style={{display: 'none'}} onChange={handleUploadAssetV2} />
-                  <button onClick={() => document.getElementById('upload-doc-v2').click()} style={{ background: '#6C5CE7', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Upload Files</button>
+                  <button onClick={() => document.getElementById('upload-doc-v2').click()} style={{ background: '#6C5CE7', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Upload Files</button>
                 </div>
               </div>
 
@@ -2950,7 +2988,7 @@ export default function PatientDashboard() {
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }}>
-                  <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>Appointments Hub</h2>
+                  <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Poppins", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>Appointments Hub</h2>
                 </div>
               </div>
               <div className="appointments-container" style={{ display: 'flex', flexDirection: 'column', flex: 1, background: '#FFF', borderRadius: '16px', padding: '32px', overflowY: 'auto', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', minHeight: 0, boxSizing: 'border-box' }}>
