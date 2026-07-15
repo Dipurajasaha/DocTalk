@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSession } from '../contexts/SessionContext';
 import { useNotifications, useAssetCache } from '../contexts';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { authApi, patientApi, paymentApi, buildAssetDownloadUrl } from '../lib/api';
+import { authApi, patientApi, paymentApi, prescriptionApi, buildAssetDownloadUrl } from '../lib/api';
 import { buildAiChatWebSocketUrl, createRealTimeClient } from '../lib/realTimeClient';
 import '../styles/patient.css';
 import XrayAnalyzerPanel from '../components/XrayAnalyzerPanel';
@@ -135,11 +135,19 @@ export default function PatientDashboard() {
     }
   });
 
+  const [chatHistoryCollapsed, setChatHistoryCollapsed] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+
   const setActivePanelFromNav = (panel) => {
     const nextPanel = VALID_PANELS.includes(panel) ? panel : 'explain';
     setActivePanel(nextPanel);
+    setChatHistoryCollapsed(nextPanel !== 'explain');
     navigate(`/patient/dashboard?panel=${encodeURIComponent(nextPanel)}`);
   };
+
+  useEffect(() => {
+    setChatHistoryCollapsed(activePanel !== 'explain');
+  }, [activePanel]);
 
   useEffect(() => {
     try {
@@ -233,6 +241,24 @@ export default function PatientDashboard() {
   const saveMed = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch (_) {} };
 
   const [medTab, setMedTab] = useState('overview');
+
+  // ── Patient Dashboard view state ──────────────────────────────────────────
+  const [healthView, setHealthView] = useState('dashboard'); // 'dashboard' | 'record'
+  const [prescriptionsList, setPrescriptionsList] = useState([]);
+  const [prescriptionsLoading, setPrescriptionsLoading] = useState(false);
+
+  const loadPrescriptions = async () => {
+    setPrescriptionsLoading(true);
+    try {
+      const list = await prescriptionApi.listMine();
+      setPrescriptionsList(Array.isArray(list) ? list : []);
+    } catch (e) {
+      console.error('Failed loading prescriptions', e);
+      setPrescriptionsList([]);
+    } finally {
+      setPrescriptionsLoading(false);
+    }
+  };
 
   // Vitals
   const [vitals, setVitals] = useState(() => loadMed('dtalk_vitals', {
@@ -422,6 +448,10 @@ export default function PatientDashboard() {
     if (activePanel === 'docchat') {
       loadConsultations();
       loadDoctors();
+    }
+    if (activePanel === 'history') {
+      loadAppointments();
+      loadPrescriptions();
     }
   }, [activePanel]);
 
@@ -1487,99 +1517,413 @@ export default function PatientDashboard() {
       </nav>
 
       <div className="profile-container" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', boxSizing: 'border-box' }}>
-        {/* Sidebar */}
-        <div className="sidebar patient-sidebar-override">
-          <img
-            src={user.profile_pic || getAvatarFallback(user.name || user.display_name || 'Patient')}
-            alt="Profile"
-            className="patient-sidebar-img"
-            onError={(e) => {
-              const fallback = getAvatarFallback(user.name || user.display_name || 'Patient');
-              if (e.currentTarget.src !== fallback) {
-                e.currentTarget.src = fallback;
-              }
-            }}
-          />
-          <div className="patient-sidebar-name">{user.name}</div>
+        {/* Left Icon Sidebar (80px) */}
+        <nav className="neu-left-sidebar" aria-label="Main navigation">
+          <button className="neu-sidebar-logo" onClick={() => setActivePanelFromNav('explain')} title="DocTalk AI">
+            D
+          </button>
 
-          <div className="patient-nav">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <button 
-                className={activePanel === 'explain' ? 'active' : ''}
-                onClick={() => setActivePanelFromNav('explain')}
-                style={{ flex: 1 }}
-              >
-                Analyze Report
-              </button>
-              <button
-                onClick={handleNewChat}
-                title="New chat"
-                aria-label="New chat"
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  flexShrink: 0,
-                  background: 'transparent',
-                  color: '#6C5CE7',
-                  border: '1px solid #6C5CE7',
-                  borderRadius: '10px',
-                  fontWeight: '700',
-                  fontSize: '20px',
-                  lineHeight: 1,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: '0.2s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#6C5CE7'; e.currentTarget.style.color = '#FFF'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#6C5CE7'; }}
-              >
-                +
-              </button>
-            </div>
+          <div className="neu-sidebar-nav">
             <button
-              className={activePanel === 'documents' ? 'active' : ''}
-              onClick={() => setActivePanelFromNav('documents')}
+              className={`neu-sidebar-item ${activePanel === 'explain' ? 'active' : ''}`}
+              onClick={() => setActivePanelFromNav('explain')}
+              title="AI Analysis"
             >
-              My Documents
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12A10 10 0 0 1 12 2z"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <span className="tooltip">Quick Analysis</span>
             </button>
-            <button 
-              className={activePanel === 'xray' ? 'active' : ''}
-              onClick={() => setActivePanelFromNav('xray')}
-            >
-              Med Image Analysis
-            </button>
-            <button 
-              className={activePanel === 'appointments' ? 'active' : ''}
-              onClick={() => setActivePanelFromNav('appointments')}
-            >
-              Appointments
-            </button>
-            <button 
-              className={activePanel === 'docchat' ? 'active' : ''}
-              onClick={() => setActivePanelFromNav('docchat')}
-            >
-              Doctor Chat
-            </button>
-            <button 
-              className={activePanel === 'history' ? 'active' : ''}
+            <button
+              className={`neu-sidebar-item ${activePanel === 'history' ? 'active' : ''}`}
               onClick={() => setActivePanelFromNav('history')}
+              title="Dashboard"
             >
-              Medical History
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+              <span className="tooltip">Dashboard</span>
             </button>
-            <button 
-              className={activePanel === 'profile' ? 'active' : ''}
-              onClick={() => setActivePanelFromNav('profile')}
+            <button
+              className={`neu-sidebar-item ${activePanel === 'xray' ? 'active' : ''}`}
+              onClick={() => setActivePanelFromNav('xray')}
+              title="Med Image Analysis"
             >
-              Profile
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              <span className="tooltip">Med Image Analysis</span>
+            </button>
+            <button
+              className={`neu-sidebar-item ${activePanel === 'appointments' ? 'active' : ''}`}
+              onClick={() => setActivePanelFromNav('appointments')}
+              title="Appointments"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              <span className="tooltip">Appointments</span>
+            </button>
+            <button
+              className={`neu-sidebar-item ${activePanel === 'docchat' ? 'active' : ''}`}
+              onClick={() => setActivePanelFromNav('docchat')}
+              title="Doctor Chat"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              <span className="tooltip">Doctor Chat</span>
+            </button>
+            <button
+              className={`neu-sidebar-item ${activePanel === 'documents' ? 'active' : ''}`}
+              onClick={() => setActivePanelFromNav('documents')}
+              title="My Documents"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <span className="tooltip">My Documents</span>
             </button>
           </div>
-        </div>
+
+          <div className="neu-sidebar-spacer" />
+
+          <div className="neu-sidebar-bottom">
+            <button
+              className={`neu-sidebar-item ${activePanel === 'profile' ? 'active' : ''}`}
+              onClick={() => setActivePanelFromNav('profile')}
+              title="Settings"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              <span className="tooltip">Settings</span>
+            </button>
+          </div>
+        </nav>
+
+        {/* Chat History Sidebar */}
+        <aside className={`neu-chat-history-sidebar ${chatHistoryCollapsed ? 'collapsed' : ''}`}>
+          <div className="neu-chat-history-header">
+            <h3 className="neu-chat-history-title">Chats</h3>
+            <button className="neu-new-chat-btn" onClick={handleNewChat} title="New chat">+</button>
+          </div>
+          <div className="neu-chat-search">
+            <input
+              type="text"
+              placeholder="Search chats..."
+              value={chatSearchQuery}
+              onChange={(e) => setChatSearchQuery(e.target.value)}
+            />
+          </div>
+           <div className="neu-chat-history-list">
+             {aiSessions
+              .filter((s) => {
+                if (!chatSearchQuery.trim()) return true;
+                const q = chatSearchQuery.toLowerCase();
+                return (s.title || '').toLowerCase().includes(q);
+              })
+               .map((session) => (
+                <div
+                  key={session.id}
+                  className={`neu-chat-history-item ${session.id === activeAiSessionId ? 'active' : ''}`}
+                  onClick={() => {
+                    setActiveAiSessionId(session.id);
+                    setMessages([]);
+                    setActivePanelFromNav('explain');
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      setActiveAiSessionId(session.id);
+                      setMessages([]);
+                      setActivePanelFromNav('explain');
+                    }
+                  }}
+                >
+                  <span className="neu-chat-history-item-title">{session.title || 'New Chat'}</span>
+                  <span className="neu-chat-history-item-preview">
+                    {session.is_default ? 'Default chat' : 'Medical analysis session'}
+                  </span>
+                  <span className="neu-chat-history-item-meta">
+                    {session.created_at ? new Date(session.created_at).toLocaleDateString() : ''}
+                  </span>
+                  <button
+                    className="neu-chat-history-delete-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteSession(session.id);
+                    }}
+                    disabled={session.is_default}
+                    title="Delete chat"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            {aiSessions.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '24px 16px', color: '#6E6E73', fontSize: '13px' }}>
+                No chats yet
+              </div>
+            )}
+          </div>
+           <div className="neu-chat-history-footer">
+             <button className="neu-chat-collapse-btn" onClick={() => setChatHistoryCollapsed(!chatHistoryCollapsed)}>
+               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
+               {chatHistoryCollapsed ? 'Expand' : 'Collapse'}
+             </button>
+           </div>
+           <button className="neu-chat-expand-tab" onClick={() => setChatHistoryCollapsed(false)}>
+             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>
+           </button>
+         </aside>
 
         {/* Main Content */}
-        <div className="main-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '24px', gap: '24px', background: '#F0F2F5', borderTopLeftRadius: '40px', overflow: 'hidden', minHeight: 0, boxSizing: 'border-box' }}>
-          
+        <div className="main-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#F5F5F7' }}>
+          {activePanel === 'explain' && (
+            <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+              {/* Chat Area */}
+              <div className="neu-chat-area">
+                <div className="neu-chat-header">
+                   <div className="neu-chat-header-greeting">
+                    <h2>Quick Analysis</h2>
+                    <p>*Not a substitute for professional medical advice*</p>
+                  </div>
+                </div>
+
+                <div className="neu-chat-messages">
+                  {messages.length === 0 && !isAiProcessing && (
+                    <div style={{ textAlign: 'center', color: '#6E6E73', marginTop: '40px', fontSize: '14px' }}>
+                      Start chatting with your AI Medical Assistant!
+                    </div>
+                  )}
+                  {messages.map((msg, idx) => {
+                    const isUser = isOutgoingChatMessage(msg);
+                    return (
+                      <div key={msg.id || idx} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: '4px' }}>
+                        <div className={`neu-chat-bubble ${isUser ? 'user' : 'assistant'}`}>
+                          {isUser ? (
+                            <div style={{ whiteSpace: 'pre-wrap' }}>{msg.text || ''}</div>
+                          ) : msg.structured ? (
+                            <div><StructuredReply data={msg.structured} /></div>
+                          ) : isJsonLike(msg.text) && tryParseJson(msg.text) ? (
+                            <div><MarkdownMessage text={getCleanAnalysisText(msg.text)} /></div>
+                          ) : (
+                            <div><MarkdownMessage text={msg.text || ''} /></div>
+                          )}
+                          <div className="timestamp">
+                            <span>{isUser ? 'You' : 'AI Assistant'}</span>
+                            <span>{msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {isAiProcessing && <AiProcessingCard active={isAiProcessing} status={processingState} />}
+                  <div ref={chatEndRef} />
+                </div>
+
+                <form className="neu-chat-input-area" onSubmit={handleChatSubmit}>
+                  <div className="neu-chat-input-form">
+                    <textarea
+                      value={inputMsg}
+                      onChange={(e) => setInputMsg(e.target.value)}
+                      placeholder="Ask AI Health Assistant..."
+                      rows={1}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleChatSubmit(e);
+                        }
+                      }}
+                    />
+                    <div className="neu-chat-input-actions">
+                      <select
+                        value={language}
+                        onChange={(e) => setLanguage(e.target.value)}
+                        className="neu-chat-language-select"
+                      >
+                        <option value="en">EN</option>
+                        <option value="es">ES</option>
+                        <option value="hi">HI</option>
+                        <option value="bn">BN</option>
+                      </select>
+                      <button type="submit" className="neu-chat-send-btn" disabled={!inputMsg.trim()}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+              
+              <div className="neu-analysis-panel">
+                <div className="neu-analysis-panel-header">
+                  <h3>Analyze Medical Files</h3>
+                  <div className="neu-analysis-tabs">
+                    <button
+                      className={`neu-analysis-tab ${analysisMode === 'upload' ? 'active' : ''}`}
+                      onClick={() => { setAnalysisMode('upload'); setUploadedFiles([]); setSelectedDocForAnalysis(null); }}
+                    >
+                      Upload
+                    </button>
+                    <button
+                      className={`neu-analysis-tab ${analysisMode === 'select' ? 'active' : ''}`}
+                      onClick={() => { setAnalysisMode('select'); setUploadedFiles([]); setSelectedDocForAnalysis(null); setAnalysisCurrentFolder(null); loadAssets(); }}
+                    >
+                      Documents
+                    </button>
+                  </div>
+                </div>
+                <div className="neu-analysis-content">
+                  {analysisMode === 'upload' ? (
+                    uploadedFiles.length === 0 ? (
+                      <div className="neu-dropzone" onClick={() => explainUploadInputRef.current?.click()}>
+                        <span className="neu-dropzone-icon">+</span>
+                        <p className="neu-dropzone-title">Upload Medical File</p>
+                        <p className="neu-dropzone-subtitle">PDF, Images, Reports, Prescriptions</p>
+                        <input
+                          type="file"
+                          ref={explainUploadInputRef}
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          onChange={handleAddExplainFile}
+                          style={{ display: 'none' }}
+                        />
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        {uploadedFiles.map((fileObj) => (
+                          <div key={fileObj.id} className="neu-document-card">
+                            <div className="neu-document-icon">
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+                            </div>
+                            <div className="neu-document-info">
+                              <div className="neu-document-name">{fileObj.name}</div>
+                              <div className="neu-document-meta">{(fileObj.file.size / 1024 / 1024).toFixed(2)} MB</div>
+                            </div>
+                            <button className="neu-document-delete" onClick={() => handleRemoveExplainFile(fileObj.id)} title="Remove">
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            </button>
+                          </div>
+                        ))}
+                        <div className="neu-dropzone" style={{ padding: '20px 16px' }} onClick={() => explainUploadInputRef.current?.click()}>
+                          <span className="neu-dropzone-icon" style={{ fontSize: '24px' }}>+</span>
+                          <p className="neu-dropzone-title" style={{ fontSize: '12px' }}>Add More Files</p>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            onChange={handleAddExplainFile}
+                            style={{ display: 'none' }}
+                          />
+                        </div>
+                        <button
+                          onClick={handleExplainUpload}
+                          style={{
+                            width: '100%',
+                            padding: '14px',
+                            borderRadius: '50px',
+                            background: 'linear-gradient(135deg, #7C5CFF, #A88CFF)',
+                            color: '#FFF',
+                            border: 'none',
+                            fontWeight: '700',
+                            fontSize: '13px',
+                            cursor: 'pointer',
+                            boxShadow: '4px 4px 10px rgba(124,92,255,.3)',
+                            transition: 'all 0.2s ease',
+                            marginTop: '8px',
+                          }}
+                        >
+                          Analyze {uploadedFiles.length} File{uploadedFiles.length !== 1 ? 's' : ''}
+                        </button>
+                      </div>
+                    )
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {analysisCurrentFolder !== null && (
+                        <span onClick={() => setAnalysisCurrentFolder(null)} style={{ color: '#7C5CFF', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>← Back to Root</span>
+                      )}
+                      {analysisCurrentFolder === null && assets.folders.length === 0 && assets.files.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '32px 16px', color: '#6E6E73' }}>
+                          <div style={{ fontSize: '32px', marginBottom: '12px' }}>📁</div>
+                          <div style={{ fontSize: '13px' }}>No documents uploaded yet.</div>
+                        </div>
+                      ) : (
+                        <>
+                          {assets.folders
+                            .filter((f) => analysisCurrentFolder === null)
+                            .map((folderName, i) => (
+                              <div
+                                key={'analysis-folder-' + i}
+                                onClick={() => setAnalysisCurrentFolder(folderName.path)}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  padding: '10px 12px',
+                                  background: '#F5F5F7',
+                                  borderRadius: '12px',
+                                  border: '1px solid rgba(255,255,255,.6)',
+                                  boxShadow: '3px 3px 6px rgba(209,209,214,.4), -3px -3px 6px rgba(255,255,255,.8)',
+                                  gap: '10px',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#F5F5F7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', boxShadow: 'inset 2px 2px 4px rgba(209,209,214,.4), inset -2px -2px 4px rgba(255,255,255,.8)' }}>📁</div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontWeight: 600, fontSize: '12px', color: '#1C1C1E' }}>{folderName.label}</div>
+                                  <div style={{ fontSize: '10px', color: '#6E6E73' }}>Folder</div>
+                                </div>
+                              </div>
+                            ))}
+                          {assets.files
+                            .filter((f) => (f.folder || '') === (analysisCurrentFolder || ''))
+                            .map((doc) => (
+                              <div
+                                key={doc.id}
+                                onClick={() => setSelectedDocForAnalysis(doc.id)}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  padding: '10px 12px',
+                                  background: selectedDocForAnalysis === doc.id ? 'rgba(124,92,255,.08)' : '#F5F5F7',
+                                  borderRadius: '12px',
+                                  border: selectedDocForAnalysis === doc.id ? '2px solid #7C5CFF' : '1px solid rgba(255,255,255,.6)',
+                                  boxShadow: selectedDocForAnalysis === doc.id ? 'none' : '3px 3px 6px rgba(209,209,214,.4), -3px -3px 6px rgba(255,255,255,.8)',
+                                  gap: '10px',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s ease',
+                                }}
+                              >
+                                <div className="neu-document-icon" style={{ width: '32px', height: '32px', fontSize: '14px', borderRadius: '8px' }}>
+                                  {String(doc?.name || '').toLowerCase().endsWith('.pdf') ? '📄' : '🖼️'}
+                                </div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontWeight: 600, fontSize: '12px', color: '#1C1C1E', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc.name}</div>
+                                  <div style={{ fontSize: '10px', color: '#6E6E73', marginTop: '2px' }}>{doc.folder || 'Root'} • {doc.uploaded_at || 'Unknown'}</div>
+                                </div>
+                                <input
+                                  type="radio"
+                                  checked={selectedDocForAnalysis === doc.id}
+                                  onChange={() => setSelectedDocForAnalysis(doc.id)}
+                                  style={{ width: '14px', height: '14px', accentColor: '#7C5CFF', cursor: 'pointer' }}
+                                />
+                              </div>
+                            ))}
+                          <button
+                            onClick={handleAnalyzeSelected}
+                            disabled={!selectedDocForAnalysis}
+                            style={{
+                              width: '100%',
+                              padding: '14px',
+                              borderRadius: '50px',
+                              background: selectedDocForAnalysis ? 'linear-gradient(135deg, #7C5CFF, #A88CFF)' : '#F5F5F7',
+                              color: selectedDocForAnalysis ? '#FFF' : '#6E6E73',
+                              border: 'none',
+                              fontWeight: '700',
+                              fontSize: '13px',
+                              cursor: selectedDocForAnalysis ? 'pointer' : 'default',
+                              boxShadow: selectedDocForAnalysis ? '4px 4px 10px rgba(124,92,255,.3)' : 'inset 3px 3px 6px rgba(209,209,214,.4), inset -3px -3px 6px rgba(255,255,255,.8)',
+                              transition: 'all 0.2s ease',
+                              marginTop: '8px',
+                            }}
+                          >
+                            Analyze Selected
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ═══════════════════════ MEDICAL HISTORY PANEL (Full Clinical Profile) ═══════════════════════ */}
           {activePanel === 'history' && (() => {
             // ── Shared helpers ──────────────────────────────────────────────
@@ -1621,6 +1965,7 @@ export default function PatientDashboard() {
               { id:'lifestyle',     label:'Lifestyle',         icon:'🌿' },
             ];
 
+            if (healthView === 'record') {
             return (
               <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, gap:'0' }}>
                 {/* ── Page header ── */}
@@ -1629,12 +1974,15 @@ export default function PatientDashboard() {
                     <h2 style={{ margin:0, fontSize:'18px', color:'#6C5CE7', fontWeight:'800', letterSpacing:'-0.5px' }}>Medical Profile</h2>
                     <p style={{ margin:'3px 0 0', fontSize:'12px', color:'#8B7EFF' }}>Complete clinical record — visible to your treating doctors</p>
                   </div>
-                  {hasAlerts && (
-                    <div style={{ display:'flex', alignItems:'center', gap:'6px', background:'#fef2f2', border:'1px solid #fecaca', borderRadius:'8px', padding:'8px 14px' }}>
-                      <span style={{ fontSize:'14px' }}>🚨</span>
-                      <span style={{ fontSize:'12px', color:'#ef4444', fontWeight:'700' }}>Severe Allergy on Record</span>
-                    </div>
-                  )}
+                  <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
+                    <button onClick={()=>setHealthView('dashboard')} style={{ padding:'8px 16px', borderRadius:'50px', border:'1px solid #E2E8F0', background:'#F1F5F9', cursor:'pointer', fontSize:'12px', fontWeight:'700', color:'#64748B' }}>◂ Dashboard</button>
+                    {hasAlerts && (
+                      <div style={{ display:'flex', alignItems:'center', gap:'6px', background:'#fef2f2', border:'1px solid #fecaca', borderRadius:'8px', padding:'8px 14px' }}>
+                        <span style={{ fontSize:'14px' }}>🚨</span>
+                        <span style={{ fontSize:'12px', color:'#ef4444', fontWeight:'700' }}>Severe Allergy on Record</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* ── Tab bar ── */}
@@ -2257,7 +2605,191 @@ export default function PatientDashboard() {
                 </div>
               </div>
             );
-          })()}
+          }
+
+          // ══════════════════════ PATIENT DASHBOARD (neumorphic) ══════════════════════
+          const NS = {
+            wrap:       { display:'flex', flexDirection:'column', gap:'24px', flex:1, minHeight:0, overflowY:'auto', paddingRight:'4px' },
+            card:       { background:'linear-gradient(145deg,#FBFBFD,#ECECF1)', borderRadius:'22px', padding:'22px 24px', boxShadow:'8px 8px 18px rgba(209,209,214,.6), -8px -8px 18px rgba(255,255,255,.9)', border:'1px solid rgba(255,255,255,.6)' },
+            statCard:   { background:'linear-gradient(145deg,#FBFBFD,#ECECF1)', borderRadius:'20px', padding:'16px 12px', boxShadow:'6px 6px 14px rgba(209,209,214,.55), -6px -6px 14px rgba(255,255,255,.9)', border:'1px solid rgba(255,255,255,.6)', textAlign:'center', display:'flex', flexDirection:'column', alignItems:'center', gap:'6px' },
+            sectionTitle:{ fontSize:'13px', fontWeight:'800', color:'#1C1C1E', letterSpacing:'0.2px', margin:'0 0 14px', display:'flex', alignItems:'center', gap:'8px' },
+            primaryBtn: { padding:'9px 18px', borderRadius:'50px', border:'none', cursor:'pointer', fontWeight:'700', fontSize:'12px', color:'#fff', background:'linear-gradient(135deg,#A88CFF,#7C5CFF)', boxShadow:'4px 4px 12px rgba(124,92,255,.35), -4px -4px 12px rgba(255,255,255,.9)' },
+            ghostBtn:   { padding:'9px 18px', borderRadius:'50px', border:'1px solid #E2E8F0', background:'#F5F5F7', cursor:'pointer', fontSize:'12px', fontWeight:'700', color:'#6E6E73', boxShadow:'4px 4px 10px rgba(209,209,214,.5), -4px -4px 10px rgba(255,255,255,.9)' },
+            link:       { fontSize:'12px', fontWeight:'700', color:'#7C5CFF', cursor:'pointer', background:'none', border:'none', display:'inline-flex', alignItems:'center', gap:'4px', padding:'0' },
+            countPill:  { fontSize:'12px', fontWeight:'800', color:'#5B21B6', background:'#F0ECFF', padding:'2px 10px', borderRadius:'50px' },
+          };
+          const apptStatusStyle = (s) => {
+            const st = String(s||'').toUpperCase();
+            if (st==='CONFIRMED'||st==='SCHEDULED') return { bg:'#EDE9FE', color:'#5B21B6' };
+            if (st==='PAYMENT_PENDING') return { bg:'#FFF7ED', color:'#c2410c' };
+            if (st==='PENDING') return { bg:'#FEF3C7', color:'#D97706' };
+            return { bg:'#EEEEF2', color:'#6E6E73' };
+          };
+          const fmtTime = (t) => { try { return new Date(t).toLocaleString('en-IN',{ day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }); } catch { return '—'; } };
+
+          const vitalsStats = [
+            { icon:'🩸', label:'Blood Group', value: vitals.blood_group || '—' },
+            { icon:'📏', label:'Height / Weight', value: vitals.height && vitals.weight ? `${vitals.height} cm · ${vitals.weight} kg` : '—' },
+            { icon:'🧮', label:'BMI', value: vitals.bmi || (vitals.height&&vitals.weight ? bmiCalc(vitals.height,vitals.weight) : '—'), note: parseFloat(vitals.bmi||bmiCalc(vitals.height,vitals.weight))>=30?'Obese':parseFloat(vitals.bmi||bmiCalc(vitals.height,vitals.weight))>=25?'Overweight':parseFloat(vitals.bmi||bmiCalc(vitals.height,vitals.weight))>=18.5?'Normal':vitals.height?'Underweight':'' },
+            { icon:'💓', label:'Blood Pressure', value: vitals.blood_pressure || '—' },
+            { icon:'❤️', label:'Heart Rate', value: vitals.heart_rate ? `${vitals.heart_rate} bpm` : '—' },
+            { icon:'🔵', label:'SpO₂', value: vitals.spo2 ? `${vitals.spo2}%` : '—' },
+            { icon:'🌡️', label:'Temperature', value: vitals.temperature ? `${vitals.temperature}°F` : '—' },
+            { icon:'🍬', label:'Sugar (F / PP)', value: [vitals.blood_sugar_fasting, vitals.blood_sugar_pp].filter(Boolean).join(' / ') || '—' },
+          ];
+          const upcomingAppts = appointments
+            .filter(a => ['scheduled','confirmed'].includes(String(a.status||'').toLowerCase()))
+            .sort((a,b)=> new Date(a.scheduled_time||a.appointmentDate||0) - new Date(b.scheduled_time||b.appointmentDate||0));
+          const latestRx = [...prescriptionsList].sort((a,b)=> new Date(b.issuedAt||0) - new Date(a.issuedAt||0))[0];
+
+          const dashConditions = conditions.filter(c=>c.status==='active'||c.status==='chronic').slice(0,3);
+          const dashMeds = medications.filter(m=>m.is_ongoing).slice(0,3);
+          const dashAllergies = allergies.slice(0,3);
+
+          const highlightCard = (icon, title, count, items, renderItem) => (
+            <div style={NS.card}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px' }}>
+                <h3 style={{ ...NS.sectionTitle, margin:0 }}>{icon} {title}</h3>
+                <span style={NS.countPill}>{count}</span>
+              </div>
+              {items.length === 0
+                ? <p style={{ fontSize:'12px', color:'#6E6E73', margin:0 }}>Nothing recorded yet</p>
+                : <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+                    {items.map(renderItem)}
+                    <button style={{ ...NS.link, marginTop:'4px' }} onClick={()=>setHealthView('record')}>Manage ▸</button>
+                  </div>}
+            </div>
+          );
+
+          return (
+            <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0 }}>
+              {/* header */}
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'22px', flexShrink:0 }}>
+                <div>
+                  <h2 style={{ margin:0, fontSize:'20px', color:'#1C1C1E', fontWeight:'800', letterSpacing:'-0.5px' }}>Patient Dashboard</h2>
+                  <p style={{ margin:'4px 0 0', fontSize:'12px', color:'#6E6E73' }}>Your health at a glance</p>
+                </div>
+                <button style={NS.ghostBtn} onClick={()=>setHealthView('record')}>Manage Record ▸</button>
+              </div>
+
+              <div style={NS.wrap}>
+                {/* ── 1. Health Overview (vitals only) ── */}
+                <div style={NS.card}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'14px' }}>
+                    <h3 style={NS.sectionTitle}>🫀 Health Overview</h3>
+                    <button style={NS.link} onClick={()=>{ setVitalsForm(vitals); setEditingVitals(true); }}>✏️ Edit Vitals</button>
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:'14px' }}>
+                    {vitalsStats.map(v=>(
+                      <div key={v.label} style={NS.statCard}>
+                        <div style={{ fontSize:'22px' }}>{v.icon}</div>
+                        <div style={{ fontSize:'16px', fontWeight:'800', color:'#1C1C1E' }}>{v.value}</div>
+                        {v.note && <div style={{ fontSize:'10px', fontWeight:'700', color:'#7C5CFF' }}>{v.note}</div>}
+                        <div style={{ fontSize:'11px', color:'#6E6E73' }}>{v.label}</div>
+                       </div>
+                         ))}
+                     </div>
+                   </div>
+
+                {/* ── 2. Highlights of Medical History ── */}
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))', gap:'16px' }}>
+                  {highlightCard('🩺', 'Active Conditions', conditions.filter(c=>c.status==='active'||c.status==='chronic').length, dashConditions, c=>(
+                    <div key={c.id} style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                      <span style={{ width:'8px', height:'8px', borderRadius:'50%', background: statusColor[c.status]||'#7C5CFF', flexShrink:0 }}></span>
+                      <span style={{ fontSize:'12px', fontWeight:'600', color:'#1C1C1E', flex:1 }}>{c.condition}</span>
+                    </div>
+                  ))}
+                  {highlightCard('💊', 'Current Medications', medications.filter(m=>m.is_ongoing).length, dashMeds, m=>(
+                    <div key={m.id} style={{ padding:'2px 0' }}>
+                      <div style={{ fontSize:'12px', fontWeight:'700', color:'#1C1C1E' }}>{m.name}</div>
+                      <div style={{ fontSize:'11px', color:'#6E6E73' }}>{m.dosage}{m.frequency?` · ${m.frequency}`:''}</div>
+                    </div>
+                  ))}
+                  {highlightCard('⚠️', 'Allergies', allergies.length, dashAllergies, a=>(
+                    <div key={a.id} style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                      <span style={{ fontSize:'10px', fontWeight:'700', padding:'2px 8px', borderRadius:'50px', background: allergyColor[a.severity]||'#f97316', color:'#fff' }}>{a.severity}</span>
+                      <span style={{ fontSize:'12px', fontWeight:'600', color:'#1C1C1E', flex:1 }}>{a.allergen}</span>
+                      <span style={{ fontSize:'11px', color:'#6E6E73' }}>{a.reaction}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── 3. Upcoming Appointments ── */}
+                <div style={NS.card}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'14px' }}>
+                    <h3 style={NS.sectionTitle}>📅 Upcoming Appointments</h3>
+                    <button style={NS.primaryBtn} onClick={()=>setActivePanelFromNav('appointments')}>+ Book New</button>
+                  </div>
+                  {upcomingAppts.length === 0 ? (
+                    <div style={{ textAlign:'center', padding:'22px', background:'linear-gradient(145deg,#FBFBFD,#ECECF1)', borderRadius:'16px', border:'1px dashed #C4B5FD' }}>
+                      <div style={{ fontSize:'30px', marginBottom:'8px' }}>🗓️</div>
+                      <div style={{ fontSize:'13px', fontWeight:'700', color:'#1C1C1E' }}>No upcoming appointments</div>
+                      <div style={{ fontSize:'12px', color:'#6E6E73', margin:'4px 0 14px' }}>Book a slot with a doctor to get started.</div>
+                      <button style={NS.primaryBtn} onClick={()=>setActivePanelFromNav('appointments')}>Book Appointment</button>
+                    </div>
+                  ) : (
+                    <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+                      {upcomingAppts.map((appt,i)=>(
+                        <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 16px', borderRadius:'16px', background:'linear-gradient(145deg,#FBFBFD,#ECECF1)', boxShadow:'5px 5px 12px rgba(209,209,214,.5), -5px -5px 12px rgba(255,255,255,.85)', border:'1px solid rgba(255,255,255,.6)' }}>
+                          <div>
+                            <div style={{ fontSize:'13px', fontWeight:'700', color:'#1C1C1E' }}>Dr. {appt.doctor_display || '—'}</div>
+                            <div style={{ fontSize:'12px', color:'#6E6E73', marginTop:'3px' }}>{fmtTime(appt.scheduled_time || appt.appointmentDate)}</div>
+                          </div>
+                          <span style={{ fontSize:'11px', fontWeight:'700', padding:'5px 12px', borderRadius:'50px', background: apptStatusStyle(appt.status).bg, color: apptStatusStyle(appt.status).color }}>
+                            {String(appt.status||'').toUpperCase()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── 4. Latest Prescription (or Wellness fallback) ── */}
+                {latestRx ? (
+                  <div style={NS.card}>
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'14px' }}>
+                      <h3 style={NS.sectionTitle}>💊 Latest Prescription</h3>
+                      {latestRx.sickNote && <span style={{ fontSize:'11px', fontWeight:'700', padding:'4px 10px', borderRadius:'50px', background:'#FFF7ED', color:'#c2410c' }}>📝 Sick Note</span>}
+                    </div>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:'10px 28px', marginBottom:'14px' }}>
+                      <div><div style={{ fontSize:'10px', fontWeight:'700', color:'#6E6E73', textTransform:'uppercase', letterSpacing:'.5px' }}>Rx #</div><div style={{ fontSize:'13px', fontWeight:'700', color:'#1C1C1E' }}>{latestRx.prescriptionNumber}</div></div>
+                      <div><div style={{ fontSize:'10px', fontWeight:'700', color:'#6E6E73', textTransform:'uppercase', letterSpacing:'.5px' }}>Doctor</div><div style={{ fontSize:'13px', fontWeight:'700', color:'#1C1C1E' }}>{latestRx.doctorName || '—'}</div></div>
+                      <div><div style={{ fontSize:'10px', fontWeight:'700', color:'#6E6E73', textTransform:'uppercase', letterSpacing:'.5px' }}>Issued</div><div style={{ fontSize:'13px', fontWeight:'700', color:'#1C1C1E' }}>{fmtTime(latestRx.issuedAt)}</div></div>
+                    </div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:'6px', marginBottom:'16px' }}>
+                      {(latestRx.medicines||[]).slice(0,3).map((m,idx)=>(
+                        <div key={idx} style={{ display:'flex', alignItems:'center', gap:'8px', fontSize:'12px', color:'#1C1C1E' }}>
+                          <span style={{ width:'6px', height:'6px', borderRadius:'50%', background:'#7C5CFF', flexShrink:0 }}></span>
+                          <span style={{ fontWeight:'600' }}>{m.name}</span>
+                          <span style={{ color:'#6E6E73' }}>{m.dosage}{m.frequency?` · ${m.frequency}`:''}</span>
+                        </div>
+                      ))}
+                      {(latestRx.medicines||[]).length === 0 && <div style={{ fontSize:'12px', color:'#6E6E73' }}>No medicines listed</div>}
+                    </div>
+                    <div style={{ display:'flex', gap:'10px', flexWrap:'wrap' }}>
+                      <button style={NS.primaryBtn} onClick={()=>window.open(prescriptionApi.pdfUrl(latestRx.id), '_blank')}>⬇ Download PDF</button>
+                      {latestRx.qrToken && <button style={NS.ghostBtn} onClick={()=>navigate(`/verify/${latestRx.qrToken}`)}>✔ Verify</button>}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={NS.card}>
+                    <div style={{ display:'flex', alignItems:'center', gap:'14px' }}>
+                      <div style={{ fontSize:'30px' }}>🌿</div>
+                      <div style={{ flex:1 }}>
+                        <h3 style={{ ...NS.sectionTitle, margin:'0 0 4px' }}>Wellness</h3>
+                        <p style={{ margin:0, fontSize:'12px', color:'#6E6E73' }}>Stay on top of your health — book a check-up or ask our AI assistant a question.</p>
+                        <div style={{ display:'flex', gap:'10px', marginTop:'12px', flexWrap:'wrap' }}>
+                          <button style={NS.primaryBtn} onClick={()=>setActivePanelFromNav('appointments')}>Book Appointment</button>
+                          <button style={NS.ghostBtn} onClick={()=>setActivePanelFromNav('explain')}>Ask AI Assistant</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
           {activePanel === 'profile' && (
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -2285,298 +2817,6 @@ export default function PatientDashboard() {
                     {isUploadingProfile ? 'Saving...' : 'Save Profile Changes'}
                   </button>
                 </form>
-              </div>
-            </div>
-          )}
-
-          {activePanel === 'explain' && (
-            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }}>
-                  <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>AI Health Assistant</h2>
-                  <p style={{ margin: '6px 0 0 0', fontSize: '11px', color: '#8B7EFF', fontWeight: '500', textAlign: 'left', width: '100%', fontFamily: '"Inter", system-ui, -apple-system, sans-serif' }}>*Not a substitute for professional medical advice*</p>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ minWidth: '200px' }}>
-                    <select
-                      value={activeAiSessionId || ''}
-                      onChange={handleSelectSession}
-                      title="Select chat"
-                      style={{ width: '100%', padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', fontSize: '11px', backgroundColor: '#FFF', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
-                    >
-                      {aiSessions.length === 0 ? (
-                        <option value="patient_ai">New Chat</option>
-                      ) : (
-                        aiSessions.map((s) => (
-                          <option key={s.id} value={s.id}>{s.title || 'New Chat'}</option>
-                        ))
-                      )}
-                    </select>
-                  </div>
-                  <button
-                    onClick={() => handleDeleteSession(activeAiSessionId)}
-                    disabled={isActiveDefault}
-                    title="Delete chat"
-                    aria-label="Delete chat"
-                    style={{
-                      width: '38px',
-                      height: '38px',
-                      flexShrink: 0,
-                      background: 'transparent',
-                      color: isActiveDefault ? '#CBD5E1' : '#ef4444',
-                      border: '1px solid',
-                      borderColor: isActiveDefault ? '#CBD5E1' : '#fecaca',
-                      borderRadius: '10px',
-                      fontSize: '16px',
-                      cursor: isActiveDefault ? 'default' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    ×
-                  </button>
-                  <div style={{ width: '160px' }}>
-                    <select
-                      value={language}
-                      onChange={(e) => setLanguage(e.target.value)}
-                      style={{ width: '100%', padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', fontSize: '11px', backgroundColor: '#FFF', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
-                    >
-                      <option value="en">English</option>
-                      <option value="es">Español</option>
-                      <option value="hi">Hindi</option>
-                      <option value="bn">Bengali</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="analyze-view-container" style={{ display: 'flex', flex: 1, gap: '24px', minHeight: 0 }}>
-                <div className="ai-chat-column" style={{ position: 'relative', flex: 7, display: 'flex', flexDirection: 'column', overflow: 'visible', minHeight: 0, gap: '0' }}>
-                  <div className="chat-box-container" style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', background: '#FFF', borderRadius: '16px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', overflow: 'hidden', minHeight: 0 }}>
-                    <div className="chat-box" style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 100px 24px', minHeight: 0 }}>
-                      {messages.length === 0 && !isAiProcessing && <div style={{textAlign: "center", color: "#6B6B6B", marginTop: "20px"}}>Start chatting with your AI Medical Assistant!</div>}
-                      {messages.map((msg, idx) => (
-                        <div key={idx} className={`chat-message ${isOutgoingChatMessage(msg) ? 'user' : 'model'}`} style={{ marginBottom: '16px', display: 'flex', alignItems: 'flex-start', justifyContent: isOutgoingChatMessage(msg) ? 'flex-end' : 'flex-start' }}>
-                          {!isOutgoingChatMessage(msg) && <div className="emoji" style={{ marginRight: '8px', fontSize: '18px' }}></div>}
-                          <div className="bubble" style={{ background: isOutgoingChatMessage(msg) ? '#8B7EFF' : '#F1F5F9', color: isOutgoingChatMessage(msg) ? '#FFF' : '#1E293B', padding: '12px 16px', borderRadius: '16px', maxWidth: '80%', boxShadow: '0 8px 16px rgba(0,0,0,0.08), 0 4px 6px rgba(0,0,0,0.04)' }}>
-                            {isOutgoingChatMessage(msg) ? (
-                              <div className="content" style={{ whiteSpace: 'pre-wrap' }}>{msg.text || ''}</div>
-                            ) : msg.structured ? (
-                              <div className="content"><StructuredReply data={msg.structured} /></div>
-                            ) : isJsonLike(msg.text) && tryParseJson(msg.text) ? (
-                              <div className="content"><StructuredReply data={tryParseJson(msg.text)} /></div>
-                            ) : isJsonLike(msg.text) ? (
-                              <div className="content"><MarkdownMessage text={getCleanAnalysisText(msg.text)} /></div>
-                            ) : (
-                              <div className="content"><MarkdownMessage text={msg.text || ''} /></div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                      {isAiProcessing && <AiProcessingCard active={isAiProcessing} status={processingState} />}
-                      <div ref={chatEndRef} />
-                    </div>
-                    <form id="chatInputForm" style={{ position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)', width: 'calc(90% - 48px)', maxWidth: '720px', display: 'flex', alignItems: 'center', padding: '6px 6px 6px 12px', background: '#ffffff', borderRadius: '50px', boxShadow: '0 16px 32px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', zIndex: 10 }} onSubmit={handleChatSubmit}>
-                      <span style={{ color: '#64748b', fontSize: '22px', marginRight: '16px', cursor: 'pointer' }}>+</span>
-                      <input
-                        type="text"
-                        placeholder="Ask AI Health Assistant..."
-                        value={inputMsg}
-                        onChange={e => setInputMsg(e.target.value)}
-                        style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '15px', color: '#1E293B', fontWeight: '500' }}
-                      />
-                      <button type="submit" disabled={!inputMsg.trim()} style={{ marginLeft: '12px', width: '40px', height: '40px', borderRadius: '50%', background: !inputMsg.trim() ? '#E2E8F0' : 'linear-gradient(to right, #D67CFF, #6B5CE7)', color: !inputMsg.trim() ? '#94A3B8' : '#FFF', border: 'none', cursor: !inputMsg.trim() ? 'default' : 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: !inputMsg.trim() ? 'none' : '0 4px 12px rgba(214, 124, 255, 0.4)' }}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="22" y1="2" x2="11" y2="13"></line>
-                          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                        </svg>
-                      </button>  
-                    </form>
-                  </div>
-                </div>
-
-                <div className="action-panel-column" style={{ flex: 3, display: 'flex', flexDirection: 'column', gap: '16px', minHeight: 0 }}>
-                  <div className="floating-box panel" style={{ background: '#FFF', padding: '24px', borderRadius: '16px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', gap: '12px' }}>
-                      <h4 style={{ margin: 0, fontSize: '13px', color: '#6C5CE7', fontWeight: 'bold', flex: 1 }}>Analyze Medical Files</h4>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button 
-                          onClick={() => { setAnalysisMode('upload'); setUploadedFiles([]); setSelectedDocForAnalysis(null); }}
-                          style={{ padding: '6px 12px', fontSize: '10px', fontWeight: '600', borderRadius: '50px', border: '1px solid', background: analysisMode === 'upload' ? '#6C5CE7' : '#F1F5F9', color: analysisMode === 'upload' ? '#FFF' : '#475569', cursor: 'pointer', transition: '0.2s' }}
-                        >
-                          Upload New
-                        </button>
-                        <button 
-                          onClick={() => { setAnalysisMode('select'); setUploadedFiles([]); setSelectedDocForAnalysis(null); setAnalysisCurrentFolder(null); loadAssets(); }}
-                          style={{ padding: '6px 12px', fontSize: '10px', fontWeight: '600', borderRadius: '50px', border: '1px solid', background: analysisMode === 'select' ? '#6C5CE7' : '#F1F5F9', color: analysisMode === 'select' ? '#FFF' : '#475569', cursor: 'pointer', transition: '0.2s' }}
-                        >
-                          My Documents
-                        </button>
-                      </div>
-                    </div>
-
-                    {analysisMode === 'upload' ? (
-                      uploadedFiles.length === 0 ? (
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: '16px' }}>
-                          <div className="styled-dropzone" style={{ border: '2px dashed #CBD5E1', borderRadius: '16px', padding: '48px 24px', textAlign: 'center', background: '#F8FAFC', position: 'relative', transition: 'all 0.2s', cursor: 'pointer', width: '100%', boxSizing: 'border-box' }} onMouseEnter={(e) => e.currentTarget.style.borderColor='#8B7EFF'} onMouseLeave={(e) => e.currentTarget.style.borderColor='#CBD5E1'}>
-                            <label style={{ cursor: 'pointer', display: 'block', width: '100%', height: '100%' }}>
-                              <div style={{ fontSize: '32px', marginBottom: '12px' }}>+</div>
-                               <div style={{ fontSize: '12px', fontWeight: '600', color: '#475569', marginBottom: '6px' }}>Upload Medical File</div>
-                               <div style={{ fontSize: '10px', color: '#64748B' }}>Any supported document or image</div>
-                               <input type="file" ref={explainUploadInputRef} accept=".pdf,.jpg,.jpeg,.png" onChange={handleAddExplainFile} style={{ position: 'absolute', top:0, left:0, width:'100%', height:'100%', opacity:0, cursor: 'pointer' }} />
-                            </label>
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
-                          <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {uploadedFiles.map((fileObj) => (
-                              <div key={fileObj.id} style={{ display: 'flex', alignItems: 'center', padding: '12px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', gap: '12px' }}>
-                                <div style={{ width: '36px', height: '36px', background: '#EEF2FF', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6366F1', flexShrink: 0 }}>
-                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
-                                </div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontWeight: '600', fontSize: '12px', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileObj.name}</div>
-                                  <div style={{ fontSize: '10px', color: '#64748B', marginTop: '2px' }}>{(fileObj.file.size / 1024 / 1024).toFixed(2)} MB</div>
-                                </div>
-                                <button 
-                                  onClick={() => handleRemoveExplainFile(fileObj.id)} 
-                                  style={{ padding: '6px 12px', background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '50px', fontSize: '10px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', flexShrink: 0 }}
-                                  onMouseEnter={(e) => { e.target.style.background = '#ef4444'; e.target.style.color = '#FFF'; }}
-                                  onMouseLeave={(e) => { e.target.style.background = '#fee2e2'; e.target.style.color = '#ef4444'; }}
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                          
-                          <div className="styled-dropzone" style={{ border: '2px dashed #CBD5E1', borderRadius: '12px', padding: '16px', textAlign: 'center', background: '#F8FAFC', position: 'relative', transition: 'all 0.2s', cursor: 'pointer', marginTop: '8px' }} onMouseEnter={(e) => e.currentTarget.style.borderColor='#8B7EFF'} onMouseLeave={(e) => e.currentTarget.style.borderColor='#CBD5E1'}>
-                            <label style={{ cursor: 'pointer', display: 'block' }}>
-                              <div style={{ fontSize: '20px', color: '#8B7EFF', fontWeight: 'bold' }}>+</div>
-                              <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>Add More Files</div>
-                               <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={handleAddExplainFile} style={{ position: 'absolute', top:0, left:0, width:'100%', height:'100%', opacity:0, cursor: 'pointer' }} />
-                            </label>
-                          </div>
-                          
-                          <button 
-                            onClick={handleExplainUpload} 
-                            style={{ width: '100%', padding: '14px', borderRadius: '50px', background: 'linear-gradient(to right, #D67CFF, #6B5CE7)', color: '#FFF', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', boxShadow: '0 3px 5px rgba(0,0,0,0.3)', transition: 'all 0.3s ease', marginTop: '8px' }}
-                            onMouseEnter={(e) => e.target.style.boxShadow = '0 6px 12px rgba(214, 124, 255, 0.4)'}
-                            onMouseLeave={(e) => e.target.style.boxShadow = '0 3px 5px rgba(0,0,0,0.3)'}
-                          >
-                            Analyze {uploadedFiles.length} File{uploadedFiles.length !== 1 ? 's' : ''}
-                          </button>
-                        </div>
-                      )
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
-                        {analysisCurrentFolder !== null && (
-                          <span onClick={() => setAnalysisCurrentFolder(null)} style={{ color: '#8B7EFF', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>
-                            ← Back to Root
-                          </span>
-                        )}
-
-                        {analysisCurrentFolder === null && assets.folders.length === 0 && assets.files.length === 0 ? (
-                          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B', textAlign: 'center', padding: '32px 16px' }}>
-                            <div>
-                              <div style={{ fontSize: '32px', marginBottom: '12px' }}>📁</div>
-                              <div style={{ fontSize: '12px' }}>No documents uploaded yet.</div>
-                              <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '8px' }}>Upload files using the "Upload New" tab or "My Documents" page.</div>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <div style={{ fontSize: '11px', color: '#64748B', marginBottom: '8px', fontWeight: '600' }}>
-                              Select a document to analyze: {analysisCurrentFolder === null ? 'Root' : getFolderDisplayName(analysisCurrentFolder)}
-                            </div>
-                            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', padding: '2px' }}>
-                              {analysisCurrentFolder === null && assets.folders.map((folderName, i) => (
-                                <div
-                                  key={'analysis-folder-' + i}
-                                  onClick={() => setAnalysisCurrentFolder(folderName.path)}
-                                  style={{ display: 'flex', alignItems: 'center', padding: '8px 10px', background: '#FAFAFA', borderRadius: '10px', border: '1px solid #E2E8F0', gap: '8px', cursor: 'pointer' }}
-                                  onMouseEnter={(e) => { e.currentTarget.style.background = '#F1F5F9'; }}
-                                  onMouseLeave={(e) => { e.currentTarget.style.background = '#FAFAFA'; }}
-                                >
-                                  <div style={{ width: '24px', height: '24px', background: '#E2E8F0', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8B7EFF', flexShrink: 0, fontSize: '12px' }}>
-                                    📁
-                                  </div>
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: '600', fontSize: '10px', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{folderName.label}</div>
-                                    <div style={{ fontSize: '8px', color: '#94A3B8', marginTop: '1px' }}>Folder</div>
-                                  </div>
-                                </div>
-                              ))}
-
-                              {assets.files
-                                .filter((f) => (f.folder || '') === (analysisCurrentFolder || ''))
-                                .map((doc) => (
-                                <div 
-                                  key={doc.id}
-                                  onClick={() => setSelectedDocForAnalysis(doc.id)}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    padding: '8px 10px',
-                                    background: selectedDocForAnalysis === doc.id ? '#EEF2FF' : '#F8FAFC',
-                                    borderRadius: '10px',
-                                    border: selectedDocForAnalysis === doc.id ? '2px solid #6C5CE7' : '1px solid #E2E8F0',
-                                    gap: '8px',
-                                    cursor: 'pointer',
-                                    transition: '0.2s',
-                                    minHeight: '42px'
-                                  }}
-                                  onMouseEnter={(e) => { if (selectedDocForAnalysis !== doc.id) e.currentTarget.style.background = '#F1F5F9'; }}
-                                  onMouseLeave={(e) => { if (selectedDocForAnalysis !== doc.id) e.currentTarget.style.background = '#F8FAFC'; }}
-                                >
-                                  <div style={{ width: '24px', height: '24px', background: '#EEF2FF', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6366F1', flexShrink: 0, fontSize: '12px' }}>
-                                    {String(doc?.name || '').toLowerCase().endsWith('.pdf') ? '📄' : '🖼️'}
-                                  </div>
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: '600', fontSize: '10px', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.name}</div>
-                                    <div style={{ fontSize: '8px', color: '#94A3B8', marginTop: '1px', lineHeight: '1.2' }}>{doc.folder || 'Root'} • {doc.uploaded_at || 'Unknown'}</div>
-                                  </div>
-                                  <input
-                                    type="radio"
-                                    checked={selectedDocForAnalysis === doc.id}
-                                    onChange={() => setSelectedDocForAnalysis(doc.id)}
-                                    style={{
-                                      width: '14px',
-                                      height: '14px',
-                                      margin: 0,
-                                      padding: 0,
-                                      flex: '0 0 auto',
-                                      cursor: 'pointer',
-                                      accentColor: '#6C5CE7'
-                                    }}
-                                  />
-                                </div>
-                              ))}
-
-                              {assets.files.filter((f) => (f.folder || '') === (analysisCurrentFolder || '')).length === 0 && (
-                                <div style={{ padding: '24px', textAlign: 'center', color: '#64748B', fontSize: '11px' }}>
-                                  No files found in this folder.
-                                </div>
-                              )}
-                            </div>
-                            
-                            <button 
-                              onClick={handleAnalyzeSelected}
-                              disabled={!selectedDocForAnalysis}
-                              style={{ width: '100%', padding: '14px', borderRadius: '50px', background: selectedDocForAnalysis ? 'linear-gradient(to right, #D67CFF, #6B5CE7)' : '#E2E8F0', color: selectedDocForAnalysis ? '#FFF' : '#94A3B8', border: 'none', fontWeight: 'bold', cursor: selectedDocForAnalysis ? 'pointer' : 'default', fontSize: '14px', boxShadow: selectedDocForAnalysis ? '0 3px 5px rgba(0,0,0,0.3)' : 'none', transition: 'all 0.3s ease', marginTop: '8px' }}
-                              onMouseEnter={(e) => { if (selectedDocForAnalysis) e.target.style.boxShadow = '0 6px 12px rgba(214, 124, 255, 0.4)'; }}
-                              onMouseLeave={(e) => { if (selectedDocForAnalysis) e.target.style.boxShadow = '0 3px 5px rgba(0,0,0,0.3)'; }}
-                            >
-                              Analyze Selected
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
               </div>
             </div>
           )}

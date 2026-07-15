@@ -19,7 +19,7 @@ class Capability(TypedDict):
 
 
 from ..capabilities.retrievers import retrieve_conversation_memory, retrieve_consultations
-from ..capabilities.retrievers.asset_index_retriever import get_latest_document, get_latest_report_by_type, get_reports_by_report_type
+from ..capabilities.retrievers.asset_index_retriever import get_latest_document, get_latest_report_by_type, get_reports_by_report_type, get_documents_by_type
 from ..capabilities.retrievers.asset_scoped_rag import retrieve_asset_scoped_context
 from ..capabilities.retrievers.patient_history_retriever import get_patient_history, get_history_by_type
 from ..capabilities.retrievers.appointment_retriever import retrieve_appointments
@@ -79,6 +79,7 @@ async def handle_appointment_retrieve(state: UnifiedChatState, params: dict[str,
     return CapabilityResult(capability_name="APPOINTMENT")
 
 async def handle_doctor_availability_retrieve(state: UnifiedChatState, params: dict[str, Any]) -> CapabilityResult:
+    doctor_name = str(params.get("doctor_name") or state.get("planner_metadata", {}).get("doctor_name") or "")
     docs = await retrieve_doctor_availability(doctor_name=doctor_name)
     return CapabilityResult(
         capability_name="DOCTOR_AVAILABILITY",

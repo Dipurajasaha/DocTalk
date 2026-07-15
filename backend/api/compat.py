@@ -228,19 +228,38 @@ async def update_patient_profile(
 async def explain_report(
     report: UploadFile | None = File(default=None),
     medical_image: UploadFile | None = File(default=None),
+    file_id: str = Form(default=""),
     language: str = Form(default="en"),
     ai_session_id: str = Form(default=""),
     current_user: CurrentUser = Depends(get_current_user),
+    service: AssetService = Depends(_asset_service),
 ) -> dict[str, Any]:
     upload = report or medical_image
-    if upload is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A report or medical_image file is required")
+    if upload is None and not file_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A report/medical_image file or file_id is required")
 
-    _validate_file_size(upload, EXPLAIN_REPORT_MAX_SIZE_BYTES)
+    temp_path = None
+    file_name = "upload"
+    mime_type = "application/octet-stream"
+    asset_category = None
 
-    temp_path = await _file_to_path(upload)
+    if file_id:
+        plaintext, file_name, mime_type = await service.get_decrypted_asset(current_user.user_id, file_id)
+        suffix = Path(file_name).suffix or ""
+        tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        tmp.write(plaintext)
+        temp_path = Path(tmp.name)
+        tmp.close()
+        asset_record = await service.client.medicalasset.find_unique(where={"id": file_id})
+        asset_category = getattr(asset_record, "assetCategory", None) if asset_record else None
+    else:
+        _validate_file_size(upload, EXPLAIN_REPORT_MAX_SIZE_BYTES)
+        temp_path = await _file_to_path(upload)
+        file_name = upload.filename or "upload"
+        mime_type = upload.content_type or "application/octet-stream"
+
     try:
-        category, extracted_text = await _classify_document(temp_path, upload.content_type or "application/octet-stream", upload.filename or "upload")
+        category, extracted_text = await _classify_document(temp_path, mime_type, file_name)
         if category == "XRAY":
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -250,11 +269,11 @@ async def explain_report(
         reply = None
         text = extracted_text.strip()
         if not text:
-            extracted = await ocr_service.extract_text(temp_path, mime_type=upload.content_type or "application/pdf")
+            extracted = await ocr_service.extract_text(temp_path, mime_type=mime_type)
             text = str(extracted.get("extracted_text") or "").strip()
         if not text:
             text = "No readable text could be extracted from the uploaded report."
-        reply = (await _analyze_text_document(text, language=language, title="Report summary")).get("reply")
+        reply = (await _analyze_text_document(text, language=language, title="Report summary", asset_category=asset_category)).get("reply")
 
         if ai_session_id and reply is not None:
             try:
@@ -279,10 +298,11 @@ async def explain_report(
 
         return {"success": True, "reply": reply}
     finally:
-        try:
-            temp_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        if temp_path:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 @router.post("/analyze_document")
