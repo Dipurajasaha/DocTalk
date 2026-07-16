@@ -126,7 +126,7 @@ async def _extract_medicine_names_from_text(text: str) -> list[str]:
             HumanMessage(content=prompt),
         ],
         temperature=0.1,
-        max_output_tokens=512,
+        max_output_tokens=1024,
     )
     if not parsed:
         return []
@@ -144,7 +144,7 @@ async def _analyze_text_document(text: str, *, language: str, title: str, asset_
             HumanMessage(content=text),
         ],
         temperature=0.2,
-        max_output_tokens=1024,
+        max_output_tokens=4096,
     )
     if not parsed:
         snippet = " ".join(str(text or "").split())
@@ -260,6 +260,7 @@ async def explain_report(
 
     try:
         category, extracted_text = await _classify_document(temp_path, mime_type, file_name)
+        text = str(extracted_text or "").strip()
 
         if category == "XRAY" or mime_type.startswith("image/"):
             analysis = await xray_analysis_service.analyze_image(temp_path, language=language)
@@ -278,7 +279,6 @@ async def explain_report(
                 "raw": analysis,
             }
         else:
-            text = extracted_text.strip()
             if not text:
                 extracted = await ocr_service.extract_text(temp_path, mime_type=mime_type)
                 text = str(extracted.get("extracted_text") or "").strip()
@@ -286,7 +286,7 @@ async def explain_report(
                 text = "No readable text could be extracted from the uploaded report."
             reply = (await _analyze_text_document(text, language=language, title="Report summary", asset_category=asset_category)).get("reply")
 
-        if effective_category == "PRESCRIPTION" and reply is not None:
+        if category == "PRESCRIPTION" and reply is not None:
             medicine_names = await _extract_medicine_names_from_text(text)
             if medicine_names:
                 try:
@@ -341,12 +341,17 @@ async def analyze_document(
     mime_type = getattr(asset_record, "fileType", "") if asset_record else ""
     file_name = getattr(asset_record, "fileName", "document") if asset_record else "document"
 
+    plaintext, file_name_from_db, mime_type_from_db = await service.get_decrypted_asset(current_user.user_id, file_id)
+    mime_type = mime_type_from_db or mime_type
+    file_name = file_name_from_db or file_name
+
     suffix = Path(file_name).suffix or ""
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(plaintext)
         temp_file_path = Path(tmp.name)
 
     file_path = temp_file_path
+    result = None
     
     if mime_type.startswith("image/"):
         analysis = await xray_analysis_service.analyze_image(file_path, language=language)
@@ -384,8 +389,9 @@ async def analyze_document(
                 pass
 
         temp_file_path.unlink(missing_ok=True)
-    if extracted_text and extracted_text.strip():
-        text = extracted_text.strip()
+    
+    text = str(extracted_text or "").strip()
+    if text and result is None:
         result = await _analyze_text_document(text, language=language, title=file_name, asset_category=asset_category)
 
         if effective_category == "PRESCRIPTION" and result.get("success"):
@@ -397,57 +403,7 @@ async def analyze_document(
                         result["reply"]["medicines"] = medicine_prices
                 except Exception:
                     pass
-    else:
-        plaintext, file_name_from_db, mime_type_from_db = await service.get_decrypted_asset(current_user.user_id, file_id)
-        mime_type = mime_type_from_db
-        file_name = file_name_from_db
-
-        suffix = Path(file_name).suffix or ""
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(plaintext)
-            temp_file_path = Path(tmp.name)
-
-        file_path = temp_file_path
-        
-        if mime_type.startswith("image/"):
-            analysis = await xray_analysis_service.analyze_image(file_path, language=language)
-            temp_file_path.unlink(missing_ok=True)
-            result = {
-                "success": True,
-                "reply": {
-                    "title": file_name,
-                    "description": analysis.get("summary") or analysis.get("analysis") or "",
-                    "key_points": _listify_text(analysis.get("findings") or analysis.get("analysis")),
-                    "key_findings": _listify_text(analysis.get("findings") or analysis.get("analysis")),
-                    "observations": _listify_text(analysis.get("findings") or analysis.get("analysis")),
-                    "recommendations": _listify_text(analysis.get("recommendations")),
-                    "notes": _listify_text(analysis.get("warnings")),
-                    "risks": _listify_text(analysis.get("warnings")),
-                    "summary": analysis.get("summary") or analysis.get("analysis") or "",
-                    "findings": analysis.get("findings") or analysis.get("analysis") or "",
-                    "warnings": analysis.get("warnings") or [],
-                    "raw": analysis,
-                },
-            }
-        else:
-            extracted = await ocr_service.extract_text(file_path, mime_type=mime_type)
-            text = str(extracted.get("extracted_text") or "").strip()
-            if not text:
-                text = f"No readable text could be extracted from {file_name}."
-            temp_file_path.unlink(missing_ok=True)
-            result = await _analyze_text_document(text, language=language, title=file_name, asset_category=asset_category)
-
-            if asset_category == "PRESCRIPTION" and result.get("success"):
-                medicine_names = await _extract_medicine_names_from_text(text)
-                if medicine_names:
-                    try:
-                        medicine_prices = await search_medicine_prices(medicine_names)
-                        if medicine_prices:
-                            result["reply"]["medicines"] = medicine_prices
-                    except Exception:
-                        pass
-
-    if ai_session_id and result.get("success"):
+    if ai_session_id and result and result.get("success"):
         try:
             chat_service = ChatService()
             resolved_id = await _resolve_analysis_session_id(

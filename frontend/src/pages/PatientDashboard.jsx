@@ -508,7 +508,21 @@ export default function PatientDashboard() {
       loadPrescriptions();
       loadHistoryFromApi();
     }
-  }, [activePanel]);
+  }, [activePanel]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll for assets that are still processing so UI updates automatically
+  useEffect(() => {
+    let intervalId;
+    const hasProcessing = assets?.files?.some(f => f.processing_status === 'PENDING' || f.processing_status === 'PROCESSING' || f.processing_status === 'UPLOADED');
+    if ((activePanel === 'documents' || activePanel === 'explain') && hasProcessing) {
+      intervalId = setInterval(() => {
+        loadAssets({ forceRefresh: true });
+      }, 3000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [assets, activePanel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleUploadAssetV2 = (e) => {
     const file = e.target.files && e.target.files[0];
@@ -1174,6 +1188,21 @@ export default function PatientDashboard() {
     loadAppointments();
   };
 
+  useEffect(() => {
+    const handleAiPaymentClick = (e) => {
+      const payloadString = e.detail;
+      try {
+        const orderInfo = JSON.parse(payloadString);
+        console.debug('[WS] Received payment order via link click', orderInfo);
+        setPendingOrder(orderInfo);
+      } catch (err) {
+        console.error('Failed to parse payment order from ai-payment-click', err);
+      }
+    };
+    window.addEventListener('ai-payment-click', handleAiPaymentClick);
+    return () => window.removeEventListener('ai-payment-click', handleAiPaymentClick);
+  }, []);
+
   /** "Pay Now" button for existing PAYMENT_PENDING appointments */
   const handlePayNow = async (appt) => {
     if (paymentProcessing) return;
@@ -1356,6 +1385,11 @@ export default function PatientDashboard() {
                 const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
                 return [...filtered, { sender: 'model', text: textReply, id: Date.now() }];
               });
+              
+              if (payload?.payment_order) {
+                console.debug('[WS] Received payment order', payload.payment_order);
+                setPendingOrder(payload.payment_order);
+              }
             }
             try { socket.close(); } catch (e) {}
             resolveOnce();
@@ -1444,7 +1478,8 @@ export default function PatientDashboard() {
       return;
     }
 
-    setMessages(prev => [...prev, { sender: 'model', id: 'loading', text: 'Analyzing files... Please wait.' }]);
+    setIsAiProcessing(true);
+    setProcessingState('Analyzing files... Please wait.');
 
     try {
       for (const fileObj of uploadedFiles) {
@@ -1468,35 +1503,16 @@ export default function PatientDashboard() {
         });
         const data = await response.json();
 
+        setIsAiProcessing(false);
+        setProcessingState(null);
         setMessages(prev => {
           const filtered = prev.filter(m => m.id !== 'loading');
           if (data.success) {
             const reply = data.reply;
-            let textReply = '';
             if (typeof reply === 'object' && reply) {
-              const parts = [];
-              if (reply.summary) parts.push(reply.summary);
-              if (reply.key_findings && Array.isArray(reply.key_findings)) {
-                parts.push('Key Findings: ' + reply.key_findings.join(', '));
-              }
-              if (reply.observations && Array.isArray(reply.observations)) {
-                parts.push('Observations: ' + reply.observations.join(', '));
-              }
-              if (reply.risks && Array.isArray(reply.risks)) {
-                parts.push('Risks: ' + reply.risks.join(', '));
-              }
-              if (reply.recommendations && Array.isArray(reply.recommendations)) {
-                parts.push('Recommendations: ' + reply.recommendations.join(', '));
-              }
-              if (reply.notes) {
-                const notesText = Array.isArray(reply.notes) ? reply.notes.join('. ') : reply.notes;
-                parts.push('Notes: ' + notesText);
-              }
-              textReply = parts.filter(p => p).join('\n\n');
-            } else {
-              textReply = String(reply);
+              return [...filtered, { sender: 'model', structured: reply }];
             }
-            return [...filtered, { sender: 'model', text: textReply }];
+            return [...filtered, { sender: 'model', text: String(reply) }];
           }
         return [...filtered, { sender: 'model', text: 'Error analyzing ' + fileObj.name + ': ' + (data.error || data.detail || data.message || 'Unknown error') }];
         });
@@ -1504,6 +1520,8 @@ export default function PatientDashboard() {
 
       setUploadedFiles([]);
     } catch (err) {
+      setIsAiProcessing(false);
+      setProcessingState(null);
       setMessages(prev => prev.filter(m => m.id !== 'loading'));
       try { addNotification({ type: 'error', message: 'Analysis failed: ' + err.message }); } catch (e) {}
     }
@@ -1515,7 +1533,8 @@ export default function PatientDashboard() {
       return;
     }
 
-    setMessages(prev => [...prev, { sender: 'model', id: 'loading', text: 'Analyzing selected document... Please wait.' }]);
+    setIsAiProcessing(true);
+    setProcessingState('Analyzing selected document... Please wait.');
 
     try {
       const formData = new FormData();
@@ -1532,6 +1551,8 @@ export default function PatientDashboard() {
       });
       const data = await response.json();
 
+      setIsAiProcessing(false);
+      setProcessingState(null);
       setMessages(prev => {
         const filtered = prev.filter(m => m.id !== 'loading');
         if (data.success) {
@@ -1542,6 +1563,8 @@ export default function PatientDashboard() {
         return [...filtered, { sender: 'model', text: 'Error analyzing document: ' + (data.error || data.detail || data.message || 'Unknown error') }];
       });
     } catch (err) {
+      setIsAiProcessing(false);
+      setProcessingState(null);
       setMessages(prev => prev.filter(m => m.id !== 'loading'));
       try { addNotification({ type: 'error', message: 'Analysis failed: ' + err.message }); } catch (e) {}
     }
@@ -1745,7 +1768,7 @@ export default function PatientDashboard() {
          </aside>
 
         {/* Main Content */}
-        <div className="main-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#F5F5F7', paddingTop: '80px', position: 'relative' }}>
+        <div className="main-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#F5F5F7', paddingTop: activePanel === 'explain' ? '0px' : '80px', position: 'relative' }}>
           {activePanel === 'overview' && (
             <PatientOverview
               user={user}
@@ -1759,7 +1782,7 @@ export default function PatientDashboard() {
             <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
               {/* Chat Area */}
               <div className="neu-chat-area">
-                <div className="neu-chat-header">
+                <div className="neu-chat-header" style={{ paddingLeft: '180px' }}>
                    <div className="neu-chat-header-greeting">
                     <h2>AI Health Assistant</h2>
                     <p>*Not a substitute for professional medical advice*</p>

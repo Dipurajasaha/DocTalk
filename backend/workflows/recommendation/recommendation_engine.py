@@ -1,16 +1,32 @@
 from typing import Any
 import re
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from ...core.database import get_prisma
 from ..graph.state import UnifiedChatState
 from ..graph.common import latest_message_text, get_workflow_model
 from ..utils.logger import log_section, log_key_value
 
 class RecommendationPrediction(BaseModel):
-    needs_doctor: bool = Field(description="True if the patient is describing a symptom, condition, or need that requires a doctor's consultation.")
-    recommended_specialty: str | None = Field(description="The specific type of doctor needed (e.g., 'Cardiologist', 'General Physician', 'Pulmonologist', 'Dermatologist'). Null if no doctor is needed.")
-    reasoning: str = Field(description="Brief explanation of why this specialty is recommended.")
+    needs_doctor: bool = Field(default=False, description="True if the patient is describing a symptom, condition, or need that requires a doctor's consultation.")
+    recommended_specialty: str | None = Field(default=None, description="The specific type of doctor needed (e.g., 'Cardiologist', 'General Physician', 'Pulmonologist', 'Dermatologist'). Null if no doctor is needed.")
+    reasoning: str = Field(default="", description="Brief explanation of why this specialty is recommended.")
+
+    @model_validator(mode='before')
+    @classmethod
+    def parse_flexible_fields(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        
+        data = dict(values)
+        if "needs_doctor" not in data:
+            data["needs_doctor"] = False
+        if "recommended_specialty" not in data:
+            data["recommended_specialty"] = None
+        if "reasoning" not in data:
+            data["reasoning"] = ""
+            
+        return data
 
 async def recommendation_engine_node(state: UnifiedChatState) -> dict[str, Any]:
     # 0. Skip recommendation engine entirely for doctors
@@ -45,6 +61,13 @@ async def recommendation_engine_node(state: UnifiedChatState) -> dict[str, Any]:
 You are a medical triage assistant. Analyze the recent conversation to determine if the patient needs to consult a doctor.
 If they are reporting a symptom (e.g., cough, headache, chest pain), asking for a doctor, or seeking medical advice, set needs_doctor=true and provide the most appropriate medical specialty (e.g., 'General Physician', 'Pulmonologist', 'Cardiologist').
 If they are just greeting, asking general platform questions, or following up on a non-medical topic, set needs_doctor=false.
+
+You MUST respond with a strictly formatted JSON object matching the following schema:
+{{
+  "needs_doctor": boolean,
+  "recommended_specialty": "string" or null,
+  "reasoning": "string"
+}}
 
 Recent conversation:
 {chr(10).join(chat_history)}
@@ -102,8 +125,12 @@ Recent conversation:
     rec_text = f"Based on your symptoms, consulting {article} {specialty} would be recommended.\n"
     
     if doctors:
-        doc_names = ", ".join([f"Dr. {d.name} ({d.specialization})" for d in doctors])
-        recommendation_context["suggested_doctors"] = [{"id": d.id, "name": d.name, "specialization": d.specialization} for d in doctors]
+        doc_names_list = []
+        for d in doctors:
+            name_prefix = "" if d.name.startswith("Dr.") else "Dr. "
+            doc_names_list.append(f"{name_prefix}{d.name} ({d.specialization})")
+        doc_names = ", ".join(doc_names_list)
+        recommendation_context["suggested_doctors"] = [{"id": d.doctorId, "name": d.name, "specialization": d.specialization} for d in doctors]
         rec_text += f"\nWe have the following doctors available on our platform who can help you:\n{doc_names}\n\nWould you like me to help you book an appointment with them?"
     else:
         rec_text += "\nIf you'd like, I can help you find an appropriate specialist available on this platform."

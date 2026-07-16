@@ -735,8 +735,12 @@ async def handle_appointment_book(
             },
         }
 
+        doc_name = selected_slot.doctor.name
+        if not doc_name.lower().startswith("dr"):
+            doc_name = f"Dr. {doc_name}"
+            
         message = (
-            f"Your appointment with Dr. {selected_slot.doctor.name} on {local_time.strftime('%B %d, %Y')} "
+            f"Your appointment with {doc_name} on {local_time.strftime('%B %d, %Y')} "
             f"at {local_time.strftime('%I:%M %p')} has been reserved.\n\n"
             f"The consultation fee is Rs. {int(amount_paise / 100):,}. Do you want to proceed to payment?"
         )

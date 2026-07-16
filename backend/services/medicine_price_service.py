@@ -97,7 +97,7 @@ async def search_medicine_prices(
     gemini_model = (
         model
         or str(settings.gemini_model or "").strip()
-        or "gemini-2.5-flash"
+        or "gemini-1.5-flash"
     )
 
     if not gemini_api_key:
