@@ -213,6 +213,7 @@ export default function DoctorDashboard() {
     }
   });
   const [dashboardData, setDashboardData] = useState(null);
+  const [earningsData, setEarningsData] = useState(null);
   const [manageSessionTab, setManageSessionTab] = useState(() => {
     try {
       return localStorage.getItem('doctalk_doctor_manage_session_tab') || 'upcoming';
@@ -413,6 +414,16 @@ export default function DoctorDashboard() {
       cancelled = true;
     };
   }, [user, activeTab, currentDoctorId]);
+
+  // Fetch real earnings from DB whenever the payments tab becomes active
+  useEffect(() => {
+    if (activeTab !== 'payments' || !user) return;
+    let cancelled = false;
+    doctorApi.getEarnings()
+      .then((data) => { if (!cancelled) setEarningsData(data); })
+      .catch((err) => { console.error('Failed to load earnings:', err); });
+    return () => { cancelled = true; };
+  }, [activeTab, user]);
 
   function normalizeChatMessage(item) {
     return {
@@ -633,13 +644,10 @@ export default function DoctorDashboard() {
   const renderDashboardTab = () => {
     if (!dashboardData) return <div>Loading dashboard data...</div>;
     
-    // Mock Monthly Patients Data for Line Chart
-    const monthlyData = [
-      { name: 'Jan', patients: 12 }, { name: 'Feb', patients: 19 },
-      { name: 'Mar', patients: 15 }, { name: 'Apr', patients: 22 },
-      { name: 'May', patients: 28 }, { name: 'Jun', patients: 35 },
-      { name: 'Jul', patients: 32 }
-    ];
+    // Real monthly patient data from DB (last 6 months), falls back to empty months
+    const monthlyData = dashboardData.monthly_patient_data?.length
+      ? dashboardData.monthly_patient_data
+      : [];
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -664,7 +672,7 @@ export default function DoctorDashboard() {
           </div>
           <div className="doc-card">
             <h3 style={{color: '#6366f1'}}>Monthly Revenue</h3>
-            <div className="doc-value">${dashboardData.monthly_revenue || '1,250'}</div>
+            <div className="doc-value">₹{(dashboardData.monthly_revenue ?? 0).toLocaleString('en-IN')}</div>
           </div>
         </div>
 
@@ -1164,33 +1172,58 @@ export default function DoctorDashboard() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <h1 className="doc-h1">Earnings & Payments</h1>
           <div className="doc-section" style={{ display: 'flex', flexDirection: 'column' }}>
-          
-          <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
-            <div style={{ fontSize: '14px', color: '#6B6B6B' }}>Total Earnings</div>
-            <div style={{ fontSize: '32px', fontWeight: '700', color: '#0C0C0C' }}>$1,250.00</div>
+
+          {/* Summary cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+            <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '13px', color: '#6B6B6B', fontWeight: '600', marginBottom: '6px' }}>Total Earnings</div>
+              <div style={{ fontSize: '32px', fontWeight: '700', color: '#0C0C0C' }}>
+                {earningsData
+                  ? `₹${Math.round(earningsData.total_earnings_paise / 100).toLocaleString('en-IN')}`
+                  : '...'}
+              </div>
+            </div>
+            <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '13px', color: '#6B6B6B', fontWeight: '600', marginBottom: '6px' }}>This Month</div>
+              <div style={{ fontSize: '32px', fontWeight: '700', color: '#6366f1' }}>
+                {earningsData
+                  ? `₹${Math.round(earningsData.monthly_earnings_paise / 100).toLocaleString('en-IN')}`
+                  : '...'}
+              </div>
+            </div>
+            <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '13px', color: '#6B6B6B', fontWeight: '600', marginBottom: '6px' }}>Transactions</div>
+              <div style={{ fontSize: '32px', fontWeight: '700', color: '#10b981' }}>
+                {earningsData ? earningsData.transactions.length : '...'}
+              </div>
+            </div>
           </div>
+
+          {/* Transactions table */}
           <table className="doc-table">
             <thead>
               <tr>
                 <th>Date</th>
                 <th>Patient</th>
                 <th>Amount</th>
+                <th>Razorpay ID</th>
                 <th>Status</th>
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td>2024-03-28</td>
-                <td>Dip Saha</td>
-                <td>$150.00</td>
-                <td><span className="doc-badge success">Completed</span></td>
-              </tr>
-              <tr>
-                <td>2024-03-27</td>
-                <td>John Doe</td>
-                <td>$150.00</td>
-                <td><span className="doc-badge success">Completed</span></td>
-              </tr>
+              {!earningsData ? (
+                <tr><td colSpan="5" style={{ textAlign: 'center', color: '#777' }}>Loading...</td></tr>
+              ) : earningsData.transactions.length === 0 ? (
+                <tr><td colSpan="5" style={{ textAlign: 'center', color: '#777' }}>No payments received yet.</td></tr>
+              ) : earningsData.transactions.map((txn, i) => (
+                <tr key={i}>
+                  <td>{txn.date ? new Date(txn.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+                  <td>{txn.patient}</td>
+                  <td>₹{Math.round(txn.amount_paise / 100).toLocaleString('en-IN')}</td>
+                  <td style={{ fontSize: '12px', color: '#64748b', fontFamily: 'monospace' }}>{txn.razorpay_payment_id || '—'}</td>
+                  <td><span className="doc-badge success">Captured</span></td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

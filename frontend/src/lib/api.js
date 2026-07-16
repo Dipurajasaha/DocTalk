@@ -185,10 +185,11 @@ export const doctorApi = {
     const normalizeStatus = (value) => String(value || '').trim().toUpperCase();
     const resolvedDoctorId = String(doctorId || '').trim();
 
-    const [appointmentsResult, slotsResult, consultationsResult] = await Promise.allSettled([
+    const [appointmentsResult, slotsResult, consultationsResult, paymentsResult] = await Promise.allSettled([
       apiClient.get('/api/appointments', { retries: 1, auth: true }),
       resolvedDoctorId ? apiClient.get(`/api/appointments/slots/${encodeURIComponent(resolvedDoctorId)}`, { retries: 1, auth: true }) : Promise.resolve([]),
       apiClient.get('/api/chat/consultations', { retries: 0, auth: true }),
+      apiClient.get('/api/payments/doctor-earnings', { retries: 1, auth: true }),
     ]);
 
     const appointments = appointmentsResult.status === 'fulfilled' && Array.isArray(appointmentsResult.value)
@@ -200,6 +201,7 @@ export const doctorApi = {
     const consultations = consultationsResult.status === 'fulfilled' && Array.isArray(consultationsResult.value)
       ? consultationsResult.value
       : [];
+    const earningsData = paymentsResult.status === 'fulfilled' ? paymentsResult.value : null;
 
     const requests = appointments.filter((item) => normalizeStatus(item.status) === 'PENDING');
     const upcoming_schedules = appointments.filter((item) => normalizeStatus(item.status) === 'CONFIRMED');
@@ -222,6 +224,45 @@ export const doctorApi = {
       .filter(Boolean);
     const uniquePatientIds = Array.from(new Set([...appointmentPatientIds, ...consultationPatientIds]));
 
+    // Compute monthly revenue from real captured payments (amountPaise / 100 → INR)
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const completedThisMonth = completed_schedules.filter((appt) => {
+      const d = new Date(appt.completedAt || appt.updatedAt || appt.appointmentDate || 0);
+      return d >= startOfMonth;
+    });
+    // Use earningsData from backend if available, otherwise fall back to appointment amountPaise
+    const monthly_revenue_paise = earningsData?.monthly_revenue_paise
+      ?? completedThisMonth.reduce((sum, appt) => sum + (appt.amountPaise || 0), 0);
+    const monthly_revenue = Math.round(monthly_revenue_paise / 100);
+
+    // Payment transactions from the earnings endpoint (real Razorpay data)
+    const payment_transactions = earningsData?.transactions ?? [];
+    const total_earnings_paise = earningsData?.total_earnings_paise
+      ?? completed_schedules.reduce((sum, appt) => sum + (appt.amountPaise || 0), 0);
+    const total_earnings = Math.round(total_earnings_paise / 100);
+
+    // Monthly patient trend from real appointment data (last 6 months)
+    const monthlyPatientData = (() => {
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const counts = {};
+      appointments.forEach((appt) => {
+        const d = new Date(appt.appointmentDate || appt.createdAt || appt.requestedAt || 0);
+        if (isNaN(d.getTime())) return;
+        const key = `${d.getFullYear()}-${d.getMonth()}`;
+        counts[key] = (counts[key] || { name: monthNames[d.getMonth()], patients: 0 });
+        counts[key].patients += 1;
+      });
+      // Build last 6 months in order
+      const result = [];
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = `${d.getFullYear()}-${d.getMonth()}`;
+        result.push(counts[key] || { name: monthNames[d.getMonth()], patients: 0 });
+      }
+      return result;
+    })();
+
     return {
       success: true,
       appointments,
@@ -233,7 +274,10 @@ export const doctorApi = {
       slots,
       total_requests: requests.length,
       total_patients: uniquePatientIds.length,
-      monthly_revenue: 0,
+      monthly_revenue,
+      total_earnings,
+      payment_transactions,
+      monthly_patient_data: monthlyPatientData,
     };
   },
   getCopilotForPatient: (patientId, consultationId = '') => {
@@ -241,6 +285,7 @@ export const doctorApi = {
     return apiClient.get(`/api/doctor/copilot/patients/${encodeURIComponent(patientId)}${query}`, { retries: 1, auth: true });
   },
   getCopilotForConsultation: (consultationId) => apiClient.get(`/api/doctor/copilot/consultations/${encodeURIComponent(consultationId)}`, { retries: 1, auth: true }),
+  getEarnings: () => apiClient.get('/api/payments/doctor-earnings', { retries: 1, auth: true }),
 };
 
 export const adminApi = {

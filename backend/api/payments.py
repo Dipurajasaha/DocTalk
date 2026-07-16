@@ -2,17 +2,20 @@
 
 Endpoints
 ---------
-POST /api/payments/create-order   – Patient initiates payment for an appointment
-POST /api/payments/verify         – Frontend reports successful checkout; server verifies HMAC
-POST /api/payments/webhook        – Razorpay sends server-side payment events
+POST /api/payments/create-order      – Patient initiates payment for an appointment
+POST /api/payments/verify            – Frontend reports successful checkout; server verifies HMAC
+POST /api/payments/webhook           – Razorpay sends server-side payment events
+GET  /api/payments/doctor-earnings   – Doctor fetches real earnings from captured payments
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
+from ..core.database import prisma
 from ..core.security import CurrentUser, get_current_user
 from ..schemas.payment_schemas import (
     CreateOrderRequest,
@@ -138,3 +141,87 @@ async def razorpay_webhook(
     payload_bytes = await request.body()
     result = await payment_service.process_webhook(payload_bytes, x_razorpay_signature)
     return WebhookResponse.model_validate(result)
+
+
+@router.get("/doctor-earnings")
+async def doctor_earnings(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """
+    Return real earnings data for the authenticated doctor.
+
+    Queries all CAPTURED payments linked to this doctor's appointments and
+    returns:
+    - total_earnings_paise  – lifetime captured amount in paise
+    - monthly_earnings_paise – captured amount in the current calendar month
+    - transactions          – list of individual payment records (newest first)
+    """
+    if current_user.role != "doctor":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Doctor access required")
+
+    doctor_id = current_user.user_id
+
+    # Fetch all CAPTURED payments for this doctor's appointments
+    payments = await prisma.payment.find_many(
+        where={
+            "status": "CAPTURED",
+            "appointment": {
+                "doctorId": doctor_id,
+            },
+        },
+        include={
+            "appointment": {
+                "include": {
+                    "patient": True,
+                }
+            }
+        },
+        order_by={"createdAt": "desc"},
+    )
+
+    now = datetime.now(timezone.utc)
+    start_of_month = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+
+    total_paise = 0
+    monthly_paise = 0
+    transactions: list[dict[str, Any]] = []
+
+    for p in payments:
+        amount = int(p.amountPaise or 0)
+        total_paise += amount
+
+        created_at = p.createdAt
+        if created_at and created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        if created_at and created_at >= start_of_month:
+            monthly_paise += amount
+
+        # Resolve patient display name
+        patient_display = "Unknown"
+        try:
+            appt = p.appointment
+            if appt:
+                pt = appt.patient
+                if pt:
+                    patient_display = (
+                        getattr(pt, "displayName", None)
+                        or getattr(pt, "name", None)
+                        or getattr(pt, "username", None)
+                        or "Unknown"
+                    )
+        except Exception:
+            pass
+
+        transactions.append({
+            "date": p.createdAt.isoformat() if p.createdAt else None,
+            "patient": patient_display,
+            "amount_paise": amount,
+            "razorpay_payment_id": p.razorpayPaymentId,
+            "status": p.status,
+        })
+
+    return {
+        "total_earnings_paise": total_paise,
+        "monthly_earnings_paise": monthly_paise,
+        "transactions": transactions,
+    }

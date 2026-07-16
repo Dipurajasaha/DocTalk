@@ -20,11 +20,13 @@ async def public_stats() -> dict[str, int]:
     doctors = await prisma.doctor.count()
     admins = await prisma.admin.count()
 
+    hospitals = await prisma.hospital.count() if hasattr(prisma, "hospital") else 0
+
     return {
         "patients": patients,
         "doctors": doctors,
         "admins": admins,
-        "hospitals": 0,
+        "hospitals": hospitals,
     }
 
 
