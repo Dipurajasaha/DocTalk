@@ -281,7 +281,7 @@ async def _vision_gemini(
 
     gemini_api_key = str(settings.gemini_api_key or "").strip()
     gemini_model = (
-        model or str(settings.gemini_model or "").strip() or "gemini-2.5-flash-lite"
+        model or str(settings.gemini_model or "").strip() or "gemini-2.0-flash-lite"
     )
 
     if not gemini_api_key:

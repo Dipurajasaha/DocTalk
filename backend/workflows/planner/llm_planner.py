@@ -35,6 +35,7 @@ RULES:
 8. If the user asks to cancel an appointment (e.g. "Cancel my appointment"), use APPOINTMENT_CANCEL.
 9. For general greetings (e.g. "Hello", "Hi"), return NO tasks and "query_type": "general". DO NOT include workflow or appointment metadata.
 10. For general medical knowledge (e.g. "Tell me about anemia", "What is diabetes?"), return NO tasks and "query_type": "knowledge". DO NOT include workflow or appointment metadata.
+11. For requests to recommend a doctor based on symptoms (e.g. "Can you recommend a doctor for my headaches?"), return NO tasks and "query_type": "general". The recommendation engine will handle this.
 11. Always preserve the active_workflow if we are in the middle of a booking, UNLESS the query is unrelated (general or knowledge) or cancelled. For unrelated queries, omit workflow metadata entirely to prevent context pollution.
 11a. If the user says payment was successful, paid, or completed while a booking is waiting for payment confirmation, treat it as confirmation of the existing appointment. Do NOT search slots again, do NOT reserve a new slot, and do NOT create a fresh booking.
 12. If PREVIOUS PLANNER METADATA contains `recommended_specialty` and the user accepts it (e.g. "Yes", "Find one", "Book it"), use APPOINTMENT_SEARCH_SLOTS. If there is a `recommended_doctor_name`, set "doctor_name" in metadata. Otherwise set "specialty" in metadata to the `recommended_specialty`.

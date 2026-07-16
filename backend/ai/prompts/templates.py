@@ -15,7 +15,8 @@ class PromptService:
     _SUMMARY_TEMPLATE = PromptTemplate.from_template(
         "Summarize this medical text into a concise clinically useful memory item. {language_hint} "
         "Return valid JSON only with keys: success, summary, findings, recommendations, warnings, metadata. "
-        "Keep the summary brief and preserve medically relevant detail."
+        "Keep the summary brief and preserve medically relevant detail. "
+        "CRITICAL RULE: If the input is clearly not a medical file, reject it by returning success=false and a summary stating that this type of file is not supported."
     )
     _XRAY_TEMPLATE = PromptTemplate.from_template(
         "Analyze the medical image for educational support only. {language_hint} {context_block}"
@@ -25,12 +26,14 @@ class PromptService:
         "recommendations (list of strings), warnings (list of strings), "
         "images (object with optional defect_marked and healthy_version URLs), "
         "metadata (object). "
-        "Do not provide a diagnosis. Emphasize observable findings and safe recommendations."
+        "Do not provide a diagnosis. Emphasize observable findings and safe recommendations. "
+        "CRITICAL RULE: If the image is clearly not a medical file, reject it by returning success=false and a summary stating that this type of file is not supported."
     )
     _CONSULTATION_TEMPLATE = PromptTemplate.from_template(
         "Review the consultation text. {language_hint} {context_block}"
         "Return valid JSON only with keys: success, summary, findings, recommendations, warnings, metadata. "
-        "Summarize clinically relevant themes without inventing facts."
+        "Summarize clinically relevant themes without inventing facts. "
+        "CRITICAL RULE: If the input is clearly not a medical file, reject it by returning success=false and a summary stating that this type of file is not supported."
     )
 
     @staticmethod

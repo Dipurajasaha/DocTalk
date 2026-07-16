@@ -31,9 +31,7 @@ export default function StructuredReply({ data }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      {title && (
-        <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{title}</div>
-      )}
+
 
       {description && (
         <div style={{ fontSize: '13px', color: '#334155' }}>{description}</div>
@@ -101,12 +99,7 @@ export default function StructuredReply({ data }) {
         </div>
       )}
 
-      {hasRawData && (
-        <details style={{ marginTop: '4px' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '12px', color: '#475569' }}>Raw JSON</summary>
-          <pre style={{ whiteSpace: 'pre-wrap', margin: '8px 0 0', color: '#0f172a', fontSize: '12px' }}>{fallbackJson}</pre>
-        </details>
-      )}
+
     </div>
   );
 }

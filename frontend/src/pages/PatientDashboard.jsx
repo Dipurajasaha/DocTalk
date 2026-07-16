@@ -138,6 +138,7 @@ export default function PatientDashboard() {
 
   const [chatHistoryCollapsed, setChatHistoryCollapsed] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const setActivePanelFromNav = (panel) => {
     const nextPanel = VALID_PANELS.includes(panel) ? panel : 'explain';
@@ -507,7 +508,21 @@ export default function PatientDashboard() {
       loadPrescriptions();
       loadHistoryFromApi();
     }
-  }, [activePanel]);
+  }, [activePanel]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll for assets that are still processing so UI updates automatically
+  useEffect(() => {
+    let intervalId;
+    const hasProcessing = assets?.files?.some(f => f.processing_status === 'PENDING' || f.processing_status === 'PROCESSING' || f.processing_status === 'UPLOADED');
+    if ((activePanel === 'documents' || activePanel === 'explain') && hasProcessing) {
+      intervalId = setInterval(() => {
+        loadAssets({ forceRefresh: true });
+      }, 3000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [assets, activePanel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleUploadAssetV2 = (e) => {
     const file = e.target.files && e.target.files[0];
@@ -1173,6 +1188,21 @@ export default function PatientDashboard() {
     loadAppointments();
   };
 
+  useEffect(() => {
+    const handleAiPaymentClick = (e) => {
+      const payloadString = e.detail;
+      try {
+        const orderInfo = JSON.parse(payloadString);
+        console.debug('[WS] Received payment order via link click', orderInfo);
+        setPendingOrder(orderInfo);
+      } catch (err) {
+        console.error('Failed to parse payment order from ai-payment-click', err);
+      }
+    };
+    window.addEventListener('ai-payment-click', handleAiPaymentClick);
+    return () => window.removeEventListener('ai-payment-click', handleAiPaymentClick);
+  }, []);
+
   /** "Pay Now" button for existing PAYMENT_PENDING appointments */
   const handlePayNow = async (appt) => {
     if (paymentProcessing) return;
@@ -1355,6 +1385,11 @@ export default function PatientDashboard() {
                 const filtered = prev.filter(m => m.id !== 'loading' && m.id !== 'assistant-stream');
                 return [...filtered, { sender: 'model', text: textReply, id: Date.now() }];
               });
+              
+              if (payload?.payment_order) {
+                console.debug('[WS] Received payment order', payload.payment_order);
+                setPendingOrder(payload.payment_order);
+              }
             }
             try { socket.close(); } catch (e) {}
             resolveOnce();
@@ -1424,17 +1459,7 @@ export default function PatientDashboard() {
       type: file.type
     }]);
 
-    // Persist the file as a MedicalAsset so it appears in the "My Documents" section.
-    patientApi.uploadAsset(file)
-      .then((data) => {
-        if (data && (data.success || data.id)) {
-          try { removeAsset && removeAsset('assets_files'); } catch (err) {}
-          loadAssets({ forceRefresh: true });
-        }
-      })
-      .catch((err) => {
-        console.error('Background asset upload failed', err);
-      });
+    // Persisting the file has been removed for temporary quick analysis uploads.
 
     if (explainUploadInputRef.current) {
       explainUploadInputRef.current.value = '';
@@ -1453,7 +1478,8 @@ export default function PatientDashboard() {
       return;
     }
 
-    setMessages(prev => [...prev, { sender: 'model', id: 'loading', text: 'Analyzing files... Please wait.' }]);
+    setIsAiProcessing(true);
+    setProcessingState('Analyzing files... Please wait.');
 
     try {
       for (const fileObj of uploadedFiles) {
@@ -1477,19 +1503,25 @@ export default function PatientDashboard() {
         });
         const data = await response.json();
 
-          setMessages(prev => {
-            const filtered = prev.filter(m => m.id !== 'loading');
-            if (data.success) {
-              const reply = data.reply;
-              if (reply && typeof reply === 'object') return [...filtered, { sender: 'model', structured: reply }];
-              return [...filtered, { sender: 'model', text: String(reply) }];
+        setIsAiProcessing(false);
+        setProcessingState(null);
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== 'loading');
+          if (data.success) {
+            const reply = data.reply;
+            if (typeof reply === 'object' && reply) {
+              return [...filtered, { sender: 'model', structured: reply }];
             }
-            return [...filtered, { sender: 'model', text: 'Error analyzing ' + fileObj.name + ': ' + (data.error || data.detail || data.message || 'Unknown error') }];
-          });
+            return [...filtered, { sender: 'model', text: String(reply) }];
+          }
+        return [...filtered, { sender: 'model', text: 'Error analyzing ' + fileObj.name + ': ' + (data.error || data.detail || data.message || 'Unknown error') }];
+        });
       }
 
       setUploadedFiles([]);
     } catch (err) {
+      setIsAiProcessing(false);
+      setProcessingState(null);
       setMessages(prev => prev.filter(m => m.id !== 'loading'));
       try { addNotification({ type: 'error', message: 'Analysis failed: ' + err.message }); } catch (e) {}
     }
@@ -1501,7 +1533,8 @@ export default function PatientDashboard() {
       return;
     }
 
-    setMessages(prev => [...prev, { sender: 'model', id: 'loading', text: 'Analyzing selected document... Please wait.' }]);
+    setIsAiProcessing(true);
+    setProcessingState('Analyzing selected document... Please wait.');
 
     try {
       const formData = new FormData();
@@ -1518,6 +1551,8 @@ export default function PatientDashboard() {
       });
       const data = await response.json();
 
+      setIsAiProcessing(false);
+      setProcessingState(null);
       setMessages(prev => {
         const filtered = prev.filter(m => m.id !== 'loading');
         if (data.success) {
@@ -1528,6 +1563,8 @@ export default function PatientDashboard() {
         return [...filtered, { sender: 'model', text: 'Error analyzing document: ' + (data.error || data.detail || data.message || 'Unknown error') }];
       });
     } catch (err) {
+      setIsAiProcessing(false);
+      setProcessingState(null);
       setMessages(prev => prev.filter(m => m.id !== 'loading'));
       try { addNotification({ type: 'error', message: 'Analysis failed: ' + err.message }); } catch (e) {}
     }
@@ -1542,28 +1579,18 @@ export default function PatientDashboard() {
     navigate('/login');
   };
 
-  if (!user) return <div style={{padding: '50px', textAlign: 'center'}}>Loading App Data...</div>;
+  if (!user) return <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#F5F5F7' }}><div style={{ transform: 'scale(1.3)' }}><AiProcessingCard active={true} status="Loading App Data..." /></div></div>;
 
   const activeSession = aiSessions.find((s) => s.id === (activeAiSessionId || ''));
   const isActiveDefault = !!(activeSession && activeSession.is_default);
 
   return (
     <div className="app-wrapper" style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
-      {/* Top Navigation Bar */}
-      <nav className="top-navbar">
-        <div className="nav-text-logo">
-          DocTalk<span className="logo-sup">AI</span>
+      <div style={{ position: 'absolute', top: '24px', left: '112px', zIndex: 100 }}>
+        <div className="nav-text-logo" style={{ fontSize: '28px', margin: 0 }}>
+          DocTalk<span className="logo-sup" style={{ fontSize: '14px' }}>AI</span>
         </div>
-        <div style={{ flex: 1 }} />
-        <button 
-          onClick={handleLogout} 
-          style={{ background: '#fff', color: '#ff4b5c', border: '1px solid #ff4b5c', padding: '8px 20px', borderRadius: '50px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', fontSize: '11px', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.15)' }}
-          onMouseEnter={(e) => { e.target.style.background = '#ff4b5c'; e.target.style.color = '#fff'; }}
-          onMouseLeave={(e) => { e.target.style.background = '#fff'; e.target.style.color = '#ff4b5c'; }}
-        >
-          Logout
-        </button>
-      </nav>
+      </div>
 
       <div className="profile-container" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', boxSizing: 'border-box' }}>
         {/* Left Icon Sidebar (80px) */}
@@ -1584,10 +1611,10 @@ export default function PatientDashboard() {
             <button
               className={`neu-sidebar-item ${activePanel === 'explain' ? 'active' : ''}`}
               onClick={() => setActivePanelFromNav('explain')}
-              title="AI Analysis"
+              title="AI Chat"
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12A10 10 0 0 1 12 2z"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-              <span className="tooltip">Quick Analysis</span>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
+              <span className="tooltip">AI Chat</span>
             </button>
             <button
               className={`neu-sidebar-item ${activePanel === 'history' ? 'active' : ''}`}
@@ -1633,10 +1660,28 @@ export default function PatientDashboard() {
 
           <div className="neu-sidebar-spacer" />
 
-          <div className="neu-sidebar-bottom">
+          <div className="neu-sidebar-bottom" style={{ position: 'relative' }}>
+            {isSettingsOpen && (
+              <div className="neu-settings-popup">
+                <button 
+                  className="neu-settings-option" 
+                  onClick={() => { setActivePanelFromNav('profile'); setIsSettingsOpen(false); }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                  Profile
+                </button>
+                <button 
+                  className="neu-settings-option logout" 
+                  onClick={() => { handleLogout(); setIsSettingsOpen(false); }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                  Logout
+                </button>
+              </div>
+            )}
             <button
-              className={`neu-sidebar-item ${activePanel === 'profile' ? 'active' : ''}`}
-              onClick={() => setActivePanelFromNav('profile')}
+              className={`neu-sidebar-item ${isSettingsOpen || activePanel === 'profile' ? 'active' : ''}`}
+              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
               title="Settings"
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -1723,7 +1768,7 @@ export default function PatientDashboard() {
          </aside>
 
         {/* Main Content */}
-        <div className="main-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#F5F5F7' }}>
+        <div className="main-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#F5F5F7', paddingTop: activePanel === 'explain' ? '0px' : '80px', position: 'relative' }}>
           {activePanel === 'overview' && (
             <PatientOverview
               user={user}
@@ -1737,9 +1782,9 @@ export default function PatientDashboard() {
             <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
               {/* Chat Area */}
               <div className="neu-chat-area">
-                <div className="neu-chat-header">
+                <div className="neu-chat-header" style={{ paddingLeft: '180px' }}>
                    <div className="neu-chat-header-greeting">
-                    <h2>Quick Analysis</h2>
+                    <h2>AI Health Assistant</h2>
                     <p>*Not a substitute for professional medical advice*</p>
                   </div>
                 </div>
@@ -1812,36 +1857,45 @@ export default function PatientDashboard() {
               
               <div className="neu-analysis-panel">
                 <div className="neu-analysis-panel-header">
-                  <h3>Analyze Medical Files</h3>
+                  <h3>Quick Analysis</h3>
                   <div className="neu-analysis-tabs">
                     <button
                       className={`neu-analysis-tab ${analysisMode === 'upload' ? 'active' : ''}`}
                       onClick={() => { setAnalysisMode('upload'); setUploadedFiles([]); setSelectedDocForAnalysis(null); }}
                     >
-                      Upload
+                      Upload New
                     </button>
                     <button
                       className={`neu-analysis-tab ${analysisMode === 'select' ? 'active' : ''}`}
                       onClick={() => { setAnalysisMode('select'); setUploadedFiles([]); setSelectedDocForAnalysis(null); setAnalysisCurrentFolder(null); loadAssets(); }}
                     >
-                      Documents
+                      My Documents
                     </button>
                   </div>
                 </div>
                 <div className="neu-analysis-content">
                   {analysisMode === 'upload' ? (
                     uploadedFiles.length === 0 ? (
-                      <div className="neu-dropzone" onClick={() => explainUploadInputRef.current?.click()}>
-                        <span className="neu-dropzone-icon">+</span>
-                        <p className="neu-dropzone-title">Upload Medical File</p>
-                        <p className="neu-dropzone-subtitle">PDF, Images, Reports, Prescriptions</p>
-                        <input
-                          type="file"
-                          ref={explainUploadInputRef}
-                          accept=".pdf,.jpg,.jpeg,.png"
-                          onChange={handleAddExplainFile}
-                          style={{ display: 'none' }}
-                        />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <div className="neu-dropzone" onClick={() => explainUploadInputRef.current?.click()}>
+                          <div className="neu-dropzone-circle-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7C5CFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                          </div>
+                          <p className="neu-dropzone-title">Upload Medical File</p>
+                          <p className="neu-dropzone-subtitle">Drag & drop or click to browse</p>
+                          <p className="neu-dropzone-subtitle">PDF, JPG, PNG, DICOM up to 50MB</p>
+                          <input
+                            type="file"
+                            ref={explainUploadInputRef}
+                            accept=".pdf,.jpg,.jpeg,.png,.dcm"
+                            onChange={handleAddExplainFile}
+                            style={{ display: 'none' }}
+                          />
+                        </div>
+                        <button className="neu-select-files-btn" onClick={() => explainUploadInputRef.current?.click()}>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                          Select Files
+                        </button>
                       </div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -2747,7 +2801,7 @@ export default function PatientDashboard() {
           );
 
           return (
-            <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0 }}>
+            <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0, paddingLeft:'32px', paddingRight:'32px' }}>
               {/* header */}
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'22px', flexShrink:0 }}>
                  <div>
@@ -2875,7 +2929,7 @@ export default function PatientDashboard() {
         })()}
 
           {activePanel === 'profile' && (
-            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, paddingLeft: '32px', paddingRight: '32px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }}>
                   <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Poppins", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>Edit Profile</h2>
@@ -2905,7 +2959,7 @@ export default function PatientDashboard() {
           )}
 
           {activePanel === 'documents' && (
-            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, paddingLeft: '32px', paddingRight: '32px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', paddingRight: '70px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', fontFamily: '"Poppins", sans-serif', letterSpacing: '-0.5px' }}>
@@ -3026,11 +3080,13 @@ export default function PatientDashboard() {
           )}
 
           {activePanel === 'xray' && (
-            <XrayAnalyzerPanel />
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingLeft: '32px', paddingRight: '32px', minHeight: 0 }}>
+              <XrayAnalyzerPanel />
+            </div>
           )}
 
           {activePanel === 'appointments' && (
-            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, paddingLeft: '32px', paddingRight: '32px' }}>
 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }}>
                   <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Poppins", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>Appointments Hub</h2>
@@ -3193,8 +3249,9 @@ export default function PatientDashboard() {
           )}
 
           {activePanel === 'docchat' && (
-            <div className="human-chat-wrapper" style={{ display: 'flex', flex: 1, background: '#FFF', borderRadius: '16px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', overflow: 'hidden', border: '1px solid #E2E8F0', minHeight: 0 }}>
-              
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingLeft: '32px', paddingRight: '32px', paddingBottom: '32px', minHeight: 0 }}>
+              <div className="human-chat-wrapper" style={{ display: 'flex', flex: 1, background: '#FFF', borderRadius: '16px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', overflow: 'hidden', border: '1px solid #E2E8F0', minHeight: 0 }}>
+                
               <div className="contact-sidebar" style={{ width: '300px', borderRight: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column', background: '#FAFAFA' }}>
                 <div style={{ padding: '24px', borderBottom: '1px solid #E2E8F0', background: '#FFF' }}>
                   <h2 style={{ margin: 0, fontSize: '11px', color: '#1E293B' }}>My Doctors</h2>
@@ -3303,6 +3360,7 @@ export default function PatientDashboard() {
                   </div>
                 )}
               </div>
+            </div>
             </div>
           )}
         </div>

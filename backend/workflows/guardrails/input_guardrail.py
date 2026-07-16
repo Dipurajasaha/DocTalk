@@ -109,7 +109,7 @@ async def input_guardrail_node(state: UnifiedChatState) -> dict[str, Any]:
             decision = "ALLOW"
             logger.info(f"\n[DEBUG] Guardrail automatically allowed based on core medical terms.")
         else:
-            stopwords = {"explain", "analyze", "show", "tell", "me", "about", "what", "is", "how", "does", "the", "for", "to", "or", "and", "my", "this", "a", "an", "of", "in", "write", "create", "generate", "solve", "can", "you", "i", "want"}
+            stopwords = {"explain", "analyze", "show", "tell", "me", "about", "what", "is", "how", "does", "the", "for", "to", "or", "and", "my", "this", "a", "an", "of", "in", "write", "create", "generate", "solve", "can", "you", "i", "want", "summarize", "summary", "short", "points", "key", "with"}
             tokens = [w for w in words if w not in stopwords]
             
             if not tokens and words:
@@ -139,8 +139,8 @@ async def input_guardrail_node(state: UnifiedChatState) -> dict[str, Any]:
                     for m in recent_messages:
                         role = "USER" if m.type == "human" else "ASSISTANT"
                         content = str(getattr(m, "content", "")).replace('\n', ' ')
-                        if len(content) > 150:
-                            content = content[:147] + "..."
+                        if len(content) > 300:
+                            content = content[:297] + "..."
                         history_lines.append(f"{role}: {content}")
                     history_text = "\n".join(history_lines)
 
@@ -152,11 +152,11 @@ Recent Conversation Context (for reference):
 
 Analyze this new user query: "{text}"
 
-1. Is this query related to healthcare/medical topics, or is it a normal friendly greeting or a valid conversational follow-up to the context? (If yes, it is ALLOWED).
+1. Is this query related to healthcare/medical topics, or is it a normal friendly greeting or a valid conversational follow-up (e.g. "summarize this", "make it shorter", "explain") to the context? (If yes, it is ALLOWED).
 2. Is this query completely irrelevant to the context (e.g. coding, cars, cooking, finance) or malicious? (If yes, it is REJECTED).
 
 Extract 1-3 highly specific ROOT NOUNS or core topical words from the query that define its domain. 
-CRITICAL: If the query is a vague follow-up (like "explain it", "yes", "elaborate") and has no specific nouns, just return an empty array [] for extracted_keywords. Do NOT extract common verbs.
+CRITICAL: If the query is a vague follow-up (like "explain it", "yes", "elaborate", "summarize", "short", "points") and has no specific nouns, just return an empty array [] for extracted_keywords. Do NOT extract common verbs or generic nouns.
 
 Return ONLY a JSON object with this exact structure:
 {{

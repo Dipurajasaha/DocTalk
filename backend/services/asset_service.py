@@ -546,6 +546,21 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
         doc_type = index_data.get("documentType") if isinstance(index_data, dict) else getattr(index_data, "documentType", "")
         print("[DEBUG][DOCUMENT_CLASSIFICATION]", {"document_type": doc_type})
         
+        # Parse document date for history records
+        record_date = asset.createdAt
+        raw_date = index_data.get("documentDate") or index_data.get("document_date")
+        if raw_date and isinstance(raw_date, str):
+            try:
+                import re
+                from datetime import datetime, timezone
+                match = re.search(r"(\d{4}-\d{2}-\d{2})", raw_date)
+                if match:
+                    record_date = datetime.strptime(match.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
+        elif raw_date and hasattr(raw_date, "tzinfo"):
+            record_date = raw_date
+        
         # 6. Extract History / Labs
         try:
             if doc_type == "lab_report":
@@ -555,7 +570,7 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
                     patient_id=str(asset.userId),
                     file_name=str(asset.fileName),
                     extracted_text=extracted_text,
-                    created_at=asset.createdAt
+                    created_at=record_date
                 )
             else:
                 print("[DEBUG][SELECTED_EXTRACTOR]", "PatientHistoryExtractor")
@@ -566,7 +581,7 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
                     document_type=doc_type,
                     report_type=index_data.get("reportType") if isinstance(index_data, dict) else getattr(index_data, "reportType", ""),
                     extracted_text=extracted_text,
-                    created_at=asset.createdAt
+                    created_at=record_date
                 )
             
             for entry in history_entries:
@@ -583,14 +598,14 @@ async def process_asset_background(asset_id: str, file_path: str, mimetype: str,
                 document_type=doc_type,
                 report_type=index_data.get("reportType") if isinstance(index_data, dict) else getattr(index_data, "reportType", ""),
                 extracted_text=extracted_text,
-                created_at=asset.createdAt,
+                created_at=record_date,
             )
             if record_payload is not None:
                 await _upsert_patient_history_record(
                     db=db,
                     patient_id=str(asset.userId),
                     payload=record_payload,
-                    record_date=asset.createdAt,
+                    record_date=record_date,
                     asset_id=asset_id,
                 )
         except Exception as exc:
