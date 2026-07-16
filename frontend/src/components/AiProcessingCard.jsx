@@ -78,8 +78,8 @@ export default function AiProcessingCard({ active, status, timeoutMs = 30000 }) 
         />
         <span
           style={{
-            fontSize: '13px',
-            color: '#64748b',
+            fontSize: '11px',
+            color: '#000000',
             fontWeight: 500,
             lineHeight: 1.4,
           }}

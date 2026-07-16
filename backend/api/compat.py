@@ -260,20 +260,31 @@ async def explain_report(
 
     try:
         category, extracted_text = await _classify_document(temp_path, mime_type, file_name)
-        if category == "XRAY":
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="This file appears to be a medical image (X-ray/scan). Please use the 'Medical Image Analysis' section to analyze X-ray images.",
-            )
 
-        reply = None
-        text = extracted_text.strip()
-        if not text:
-            extracted = await ocr_service.extract_text(temp_path, mime_type=mime_type)
-            text = str(extracted.get("extracted_text") or "").strip()
-        if not text:
-            text = "No readable text could be extracted from the uploaded report."
-        reply = (await _analyze_text_document(text, language=language, title="Report summary", asset_category=asset_category)).get("reply")
+        if category == "XRAY" or mime_type.startswith("image/"):
+            analysis = await xray_analysis_service.analyze_image(temp_path, language=language)
+            reply = {
+                "title": file_name,
+                "description": analysis.get("summary") or analysis.get("analysis") or "",
+                "key_points": _listify_text(analysis.get("findings") or analysis.get("analysis")),
+                "key_findings": _listify_text(analysis.get("findings") or analysis.get("analysis")),
+                "observations": _listify_text(analysis.get("findings") or analysis.get("analysis")),
+                "recommendations": _listify_text(analysis.get("recommendations")),
+                "notes": _listify_text(analysis.get("warnings")),
+                "risks": _listify_text(analysis.get("warnings")),
+                "summary": analysis.get("summary") or analysis.get("analysis") or "",
+                "findings": analysis.get("findings") or analysis.get("analysis") or "",
+                "warnings": analysis.get("warnings") or [],
+                "raw": analysis,
+            }
+        else:
+            text = extracted_text.strip()
+            if not text:
+                extracted = await ocr_service.extract_text(temp_path, mime_type=mime_type)
+                text = str(extracted.get("extracted_text") or "").strip()
+            if not text:
+                text = "No readable text could be extracted from the uploaded report."
+            reply = (await _analyze_text_document(text, language=language, title="Report summary", asset_category=asset_category)).get("reply")
 
         if effective_category == "PRESCRIPTION" and reply is not None:
             medicine_names = await _extract_medicine_names_from_text(text)
@@ -326,7 +337,9 @@ async def analyze_document(
     asset_record = await service.client.medicalasset.find_unique(where={"id": file_id})
     asset_category = getattr(asset_record, "assetCategory", None) if asset_record else None
 
-    plaintext, file_name, mime_type = await service.get_decrypted_asset(current_user.user_id, file_id)
+    extracted_text = getattr(asset_record, "extractedText", None) if asset_record else None
+    mime_type = getattr(asset_record, "fileType", "") if asset_record else ""
+    file_name = getattr(asset_record, "fileName", "document") if asset_record else "document"
 
     suffix = Path(file_name).suffix or ""
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -371,6 +384,8 @@ async def analyze_document(
                 pass
 
         temp_file_path.unlink(missing_ok=True)
+    if extracted_text and extracted_text.strip():
+        text = extracted_text.strip()
         result = await _analyze_text_document(text, language=language, title=file_name, asset_category=asset_category)
 
         if effective_category == "PRESCRIPTION" and result.get("success"):
@@ -382,6 +397,55 @@ async def analyze_document(
                         result["reply"]["medicines"] = medicine_prices
                 except Exception:
                     pass
+    else:
+        plaintext, file_name_from_db, mime_type_from_db = await service.get_decrypted_asset(current_user.user_id, file_id)
+        mime_type = mime_type_from_db
+        file_name = file_name_from_db
+
+        suffix = Path(file_name).suffix or ""
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(plaintext)
+            temp_file_path = Path(tmp.name)
+
+        file_path = temp_file_path
+        
+        if mime_type.startswith("image/"):
+            analysis = await xray_analysis_service.analyze_image(file_path, language=language)
+            temp_file_path.unlink(missing_ok=True)
+            result = {
+                "success": True,
+                "reply": {
+                    "title": file_name,
+                    "description": analysis.get("summary") or analysis.get("analysis") or "",
+                    "key_points": _listify_text(analysis.get("findings") or analysis.get("analysis")),
+                    "key_findings": _listify_text(analysis.get("findings") or analysis.get("analysis")),
+                    "observations": _listify_text(analysis.get("findings") or analysis.get("analysis")),
+                    "recommendations": _listify_text(analysis.get("recommendations")),
+                    "notes": _listify_text(analysis.get("warnings")),
+                    "risks": _listify_text(analysis.get("warnings")),
+                    "summary": analysis.get("summary") or analysis.get("analysis") or "",
+                    "findings": analysis.get("findings") or analysis.get("analysis") or "",
+                    "warnings": analysis.get("warnings") or [],
+                    "raw": analysis,
+                },
+            }
+        else:
+            extracted = await ocr_service.extract_text(file_path, mime_type=mime_type)
+            text = str(extracted.get("extracted_text") or "").strip()
+            if not text:
+                text = f"No readable text could be extracted from {file_name}."
+            temp_file_path.unlink(missing_ok=True)
+            result = await _analyze_text_document(text, language=language, title=file_name, asset_category=asset_category)
+
+            if asset_category == "PRESCRIPTION" and result.get("success"):
+                medicine_names = await _extract_medicine_names_from_text(text)
+                if medicine_names:
+                    try:
+                        medicine_prices = await search_medicine_prices(medicine_names)
+                        if medicine_prices:
+                            result["reply"]["medicines"] = medicine_prices
+                    except Exception:
+                        pass
 
     if ai_session_id and result.get("success"):
         try:

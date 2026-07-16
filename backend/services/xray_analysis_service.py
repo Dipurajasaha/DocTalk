@@ -5,6 +5,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
+
 from ..ai.core_services.llm_client import complete_image_json
 from ..ai.core_services.ocr import ocr_service
 from ..ai.prompts.templates import medical_prompt_service
@@ -33,6 +35,20 @@ class XRayAnalysisService:
         prompt = medical_prompt_service.build_xray_prompt(language=language, context_text=context_text)
         return await self._call_vision_model(path, prompt, metadata=metadata)
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        before_sleep=before_sleep_log(logger, logging.WARNING)
+    )
+    async def _execute_vision_with_retry(self, image_path: Path, prompt: str) -> dict[str, Any]:
+        return await complete_image_json(
+            prompt=prompt,
+            image_path=image_path,
+            model=self.model_name,
+            temperature=0.2,
+            max_output_tokens=1024,
+        )
+
     async def _call_vision_model(
         self,
         image_path: Path,
@@ -41,29 +57,39 @@ class XRayAnalysisService:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         try:
-            parsed = await complete_image_json(
-                prompt=prompt,
-                image_path=image_path,
-                model=self.model_name,
-                temperature=0.2,
-                max_output_tokens=1024,
-            )
+            parsed = await self._execute_vision_with_retry(image_path, prompt)
         except Exception as exc:
-            logger.warning(
-                "X-ray analysis failed; falling back to OCR summary",
-                extra={"component": "xray_analysis", "file_path": str(image_path), "error": str(exc)},
-                exc_info=True,
-            )
+            error_str = str(exc)
+            
+            if "503" in error_str or "UNAVAILABLE" in error_str:
+                logger.error(
+                    "Vision API is experiencing high demand (503 UNAVAILABLE). Retries exhausted. Falling back to OCR.",
+                    extra={"component": "xray_analysis", "file_path": str(image_path)},
+                    exc_info=True,
+                )
+            else:
+                logger.warning(
+                    "X-ray analysis failed; falling back to OCR summary",
+                    extra={"component": "xray_analysis", "file_path": str(image_path), "error": error_str},
+                    exc_info=True,
+                )
+
             fallback_text = await self._fallback_from_ocr(image_path)
             merged_metadata = dict(metadata or {})
             merged_metadata.setdefault("source", "xray_analysis")
             merged_metadata["fallback"] = "ocr"
-            merged_metadata["vision_error"] = str(exc)
-            warnings = ["X-ray analysis fallback used."]
-            if "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc):
+            merged_metadata["vision_error"] = error_str
+            warnings = ["X-ray analysis fallback used due to an API error."]
+            
+            if "503" in error_str or "UNAVAILABLE" in error_str:
+                warnings.append(
+                    "The medical image analysis model is currently experiencing high demand. "
+                    "We used a basic text-extraction fallback. Please try again later for a full image analysis."
+                )
+            elif "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
                 warnings.append(
                     "Gemini vision quota exceeded for the configured model. "
-                    "Try GEMINI_MODEL=gemini-2.5-flash in .env and restart the backend."
+                    "Try GEMINI_MODEL=gemini-1.5-flash in .env and restart the backend."
                 )
             return {
                 "success": True,

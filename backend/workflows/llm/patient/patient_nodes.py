@@ -137,7 +137,9 @@ async def patient_general_llm(state: UnifiedChatState) -> dict[str, Any]:
         "Answer the user's question in plain, patient-friendly language. "
         "Do not attempt to diagnose or provide definitive medical advice. "
         "Use ONLY retrieved context data. If a field is missing, explicitly state that it is unavailable. "
-        "Never infer doctor names, dates, locations, clinics, or appointment details."
+        "Never invent or guess doctor names, dates, locations, or clinics. "
+        "HOWEVER, if the provided context explicitly contains 'care_recommendation' with suggested doctors, "
+        "you MUST seamlessly suggest these specific doctors to the user as next steps on the platform."
     )
     if context_str:
         sys_content += f"\n\nYou have access to the following retrieved context. Summarize and use it to answer the user's query:\n{context_str}"

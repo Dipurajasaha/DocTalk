@@ -1,10 +1,10 @@
-﻿body { margin: 0; padding: 0; }
+body { margin: 0; padding: 0; }
 
 
 .top-navbar { position: sticky; top: 0; z-index: 1000; display: flex;
     align-items: center;
     padding: 12px 24px;
-    background: #ffffff;
+    background: #F5F5F7;
     /* shadow removed */
     height: 70px;
     box-sizing: border-box;
