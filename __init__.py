@@ -1,1 +1,0 @@
-"""DocTalk project package root."""
