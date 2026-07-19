@@ -44,6 +44,7 @@ const normalizePatient = (patient) => ({
 
 export default function CopilotPanel({ patientList = [] }) {
   const [targetPatientId, setTargetPatientId] = useState(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [status, setStatus] = useState('idle');
@@ -263,28 +264,61 @@ export default function CopilotPanel({ patientList = [] }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '16px', border: '1px solid #e2e8f0', borderRadius: '16px', background: 'linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)', boxShadow: '0 12px 28px rgba(15, 23, 42, 0.06)', flexWrap: 'wrap' }}>
+      <div className="neu-flat" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '16px', borderRadius: '18px', flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>Doctor Copilot</div>
           <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>{status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Idle'} {selectedPatientLabel ? `• ${selectedPatientLabel}` : ''}</div>
         </div>
-        <div style={{ minWidth: '280px', flex: '1 1 320px' }}>
-          <select
-            value={targetPatientId || ''}
-            onChange={(event) => setTargetPatientId(event.target.value || null)}
-            style={{ width: '100%', padding: '12px 14px', border: '1px solid #cbd5e1', borderRadius: '12px', background: '#fff', outline: 'none', fontSize: '13px', color: '#0f172a' }}
+          <div 
+            style={{ position: 'relative', minWidth: '280px', flex: '1 1 320px', outline: 'none' }}
+            tabIndex={0}
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget)) {
+                setIsDropdownOpen(false);
+              }
+            }}
           >
-            <option value="">General Medical Chat</option>
-            {normalizedPatients.map((patient) => (
-              <option key={patient.id || patient.name} value={patient.id}>
-                {patient.name}
-              </option>
-            ))}
-          </select>
-        </div>
+            <div
+              className="neu-pressed"
+              style={{ padding: '12px 16px', borderRadius: '12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '500' }}
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            >
+              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {targetPatientId ? (normalizedPatients.find(p => p.id === targetPatientId)?.name || targetPatientId) : 'General Medical Chat'}
+              </span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0, marginLeft: '8px', color: 'var(--text-secondary)' }}><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+            
+            {isDropdownOpen && (
+              <div
+                className="neu-convex"
+                style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '8px', borderRadius: '16px', zIndex: 10, maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', padding: '8px', gap: '4px' }}
+              >
+                <div
+                  style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '13px', color: !targetPatientId ? 'var(--accent-primary)' : 'var(--text-primary)', fontWeight: !targetPatientId ? '700' : '500', borderRadius: '10px', background: !targetPatientId ? 'rgba(123, 97, 255, 0.08)' : 'transparent', transition: 'background 0.2s' }}
+                  onClick={() => { setTargetPatientId(null); setIsDropdownOpen(false); }}
+                  onMouseEnter={(e) => { if (targetPatientId) e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
+                  onMouseLeave={(e) => { if (targetPatientId) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  General Medical Chat
+                </div>
+                {normalizedPatients.map((patient) => (
+                  <div
+                    key={patient.id || patient.name}
+                    style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '13px', color: targetPatientId === patient.id ? 'var(--accent-primary)' : 'var(--text-primary)', fontWeight: targetPatientId === patient.id ? '700' : '500', borderRadius: '10px', background: targetPatientId === patient.id ? 'rgba(123, 97, 255, 0.08)' : 'transparent', transition: 'background 0.2s' }}
+                    onClick={() => { setTargetPatientId(patient.id); setIsDropdownOpen(false); }}
+                    onMouseEnter={(e) => { if (targetPatientId !== patient.id) e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
+                    onMouseLeave={(e) => { if (targetPatientId !== patient.id) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    {patient.name}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: '1px solid #e2e8f0', borderRadius: '18px', background: '#fff', overflow: 'hidden', boxShadow: '0 18px 36px rgba(15, 23, 42, 0.08)' }}>
+      <div className="neu-flat" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', borderRadius: '18px', overflow: 'hidden', padding: 0 }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid #eef2f7', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
           <div>
             <div style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b' }}>Conversation</div>
@@ -293,7 +327,7 @@ export default function CopilotPanel({ patientList = [] }) {
           <div style={{ fontSize: '12px', color: '#64748b' }}>{error || 'Ready'}</div>
         </div>
 
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px', background: 'linear-gradient(180deg, #fbfdff 0%, #f8fafc 100%)' }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px', background: 'transparent' }}>
           {messages.length === 0 && !error && !isAiProcessing && (
             <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '14px' }}>
               Pick a patient or stay in general chat, then send a prompt to the doctor copilot.
@@ -306,7 +340,7 @@ export default function CopilotPanel({ patientList = [] }) {
 
             return (
               <div key={message.id} style={{ display: 'flex', justifyContent: isOutgoing ? 'flex-end' : 'flex-start', marginBottom: '12px' }}>
-                <div style={{ maxWidth: '82%', padding: '12px 14px', borderRadius: '16px', background: isOutgoing ? 'linear-gradient(135deg, #8B7EFF 0%, #6C5CE7 100%)' : '#ffffff', color: isOutgoing ? '#fff' : '#1e293b', border: isOutgoing ? 'none' : '1px solid #e2e8f0', boxShadow: '0 8px 18px rgba(15, 23, 42, 0.06)' }}>
+                <div className={isOutgoing ? 'neu-convex' : 'neu-pressed'} style={{ maxWidth: '82%', padding: '12px 14px', borderRadius: '16px', background: isOutgoing ? 'var(--accent-primary)' : 'transparent', color: isOutgoing ? '#fff' : 'var(--text-primary)', border: 'none' }}>
                   {isAssistant ? (
                     <div style={{ lineHeight: 1.6, fontSize: '14px' }}>
                       <MarkdownMessage text={message.text} />
@@ -326,8 +360,8 @@ export default function CopilotPanel({ patientList = [] }) {
           <div ref={messageEndRef} />
         </div>
 
-        <form onSubmit={handleSubmit} style={{ padding: '14px', borderTop: '1px solid #eef2f7', background: '#fff' }}>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '18px', padding: '10px 10px 10px 14px' }}>
+        <form onSubmit={handleSubmit} style={{ padding: '14px', borderTop: '1px solid var(--border-subtle)', background: 'transparent' }}>
+          <div className="neu-pressed" style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', borderRadius: '18px', padding: '10px 10px 10px 14px' }}>
             <textarea
               value={inputValue}
               onChange={(event) => setInputValue(event.target.value)}
@@ -335,7 +369,7 @@ export default function CopilotPanel({ patientList = [] }) {
               rows={2}
               style={{ flex: 1, resize: 'none', border: 'none', background: 'transparent', outline: 'none', fontSize: '14px', lineHeight: 1.6, color: '#0f172a', minHeight: '48px' }}
             />
-            <button type="submit" style={{ background: '#8B7EFF', color: '#fff', border: 'none', padding: '12px 16px', borderRadius: '12px', cursor: 'pointer', fontWeight: 700, boxShadow: '0 10px 20px rgba(108, 92, 231, 0.22)' }}>
+            <button type="submit" className="neu-btn-accent" style={{ padding: '12px 16px', borderRadius: '12px', cursor: 'pointer', fontWeight: 700 }}>
               Send
             </button>
           </div>

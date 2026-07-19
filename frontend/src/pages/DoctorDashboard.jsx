@@ -231,6 +231,8 @@ export default function DoctorDashboard() {
   const [slotDate, setSlotDate] = useState(formatObjToDate(new Date()));
   const [slotsData, setSlotsData] = useState({});
   const { addNotification } = useNotifications();
+  const [sessionTypeFilterOpen, setSessionTypeFilterOpen] = useState(false);
+  const [sessionTypeFilter, setSessionTypeFilter] = useState('');
 
   const patientList = useMemo(() => {
     const appointments = Array.isArray(dashboardData?.appointments) ? dashboardData.appointments : [];
@@ -599,6 +601,17 @@ export default function DoctorDashboard() {
     }
   }, [patientMessages]);
 
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (!e.target.closest('.settings-dropdown-container')) {
+        const dropdown = document.querySelector('.settings-dropdown-container > div.neu-convex');
+        if (dropdown) dropdown.style.display = 'none';
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // 3. Handle Logout
   const handleLogout = async () => {
     try {
@@ -663,15 +676,15 @@ export default function DoctorDashboard() {
             <div className="doc-value">{dashboardData.total_patients || 0}</div>
           </div>
           <div className="doc-card">
-            <h3 style={{color: '#10b981'}}>Upcoming</h3>
+            <h3 style={{color: 'var(--accent-primary)'}}>Upcoming</h3>
             <div className="doc-value">{dashboardData.upcoming_schedules?.length || 0}</div>
           </div>
           <div className="doc-card">
-            <h3 style={{color: '#f59e0b'}}>Pending Requests</h3>
+            <h3 style={{color: 'var(--accent-primary)'}}>Pending Requests</h3>
             <div className="doc-value">{dashboardData.requests?.length || 0}</div>
           </div>
           <div className="doc-card">
-            <h3 style={{color: '#6366f1'}}>Monthly Revenue</h3>
+            <h3 style={{color: 'var(--accent-primary)'}}>Monthly Revenue</h3>
             <div className="doc-value">₹{(dashboardData.monthly_revenue ?? 0).toLocaleString('en-IN')}</div>
           </div>
         </div>
@@ -687,7 +700,7 @@ export default function DoctorDashboard() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#6B6B6B', fontSize: 13}} dy={10} />
                   <YAxis axisLine={false} tickLine={false} tick={{fill: '#6B6B6B', fontSize: 13}} dx={-10} />
-                  <Tooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'}} />
+                  <Tooltip contentStyle={{borderRadius: '8px', border: 'none', background: 'var(--bg-base)', boxShadow: '6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light)'}} />
                   <Line type="monotone" dataKey="patients" stroke="#6C5CE7" strokeWidth={3} dot={{r: 4, fill: '#6C5CE7', strokeWidth: 2, stroke: '#fff'}} activeDot={{r: 6}} />
                 </LineChart>
               </ResponsiveContainer>
@@ -722,7 +735,7 @@ export default function DoctorDashboard() {
                     {dashboardData.upcoming_schedules?.length > 0 ? new Date(dashboardData.upcoming_schedules[0].scheduled_time).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                   </span>
               </div>
-              <div style={{ background: '#F8FAFC', padding: '4px 12px', borderRadius: '50px', fontSize: '13px', color: '#334155', border: '1px solid #E2E8F0', fontWeight: '500' }}>
+              <div className="neu-convex" style={{ padding: '4px 12px', borderRadius: '50px', fontSize: '13px', color: 'var(--text-secondary)', fontWeight: '500' }}>
                   {dashboardData.upcoming_schedules?.length || 0} Sessions
               </div>
             </div>
@@ -733,8 +746,8 @@ export default function DoctorDashboard() {
                 (() => {
                   const s = dashboardData.upcoming_schedules[0];
                   return (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', background: '#F8FAFC', borderRadius: '12px', padding: '20px 16px', border: '1px solid #E2E8F0' }}>
-                      <div style={{ background: '#E6E3FF', color: '#8B7EFF', padding: '6px 16px', borderRadius: '50px', fontSize: '12px', fontWeight: '700', marginBottom: '10px', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                    <div className="neu-flat" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', borderRadius: '12px', padding: '20px 16px' }}>
+                      <div className="neu-convex" style={{ color: 'var(--accent-primary)', padding: '6px 16px', borderRadius: '50px', fontSize: '12px', fontWeight: '700', marginBottom: '10px', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                         UPCOMING
                       </div>
                       <div style={{ fontSize: '22px', fontWeight: '700', color: '#1E293B', marginBottom: '12px' }}>
@@ -744,15 +757,15 @@ export default function DoctorDashboard() {
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                         {new Date(s.scheduled_time).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} at {new Date(s.scheduled_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                       </div>
-                      <button style={{ background: '#8B7EFF', color: '#fff', border: 'none', borderRadius: '50px', padding: '12px 24px', fontSize: '15px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s', width: '100%', maxWidth: '240px' }}>
+                      <button className="neu-btn-accent" style={{ borderRadius: '50px', padding: '12px 24px', fontSize: '15px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s', width: '100%', maxWidth: '240px' }}>
                         Join Session
                       </button>
                     </div>
                   );
                 })()
               ) : (
-                <div style={{ background: '#F8FAFC', borderRadius: '12px', padding: '24px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', border: '1px solid #E2E8F0' }}>
-                  <div style={{ width: '48px', height: '48px', background: '#E2E8F0', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', color: '#94A3B8' }}>
+                <div className="neu-flat" style={{ borderRadius: '12px', padding: '24px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div className="neu-convex" style={{ width: '48px', height: '48px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', color: 'var(--text-secondary)' }}>
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65  0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                   </div>
                   <span style={{ color: '#64748B', fontSize: '14px', fontWeight: '500' }}>No upcoming sessions</span>
@@ -780,7 +793,7 @@ export default function DoctorDashboard() {
                   <td>{new Date(r.requested_at).toLocaleString()}</td>
                   <td><span className="doc-badge">{String(r.status || '').toUpperCase()}</span></td>
                   <td>
-                    <input type="datetime-local" id={`time-${r.id || r.appointment_id}`} style={{padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: '50px', fontSize: '11px', marginRight: '8px'}} />
+                    <input type="datetime-local" id={`time-${r.id || r.appointment_id}`} className="neu-input" style={{ fontSize: '11px', marginRight: '8px' }} />
                     <button onClick={() => {
                        const t = document.getElementById(`time-${r.id || r.appointment_id}`).value;
                        if(!t) return addNotification && addNotification({ type: 'error', message: 'Select time' });
@@ -795,7 +808,7 @@ export default function DoctorDashboard() {
                            doctorApi.dashboardData(currentDoctorId).then((newData)=>setDashboardData(newData));
                          }
                        });
-                    }} style={{background:'#8B7EFF', color:'#fff', border:'none', padding:'8px 16px', borderRadius:'50px', cursor:'pointer', fontSize:'12px', fontWeight:'600', transition:'0.2s'}}>Accept</button>
+                    }} className="neu-btn-accent" style={{ padding:'8px 16px', borderRadius:'50px', cursor:'pointer', fontSize:'12px', fontWeight:'600', transition:'0.2s' }}>Accept</button>
                   </td>
                 </tr>
               )) : (
@@ -812,31 +825,31 @@ export default function DoctorDashboard() {
     switch(activeTab) {
       case 'dashboard': return renderDashboardTab();
       case 'sessions': return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', background: '#fff', borderRadius: '16px', padding: '24px', minHeight: '80vh', border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minHeight: '100%', flex: 1 }}>
             <h1 className="doc-h1">Manage Sessions</h1>
           {/* Top Tabs */}
           <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', gap: '30px' }}>
             <button 
               onClick={() => setManageSessionTab('upcoming')}
-              style={{ background: 'none', border: 'none', borderBottom: manageSessionTab === 'upcoming' ? '2px solid #8B7EFF' : '2px solid transparent', padding: '10px 0', fontSize: '15px', fontWeight: '500', color: manageSessionTab === 'upcoming' ? '#8B7EFF' : '#64748b', cursor: 'pointer', outline: 'none', transition: 'all 0.2s' }}
+              style={{ background: 'none', border: 'none', borderBottom: manageSessionTab === 'upcoming' ? '2px solid var(--accent-primary)' : '2px solid transparent', padding: '10px 0', fontSize: '15px', fontWeight: '500', color: manageSessionTab === 'upcoming' ? 'var(--accent-primary)' : 'var(--text-secondary)', cursor: 'pointer', outline: 'none', transition: 'all 0.2s' }}
             >
               Upcoming Sessions
             </button>
             <button 
               onClick={() => setManageSessionTab('completed')}
-              style={{ background: 'none', border: 'none', borderBottom: manageSessionTab === 'completed' ? '2px solid #8B7EFF' : '2px solid transparent', padding: '10px 0', fontSize: '15px', fontWeight: '500', color: manageSessionTab === 'completed' ? '#8B7EFF' : '#64748b', cursor: 'pointer', outline: 'none', transition: 'all 0.2s' }}
+              style={{ background: 'none', border: 'none', borderBottom: manageSessionTab === 'completed' ? '2px solid var(--accent-primary)' : '2px solid transparent', padding: '10px 0', fontSize: '15px', fontWeight: '500', color: manageSessionTab === 'completed' ? 'var(--accent-primary)' : 'var(--text-secondary)', cursor: 'pointer', outline: 'none', transition: 'all 0.2s' }}
             >
               Completed Sessions
             </button>
             <button 
               onClick={() => setManageSessionTab('slots')}
-              style={{ background: 'none', border: 'none', borderBottom: manageSessionTab === 'slots' ? '2px solid #8B7EFF' : '2px solid transparent', padding: '10px 0', fontSize: '15px', fontWeight: '500', color: manageSessionTab === 'slots' ? '#8B7EFF' : '#64748b', cursor: 'pointer', outline: 'none', transition: 'all 0.2s' }}
+              style={{ background: 'none', border: 'none', borderBottom: manageSessionTab === 'slots' ? '2px solid var(--accent-primary)' : '2px solid transparent', padding: '10px 0', fontSize: '15px', fontWeight: '500', color: manageSessionTab === 'slots' ? 'var(--accent-primary)' : 'var(--text-secondary)', cursor: 'pointer', outline: 'none', transition: 'all 0.2s' }}
             >
               Manage Slots
             </button>
             <button 
               onClick={() => setManageSessionTab('requests')}
-              style={{ background: 'none', border: 'none', borderBottom: manageSessionTab === 'requests' ? '2px solid #8B7EFF' : '2px solid transparent', padding: '10px 0', fontSize: '15px', fontWeight: '500', color: manageSessionTab === 'requests' ? '#8B7EFF' : '#64748b', cursor: 'pointer', outline: 'none', transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '6px' }}
+              style={{ background: 'none', border: 'none', borderBottom: manageSessionTab === 'requests' ? '2px solid var(--accent-primary)' : '2px solid transparent', padding: '10px 0', fontSize: '15px', fontWeight: '500', color: manageSessionTab === 'requests' ? 'var(--accent-primary)' : 'var(--text-secondary)', cursor: 'pointer', outline: 'none', transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '6px' }}
             >
               Appointment Requests
               {dashboardData?.requests?.length > 0 && <span style={{background: '#f59e0b', color: '#fff', fontSize: '11px', padding: '2px 8px', borderRadius: '50px'}}>{dashboardData.requests.length}</span>}
@@ -846,17 +859,57 @@ export default function DoctorDashboard() {
           {/* Filters Row (Hide for requests/slots tab) */}
           {!['requests', 'slots'].includes(manageSessionTab) && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginTop: '10px' }}>
-                <span style={{ fontSize: '14px', fontWeight: '600', color: '#334155', whiteSpace: 'nowrap' }}>Filter by:</span>
-                <select style={{ padding: '10px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', color: '#475569', minWidth: '180px', width: 'max-content', outline: 'none' }}>
-                  <option value="">Session type</option>
-                  <option value="video">Video Call</option>
-                  <option value="inperson">In-person</option>
-                </select>
-                <div style={{ position: 'relative' }}>
-                  <input type="date" style={{ padding: '9px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', color: '#475569', outline: 'none' }} />
+                <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>Filter by:</span>
+                
+                <div 
+                  style={{ position: 'relative', minWidth: '180px', outline: 'none' }}
+                  tabIndex={0}
+                  onBlur={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget)) {
+                      setSessionTypeFilterOpen(false);
+                    }
+                  }}
+                >
+                  <div
+                    className="neu-pressed"
+                    style={{ padding: '10px 16px', borderRadius: '12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '500' }}
+                    onClick={() => setSessionTypeFilterOpen(!sessionTypeFilterOpen)}
+                  >
+                    <span>
+                      {sessionTypeFilter === 'video' ? 'Video Call' : sessionTypeFilter === 'inperson' ? 'In-person' : 'Session type'}
+                    </span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: sessionTypeFilterOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0, marginLeft: '8px', color: 'var(--text-secondary)' }}><polyline points="6 9 12 15 18 9"></polyline></svg>
+                  </div>
+                  
+                  {sessionTypeFilterOpen && (
+                    <div
+                      className="neu-convex"
+                      style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '8px', borderRadius: '16px', zIndex: 10, overflowY: 'auto', display: 'flex', flexDirection: 'column', padding: '8px', gap: '4px' }}
+                    >
+                      {[
+                        { id: '', label: 'Session type' },
+                        { id: 'video', label: 'Video Call' },
+                        { id: 'inperson', label: 'In-person' }
+                      ].map((opt) => (
+                        <div
+                          key={opt.id}
+                          style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '13px', color: sessionTypeFilter === opt.id ? 'var(--accent-primary)' : 'var(--text-primary)', fontWeight: sessionTypeFilter === opt.id ? '700' : '500', borderRadius: '10px', background: sessionTypeFilter === opt.id ? 'rgba(123, 97, 255, 0.08)' : 'transparent', transition: 'background 0.2s' }}
+                          onClick={() => { setSessionTypeFilter(opt.id); setSessionTypeFilterOpen(false); }}
+                          onMouseEnter={(e) => { if (sessionTypeFilter !== opt.id) e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
+                          onMouseLeave={(e) => { if (sessionTypeFilter !== opt.id) e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          {opt.label}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <button style={{ padding: '10px 20px', borderRadius: '6px', background: '#8B7EFF', color: '#fff', border: 'none', fontSize: '14px', fontWeight: '500', cursor: 'pointer', whiteSpace: 'nowrap' }}>Apply filter</button>
-                <button style={{ padding: '10px 10px', borderRadius: '6px', background: 'none', color: '#64748b', border: 'none', fontSize: '14px', cursor: 'pointer', whiteSpace: 'nowrap' }}>Clear filters</button>
+
+                <div style={{ position: 'relative' }}>
+                  <input type="date" className="neu-pressed" style={{ fontSize: '13px', padding: '10px 16px', borderRadius: '12px', border: 'none', background: 'transparent', outline: 'none', color: 'var(--text-primary)', fontWeight: '500', minWidth: '150px' }} />
+                </div>
+                <button className="neu-btn-accent" style={{ padding: '10px 20px', borderRadius: '12px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', whiteSpace: 'nowrap' }}>Apply filter</button>
+                <button style={{ padding: '10px 10px', borderRadius: '12px', background: 'none', color: 'var(--text-secondary)', border: 'none', fontSize: '13px', fontWeight: '600', cursor: 'pointer', whiteSpace: 'nowrap' }}>Clear filters</button>
               </div>
             )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', marginBottom: '15px' }}>
@@ -864,11 +917,11 @@ export default function DoctorDashboard() {
               {manageSessionTab === 'requests' ? 'Pending Patient Requests' : manageSessionTab === 'slots' ? 'Manage Availability Slots' : 'Patient sessions'}    
             </h3>
             {manageSessionTab === 'slots' && (
-              <div style={{ display: 'flex', gap: '15px', fontSize: '12px', color: '#64748B', alignItems: 'center', background: '#F8FAFC', padding: '8px 15px', borderRadius: '12px', border: '1px solid #E2E8F0' }}>
-                <div style={{ fontWeight: '600', color: '#1E293B', marginRight: '5px' }}>Legend:</div>
-                <span style={{display: 'flex', alignItems: 'center', gap: '6px'}}><div style={{width:'12px', height:'12px', border:'1px dashed #cbd5e1', borderRadius:'3px'}}></div> Uncreated</span>
-                <span style={{display: 'flex', alignItems: 'center', gap: '6px'}}><div style={{width:'12px', height:'12px', background:'#ecfdf5', border:'1px solid #10b981', borderRadius:'3px'}}></div> Open</span>
-                <span style={{display: 'flex', alignItems: 'center', gap: '6px'}}><div style={{width:'12px', height:'12px', background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:'3px'}}></div> Booked</span>
+              <div className="neu-pressed" style={{ display: 'flex', gap: '15px', fontSize: '12px', color: '#64748B', alignItems: 'center', padding: '8px 15px', borderRadius: '12px' }}>
+                <div style={{ fontWeight: '600', color: 'var(--text-primary)', marginRight: '5px' }}>Legend:</div>
+                <span style={{display: 'flex', alignItems: 'center', gap: '6px'}}><div style={{width:'12px', height:'12px', border:'1px dashed var(--border-subtle)', borderRadius:'3px'}}></div> Uncreated</span>
+                <span style={{display: 'flex', alignItems: 'center', gap: '6px'}}><div style={{width:'12px', height:'12px', background:'var(--bg-base)', border:'1px solid var(--accent-primary)', borderRadius:'3px'}}></div> Open</span>
+                <span style={{display: 'flex', alignItems: 'center', gap: '6px'}}><div style={{width:'12px', height:'12px', background:'var(--bg-base)', border:'1px solid var(--border-subtle)', borderRadius:'3px'}}></div> Booked</span>
               </div>
             )}
           </div>
@@ -878,7 +931,7 @@ export default function DoctorDashboard() {
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(250px, 350px) 1fr', gap: '20px', alignItems: 'start' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                 
-                <div className="doc-card" style={{ padding: '0', overflow: 'hidden', border: '1px solid #e2e8f0', borderRadius: '14px', background: '#fff', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+                <div className="doc-card neu-flat" style={{ padding: '0', overflow: 'hidden' }}>
                     <CustomCalendar selectedDate={slotDateObj} onDateSelect={(val) => { setSlotDateObj(val); setSlotDate(formatObjToDate(val)); }} dashboardData={dashboardData} slotsData={slotsData} />
                 </div>
               </div>
@@ -968,16 +1021,16 @@ export default function DoctorDashboard() {
                     }).catch(() => {
                       addNotification && addNotification({ type: 'error', message: 'Failed to save slots' });
                     });
-                  }} style={{ background: '#8B7EFF', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: '50px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>Save Slots</button>
+                  }} className="neu-btn-accent" style={{ padding: '10px 18px', borderRadius: '50px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>Save Slots</button>
                 </div>
               </div>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
               {manageSessionTab === 'requests' ? (
               // Requests view
               dashboardData?.requests?.length > 0 ? dashboardData.requests.map((r, i) => (
-                <div key={i} style={{ position: 'relative', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', background: '#fff' }}>
+                <div key={i} className="neu-flat" style={{ position: 'relative', borderRadius: '12px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', aspectRatio: '2 / 1' }}>
                   <div style={{ position: 'absolute', left: 0, top: '24px', bottom: 'auto', width: '6px', height: '40px', background: '#f59e0b', borderRadius: '0 4px 4px 0' }}></div>
                   
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingLeft: '8px' }}>
@@ -994,7 +1047,7 @@ export default function DoctorDashboard() {
                   </div>
 
                   <div style={{ marginTop: 'auto', paddingTop: '10px', paddingLeft: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <input type="datetime-local" id={`time-manage-${r.appointment_id}`} style={{padding: '8px 12px', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '13px', width: '100%', boxSizing: 'border-box', outline: 'none'}} />
+                    <input type="datetime-local" id={`time-manage-${r.appointment_id}`} className="neu-input" style={{ fontSize: '13px', width: '100%', boxSizing: 'border-box' }} />
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <button onClick={() => {
                         const t = document.getElementById(`time-manage-${r.appointment_id}`).value;
@@ -1005,7 +1058,7 @@ export default function DoctorDashboard() {
                             setSlotsData(hydrateSlotsData(newData.slots || []));
                           });
                         });
-                      }} style={{flex: 1, background:'#10b981', color:'#fff', border:'none', padding:'10px', borderRadius:'8px', cursor:'pointer', fontSize:'13px', fontWeight:'600'}}>Accept</button>
+                      }} className="neu-btn-accent" style={{flex: 1, padding:'10px', borderRadius:'8px', cursor:'pointer', fontSize:'13px', fontWeight:'600'}}>Accept</button>
                       <button onClick={() => {
                         doctorApi.respondToAppointment(r.id || r.appointment_id, { status: 'REJECT', doctorMessage: 'Declined by doctor' }).then((data)=>{
                           if(data && (data.id || data.success)) doctorApi.dashboardData(currentDoctorId).then((newData)=>{
@@ -1023,8 +1076,8 @@ export default function DoctorDashboard() {
             ) : (
               // Upcoming/Completed view
               (manageSessionTab === 'upcoming' ? dashboardData?.upcoming_schedules : dashboardData?.completed_schedules)?.length > 0 ? (manageSessionTab === 'upcoming' ? dashboardData?.upcoming_schedules : dashboardData?.completed_schedules).map((s, i) => (
-                <div key={i} style={{ 
-                  position: 'relative', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', background: '#fff', overflow: 'hidden'
+                <div key={i} className="neu-flat" style={{ 
+                  position: 'relative', borderRadius: '12px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px', overflow: 'hidden', aspectRatio: '2 / 1'
                 }}>
                   {/* Left accent */}
                   <div style={{ position: 'absolute', left: 0, top: '24px', bottom: 'auto', width: '6px', height: '40px', background: manageSessionTab === 'completed' ? '#10b981' : '#8B7EFF', borderRadius: '0 4px 4px 0' }}></div>
@@ -1081,7 +1134,7 @@ export default function DoctorDashboard() {
                             addNotification && addNotification({ type: 'error', message: 'Failed to cancel session' });
                           });
                         }}
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#BE123C', background: '#FFF1F2', border: '1px solid #FCA5A5', borderRadius: '999px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px' }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ef4444', background: 'transparent', border: '1px solid #ef4444', borderRadius: '999px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', padding: '8px 14px' }}
                       >
                         Cancel Session
                       </button>
@@ -1098,23 +1151,23 @@ export default function DoctorDashboard() {
         </div>
       );
       case 'patientchats': return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <div className="doc-section" style={{ display: 'flex', height: '80vh', padding: 0, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', height: '100%' }}>
+            <div className="neu-flat" style={{ display: 'flex', flex: 1, padding: 0, overflow: 'hidden', borderRadius: '18px', minHeight: '500px' }}>
               {/* Patient List Sidebar */}
-          <div style={{ width: '250px', borderRight: '1px solid #eee', background: '#fafafa', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '15px', fontWeight: 'bold', borderBottom: '1px solid #eee' }}>Patients</div>
+          <div style={{ width: '250px', borderRight: '1px solid var(--border-subtle)', background: 'transparent', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '15px', fontWeight: 'bold', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>Patients</div>
             <div style={{ overflowY: 'auto', flex: 1 }}>
               {patientChatList.map(p => (
                 <div 
                   key={p.id} 
                   onClick={() => setActivePatient(p.id)}
                   style={{ 
-                    padding: '12px 15px', cursor: 'pointer', borderBottom: '1px solid #eee',
-                    background: activePatient === p.id ? '#f3f0ff' : 'transparent',
-                    borderLeft: activePatient === p.id ? '4px solid #8B7EFF' : '4px solid transparent'
+                    padding: '12px 15px', cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)',
+                    borderLeft: activePatient === p.id ? '4px solid var(--accent-primary)' : '4px solid transparent'
                   }}
+                  className={activePatient === p.id ? 'neu-pressed' : ''}
                 >
-                  <div style={{ fontWeight: '500', fontSize: '14px', color: '#333' }}>{p.display}</div>
+                  <div style={{ fontWeight: '500', fontSize: '14px', color: 'var(--text-primary)' }}>{p.display}</div>
                   <div style={{ fontSize: '11px', color: p.lastStatus === 'closed' ? 'red' : 'green' }}>{p.lastStatus}</div>
                 </div>
               ))}
@@ -1145,7 +1198,7 @@ export default function DoctorDashboard() {
                 <div ref={patientChatEndRef} />
               </div>
             </div>
-            <form onSubmit={handlePatientChatSubmit} style={{ display: 'flex', padding: '15px', borderTop: '1px solid #eee', gap: '10px', border: `1px solid ${patientInputFocused ? 'rgba(139,126,255,0.35)' : '#e2e8f0'}`, borderRadius: '50px', background: '#fff', boxShadow: patientInputFocused ? '0 0 0 3px rgba(139,126,255,0.12)' : 'none', transition: 'border-color 0.18s ease, box-shadow 0.18s ease' }}>
+            <form onSubmit={handlePatientChatSubmit} className="neu-pressed" style={{ display: 'flex', padding: '10px 10px 10px 15px', margin: '15px', borderRadius: '9999px', gap: '10px' }}>
               <input 
                 type="text" 
                 value={patientMsgInput} onChange={e=>setPatientMsgInput(e.target.value)}
@@ -1153,46 +1206,42 @@ export default function DoctorDashboard() {
                 onBlur={() => setPatientInputFocused(false)}
                 disabled={chatDisabled || !activePatient}
                 placeholder={chatDisabled ? 'Chat closed' : 'Type message...'}
-                style={{ flex: 1, padding: '12px 18px', border: 'none', background: 'transparent', borderRadius: '50px', outline: 'none', fontSize: '14px', lineHeight: '1.5', color: '#0F172A', boxShadow: 'none', caretColor: '#8B7EFF' }}
+                style={{ flex: 1, fontSize: '14px', background: 'transparent', border: 'none', outline: 'none' }}
               />
-              <button disabled={chatDisabled || !activePatient} className="doc-btn doc-btn-primary" style={{ padding: '10px 24px', borderRadius: '50px', background: '#8B7EFF', color: '#fff', border: 'none', fontWeight: '600', cursor: 'pointer' }}>Send</button>
+              <button disabled={chatDisabled || !activePatient} className="neu-btn-accent" style={{ padding: '10px 24px', borderRadius: '50px', cursor: 'pointer', fontWeight: '600' }}>Send</button>
             </form>
           </div>
         </div>
         </div>
       );
       case 'assistant': return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div className="doc-section" style={{ display: 'flex', flexDirection: 'column', height: '80vh', padding: '16px' }}>
-            <CopilotPanel patientList={patientList} />
-          </div>
-        </div>
+        <CopilotPanel patientList={patientList} />
       );
       case 'payments': return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <h1 className="doc-h1">Earnings & Payments</h1>
-          <div className="doc-section" style={{ display: 'flex', flexDirection: 'column' }}>
+          <div className="neu-flat" style={{ display: 'flex', flexDirection: 'column', padding: '24px', borderRadius: '16px' }}>
 
           {/* Summary cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-            <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
-              <div style={{ fontSize: '13px', color: '#6B6B6B', fontWeight: '600', marginBottom: '6px' }}>Total Earnings</div>
-              <div style={{ fontSize: '32px', fontWeight: '700', color: '#0C0C0C' }}>
+            <div className="neu-convex" style={{ padding: '20px', borderRadius: '16px' }}>
+              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: '600', marginBottom: '6px' }}>Total Earnings</div>
+              <div style={{ fontSize: '32px', fontWeight: '700', color: 'var(--text-primary)' }}>
                 {earningsData
                   ? `₹${Math.round(earningsData.total_earnings_paise / 100).toLocaleString('en-IN')}`
                   : '...'}
               </div>
             </div>
-            <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
-              <div style={{ fontSize: '13px', color: '#6B6B6B', fontWeight: '600', marginBottom: '6px' }}>This Month</div>
-              <div style={{ fontSize: '32px', fontWeight: '700', color: '#6366f1' }}>
+            <div className="neu-convex" style={{ padding: '20px', borderRadius: '16px' }}>
+              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: '600', marginBottom: '6px' }}>This Month</div>
+              <div style={{ fontSize: '32px', fontWeight: '700', color: 'var(--accent-primary)' }}>
                 {earningsData
                   ? `₹${Math.round(earningsData.monthly_earnings_paise / 100).toLocaleString('en-IN')}`
                   : '...'}
               </div>
             </div>
-            <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
-              <div style={{ fontSize: '13px', color: '#6B6B6B', fontWeight: '600', marginBottom: '6px' }}>Transactions</div>
+            <div className="neu-convex" style={{ padding: '20px', borderRadius: '16px' }}>
+              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: '600', marginBottom: '6px' }}>Transactions</div>
               <div style={{ fontSize: '32px', fontWeight: '700', color: '#10b981' }}>
                 {earningsData ? earningsData.transactions.length : '...'}
               </div>
@@ -1247,12 +1296,12 @@ export default function DoctorDashboard() {
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <h1 className="doc-h1">Settings</h1>
-            <div className="doc-section" style={{ display: 'flex', flexDirection: 'column' }}>
-            <div style={{ paddingBottom: '20px', borderBottom: '1px solid #f0f0f0', fontWeight: '700', color: '#8B7EFF', fontSize: '18px', marginBottom: '20px' }}>Profile Settings</div>
+            <div className="neu-flat" style={{ display: 'flex', flexDirection: 'column', padding: '24px', borderRadius: '16px' }}>
+            <div style={{ paddingBottom: '20px', borderBottom: '1px solid var(--border-subtle)', fontWeight: '700', color: 'var(--accent-primary)', fontSize: '18px', marginBottom: '20px' }}>Profile Settings</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '600px' }}>
               
               {/* ── Read-Only Fields ── */}
-              <div style={{ background: '#f8fafc', borderRadius: '12px', padding: '16px', border: '1px solid #e2e8f0' }}>
+              <div className="neu-convex" style={{ borderRadius: '12px', padding: '16px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div>
                     <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B', marginBottom: '4px', display: 'block' }}>Doctor ID</label>
@@ -1285,7 +1334,7 @@ export default function DoctorDashboard() {
                 </div>
               </div>
 
-              <div style={{ fontSize: '14px', fontWeight: '700', color: '#2D3748', marginTop: '8px' }}>Editable Fields</div>
+              <div style={{ fontSize: '14px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '8px' }}>Editable Fields</div>
 
               {/* ── Profile Picture ── */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -1293,51 +1342,51 @@ export default function DoctorDashboard() {
                   src={user.profile_pic || getAvatarFallback(user.display_name || user.name || 'Doctor')}
                   alt="Profile"
                   onError={(e) => { e.currentTarget.src = getAvatarFallback(user.display_name || user.name || 'Doctor'); }}
-                  style={{ width: '72px', height: '72px', borderRadius: '50%', objectFit: 'cover', border: '1px solid #e2e8f0' }}
+                  style={{ width: '72px', height: '72px', borderRadius: '50%', objectFit: 'cover', boxShadow: '4px 4px 8px var(--shadow-dark), -4px -4px 8px var(--shadow-light)' }}
                 />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Profile Picture</label>
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>Profile Picture</label>
                   <input
                     type="file"
                     accept="image/*"
                     onChange={handleDoctorProfilePicUpload}
                     disabled={isUploadingProfilePic}
-                    style={{ fontSize: '12px', color: '#475569' }}
+                    style={{ fontSize: '12px', color: 'var(--text-secondary)' }}
                   />
-                  {isUploadingProfilePic && <span style={{ fontSize: '12px', color: '#8B7EFF' }}>Uploading…</span>}
+                  {isUploadingProfilePic && <span style={{ fontSize: '12px', color: 'var(--accent-primary)' }}>Uploading…</span>}
                 </div>
               </div>
 
               {/* ── Editable Fields ── */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Email Address</label>
-                  <input id="doc-setting-email" type="email" defaultValue={user.email || ''} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px', marginTop: '6px', boxSizing: 'border-box' }} />
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>Email Address</label>
+                  <input id="doc-setting-email" className="neu-input" type="email" defaultValue={user.email || ''} style={{ width: '100%', fontSize: '14px', marginTop: '6px' }} />
                 </div>
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Specialization</label>
-                  <select id="doc-setting-specialization" defaultValue={user.specialization || ''} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px', marginTop: '6px', boxSizing: 'border-box', background: '#fff' }}>
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>Specialization</label>
+                  <select id="doc-setting-specialization" className="neu-input" defaultValue={user.specialization || ''} style={{ width: '100%', fontSize: '14px', marginTop: '6px' }}>
                     <option value="">— Select specialization —</option>
                     {specs.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Years of Experience</label>
-                  <input id="doc-setting-experience" type="text" defaultValue={user.experience || ''} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px', marginTop: '6px', boxSizing: 'border-box' }} />
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>Years of Experience</label>
+                  <input id="doc-setting-experience" className="neu-input" type="text" defaultValue={user.experience || ''} style={{ width: '100%', fontSize: '14px', marginTop: '6px' }} />
                 </div>
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Hospital Location</label>
-                  <input id="doc-setting-location" type="text" defaultValue={user.location || user.hospital_location || user.hospitalLocation || ''} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px', marginTop: '6px', boxSizing: 'border-box' }} />
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>Hospital Location</label>
+                  <input id="doc-setting-location" className="neu-input" type="text" defaultValue={user.location || user.hospital_location || user.hospitalLocation || ''} style={{ width: '100%', fontSize: '14px', marginTop: '6px' }} />
                 </div>
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#0C0C0C' }}>Mobile Number</label>
-                  <input id="doc-setting-mobile" type="text" defaultValue={user.mobile || ''} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: '12px', outline: 'none', fontSize: '14px', marginTop: '6px', boxSizing: 'border-box' }} />
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>Mobile Number</label>
+                  <input id="doc-setting-mobile" className="neu-input" type="text" defaultValue={user.mobile || ''} style={{ width: '100%', fontSize: '14px', marginTop: '6px' }} />
                 </div>
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#6C5CE7' }}>💳 Consultation Fee (₹)</label>
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--accent-primary)' }}>💳 Consultation Fee (₹)</label>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
-                    <input id="doc-setting-fee" type="number" min="0" step="50" defaultValue={user.consultation_fee ? Math.round(user.consultation_fee / 100) : ''} placeholder="e.g. 500" style={{ flex: 1, padding: '12px 14px', border: '2px solid #C4B5FD', borderRadius: '12px', outline: 'none', fontSize: '14px', boxSizing: 'border-box', background: '#FDFAFF' }} />
-                    <div style={{ fontSize: '12px', color: '#64748B', minWidth: '160px' }}>Patients pay this amount before an appointment is confirmed. Leave blank for the default (₹500).</div>
+                    <input id="doc-setting-fee" className="neu-input" type="number" min="0" step="50" defaultValue={user.consultation_fee ? Math.round(user.consultation_fee / 100) : ''} placeholder="e.g. 500" style={{ flex: 1, fontSize: '14px' }} />
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', minWidth: '160px' }}>Patients pay this amount before an appointment is confirmed. Leave blank for the default (₹500).</div>
                   </div>
                 </div>
               </div>
@@ -1377,8 +1426,8 @@ export default function DoctorDashboard() {
                       addNotification && addNotification({ type: 'error', message: 'Network error' });
                     }
                   }}
-                  className="doc-btn doc-btn-primary" 
-                  style={{ padding: '12px 24px', borderRadius: '50px', background: '#8B7EFF', color: '#fff', border: 'none', fontWeight: '600', cursor: 'pointer' }}
+                  className="neu-btn-accent" 
+                  style={{ padding: '12px 24px', borderRadius: '50px', cursor: 'pointer', fontWeight: '600' }}
                 >
                   Save Changes
                 </button>
@@ -1395,47 +1444,56 @@ export default function DoctorDashboard() {
   if (!user) return <div style={{padding: '50px', textAlign: 'center'}}>Loading Doctor Dashboard...</div>;
 
   return (
-    <div className="app-wrapper">
-      {/* Top Navigation Bar */}
-      <nav className="top-navbar">
-        <div className="nav-text-logo">
-          DocTalk<span className="logo-sup">AI</span>
-        </div>
-        <div style={{ flex: 1 }} />
-        <button 
-          onClick={handleLogout} 
-          style={{ background: '#fff', color: '#ff4b5c', border: '1px solid #ff4b5c', padding: '8px 20px', borderRadius: '50px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', fontSize: '11px', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
-          onMouseEnter={(e) => { e.target.style.background = '#ff4b5c'; e.target.style.color = '#fff'; }}
-          onMouseLeave={(e) => { e.target.style.background = '#fff'; e.target.style.color = '#ff4b5c'; }}
-        >
-          Logout
-        </button>
-      </nav>
+    <div className="doc-app-wrapper">
+
 
       <div className="doc-layout">
         {/* Sidebar */}
         <div className="doc-sidebar">
-        <img
-          src={user.profile_pic || getAvatarFallback(user.display_name || user.name || 'Doctor')}
-          alt="Profile"
-          onError={(e) => { e.currentTarget.src = getAvatarFallback(user.display_name || user.name || 'Doctor'); }}
-        />
-        <div className="doc-name">{user.display_name}</div>
-        
-        <div className="doc-nav">
-          {['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'settings', 'prescriptions'].map(tab => (
-            <button 
-              key={tab} 
-              onClick={() => setActiveTabFromNav(tab)}
-              className={activeTab === tab ? 'active' : ''}
-              style={tab === 'sessions' ? {textTransform: 'capitalize'} : {}}
-            >
-              {tab === 'patientchats' ? 'Patient Chats' : tab === 'sessions' ? 'Manage Sessions' : tab === 'prescriptions' ? 'Prescriptions' : tab}
-            </button>
-          ))}
-        </div>
+          {/* Logo at the top of the sidebar */}
+          <div className="nav-text-logo" style={{ alignSelf: 'flex-start', marginBottom: '30px' }}>
+            DocTalk<span className="logo-sup">AI</span>
+          </div>
 
-      </div>
+          <img
+            src={user.profile_pic || getAvatarFallback(user.display_name || user.name || 'Doctor')}
+            alt="Profile"
+            onError={(e) => { e.currentTarget.src = getAvatarFallback(user.display_name || user.name || 'Doctor'); }}
+          />
+          <div className="doc-name">{user.display_name}</div>
+          
+          <div className="doc-nav">
+            {['dashboard', 'sessions', 'patientchats', 'assistant', 'payments', 'prescriptions'].map(tab => (
+              <button 
+                key={tab} 
+                onClick={() => setActiveTabFromNav(tab)}
+                className={activeTab === tab ? 'active' : ''}
+                style={tab === 'sessions' ? {textTransform: 'capitalize'} : {}}
+              >
+                {tab === 'patientchats' ? 'Patient Chats' : tab === 'sessions' ? 'Manage Sessions' : tab === 'prescriptions' ? 'Prescriptions' : tab}
+              </button>
+            ))}
+          </div>
+
+          {/* Settings Dropdown at the bottom */}
+          <div style={{ marginTop: 'auto', width: '100%', position: 'relative' }} className="settings-dropdown-container">
+            <button 
+              className="neu-flat"
+              style={{ width: '100%', padding: '12px 18px', borderRadius: '9999px', textTransform: 'capitalize', color: 'var(--text-secondary)', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: '600', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              onClick={(e) => {
+                const dropdown = e.currentTarget.nextElementSibling;
+                dropdown.style.display = dropdown.style.display === 'none' ? 'flex' : 'none';
+              }}
+            >
+              Settings
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            <div style={{ display: 'none', flexDirection: 'column', position: 'absolute', bottom: '100%', left: 0, width: '100%', marginBottom: '8px', borderRadius: '14px', overflow: 'hidden', zIndex: 100 }} className="neu-convex">
+              <button onClick={() => { setActiveTabFromNav('settings'); document.querySelector('.settings-dropdown-container > div').style.display = 'none'; }} style={{ padding: '12px 18px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-primary)', textAlign: 'left', cursor: 'pointer', fontWeight: '500', fontSize: '13px' }}>Profile</button>
+              <button onClick={handleLogout} style={{ padding: '12px 18px', background: 'transparent', border: 'none', color: '#ef4444', textAlign: 'left', cursor: 'pointer', fontWeight: '500', fontSize: '13px' }}>Logout</button>
+            </div>
+          </div>
+        </div>
 
       {/* Main Content */}
       <div className="doc-main">

@@ -565,15 +565,11 @@ async def _run_ai_websocket(
     chat_service = get_chat_service()
 
     # Scope/authorize the session id.
-    # Generic ids (patient_ai/doctor_ai) are scoped to the current user and
-    # auto-created. Explicit ids must be owned by the current user.
-    if ai_session_id in {"patient_ai", "doctor_ai"}:
-        ai_session_id = f"{ai_session_id}_{current_user.user_id}"
-    else:
-        owned = await chat_service.get_owned_ai_session(current_user.user_id, current_user.role, ai_session_id)
-        if owned is None:
-            await websocket.close(code=1008)
-            return
+    # Explicit ids must be owned by the current user.
+    owned = await chat_service.get_owned_ai_session(current_user.user_id, current_user.role, ai_session_id)
+    if owned is None:
+        await websocket.close(code=1008)
+        return
 
     normalized_target_patient_id = str(target_patient_id or "").strip() or None
 
@@ -839,16 +835,13 @@ async def fetch_ai_chat_history(
     target_patient_id: str | None = Query(default=None),
     chat_service: ChatService = Depends(get_chat_service),
 ) -> dict[str, Any]:
-    session_id = str(ai_session_id or "").strip() or ("doctor_ai" if current_user.role == "doctor" else "patient_ai")
-    
-    # ISOLATION FIX: Scope generic ai_session_id by user_id
-    if session_id in {"patient_ai", "doctor_ai"}:
-        session_id = f"{session_id}_{current_user.user_id}"
-    else:
-        owned = await chat_service.get_owned_ai_session(current_user.user_id, current_user.role, session_id)
-        if owned is None:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to access this session")
+    session_id = str(ai_session_id or "").strip()
+    if not session_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Session ID is required")
         
+    owned = await chat_service.get_owned_ai_session(current_user.user_id, current_user.role, session_id)
+    if owned is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to access this session")
     messages = await chat_service.get_ai_chat_history(session_id)
     return {
         "messages": _format_db_messages_for_ws(messages, role=current_user.role),
@@ -861,12 +854,6 @@ async def list_ai_sessions(
     current_user: CurrentUser = Depends(get_current_user),
     chat_service: ChatService = Depends(get_chat_service),
 ) -> list[AiSessionResponse]:
-    # Ensure the default session exists so returning patients always see it.
-    await chat_service.ensure_ai_session(
-        current_user.user_id,
-        current_user.role,
-        f"{'doctor_ai' if current_user.role == 'doctor' else 'patient_ai'}_{current_user.user_id}",
-    )
     sessions = await chat_service.list_ai_sessions(current_user.user_id, current_user.role)
     return [AiSessionResponse.model_validate(item) for item in sessions]
 
@@ -899,7 +886,7 @@ async def delete_ai_session(
 async def patient_ai_websocket(websocket: WebSocket) -> None:
     await _run_ai_websocket(
         websocket,
-        ai_session_id=websocket.query_params.get("ai_session_id") or "patient_ai",
+        ai_session_id=websocket.query_params.get("ai_session_id"),
         expected_role="patient",
     )
 

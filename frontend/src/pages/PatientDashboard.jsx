@@ -124,7 +124,7 @@ export default function PatientDashboard() {
   const [inputMsg, setInputMsg] = useState('');
   const [language, setLanguage] = useState('en');
   const [aiSessions, setAiSessions] = useState([]);
-  const [activeAiSessionId, setActiveAiSessionId] = useState('patient_ai');
+  const [activeAiSessionId, setActiveAiSessionId] = useState('');
   const VALID_PANELS = ['overview', 'explain', 'documents', 'xray', 'appointments', 'docchat', 'history', 'profile'];
 
   const [activePanel, setActivePanel] = useState(() => {
@@ -138,7 +138,9 @@ export default function PatientDashboard() {
 
   const [chatHistoryCollapsed, setChatHistoryCollapsed] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [chatToDelete, setChatToDelete] = useState(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [langDropdownOpen, setLangDropdownOpen] = useState(false);
 
   const setActivePanelFromNav = (panel) => {
     const nextPanel = VALID_PANELS.includes(panel) ? panel : 'explain';
@@ -713,7 +715,7 @@ export default function PatientDashboard() {
 
   const loadChatHistory = async () => {
     try {
-      const sessionId = activeAiSessionId || 'patient_ai';
+      const sessionId = activeAiSessionId;
       const data = await patientApi.getAiChatHistory(sessionId);
       const items = Array.isArray(data?.messages) ? data.messages : [];
       const backendMessages = items.map((item) => {
@@ -752,31 +754,56 @@ export default function PatientDashboard() {
     try {
       const sessions = await patientApi.listAiSessions();
       const list = Array.isArray(sessions) ? sessions : [];
+      if (list.length === 0) {
+        patientApi.createAiSession('New Chat').then(session => {
+          setAiSessions([session]);
+          setActiveAiSessionId(session.id);
+        }).catch(e => {
+          console.error('Failed to auto-create session', e);
+        });
+        return;
+      }
       setAiSessions(list);
-      // Reconcile the active id with a real (user-scoped) session row.
       setActiveAiSessionId((prev) => {
-        if (prev && prev !== 'patient_ai' && prev !== 'doctor_ai' && list.some((s) => s.id === prev)) {
+        if (prev && list.some((s) => s.id === prev)) {
           return prev;
         }
-        const def = list.find((s) => s.is_default) || list[0];
-        return def ? def.id : prev;
+        return list[0]?.id || '';
       });
     } catch (e) {
       console.error('Failed loading AI sessions', e);
     }
   };
 
-  const handleNewChat = async () => {
-    try {
-      const session = await patientApi.createAiSession('');
-      await loadAiSessions();
-      setActiveAiSessionId(session?.id || 'patient_ai');
-      setMessages([]);
-      setActivePanelFromNav('explain');
-    } catch (e) {
+  const handleNewChat = () => {
+    const tempId = `temp-${Date.now()}`;
+    const tempSession = {
+      id: tempId,
+      title: 'New Chat',
+      is_default: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    setAiSessions((prev) => [tempSession, ...prev]);
+    setActiveAiSessionId(tempId);
+    setMessages([]);
+    setActivePanelFromNav('explain');
+
+    patientApi.createAiSession('').then((session) => {
+      setAiSessions((prev) => prev.map((s) => s.id === tempId ? session : s));
+      setActiveAiSessionId((prev) => prev === tempId ? session.id : prev);
+    }).catch((e) => {
       console.error('Failed to create chat', e);
       try { addNotification({ type: 'error', message: 'Could not start a new chat.' }); } catch (_) {}
-    }
+      setAiSessions((prev) => prev.filter((s) => s.id !== tempId));
+      setActiveAiSessionId((prev) => {
+        if (prev === tempId) {
+           return aiSessions[0]?.id || '';
+        }
+        return prev;
+      });
+    });
   };
 
   const handleSelectSession = (e) => {
@@ -786,21 +813,37 @@ export default function PatientDashboard() {
     setMessages([]);
   };
 
-  const handleDeleteSession = async (id) => {
-    const session = aiSessions.find((s) => s.id === id);
-    if (!id || (session && session.is_default)) {
-      try { addNotification({ type: 'error', message: 'The default chat cannot be deleted.' }); } catch (_) {}
+  const handleDeleteSession = (id) => {
+    if (!id) return;
+    if (aiSessions.length <= 1) {
+      try { addNotification({ type: 'error', message: 'You must have at least one chat.' }); } catch (_) {}
       return;
     }
-    if (!window.confirm('Delete this chat? This cannot be undone.')) return;
-    try {
-      await patientApi.deleteAiSession(id);
-      await loadAiSessions();
-      setMessages([]);
-    } catch (e) {
-      console.error('Failed to delete chat', e);
-      try { addNotification({ type: 'error', message: 'Could not delete this chat.' }); } catch (_) {}
+    setChatToDelete(id);
+  };
+
+  const confirmDeleteChat = () => {
+    if (!chatToDelete) return;
+    const id = chatToDelete;
+    setChatToDelete(null);
+    
+    // Optimistic UI update
+    const sessionToRestore = aiSessions.find(s => s.id === id);
+    setAiSessions(prev => prev.filter(s => s.id !== id));
+    if (activeAiSessionId === id) {
+       setMessages([]);
+       setActiveAiSessionId(aiSessions.find(s => s.id !== id)?.id || '');
     }
+
+    patientApi.deleteAiSession(id).then(() => {
+       loadAiSessions();
+    }).catch(e => {
+       console.error('Failed to delete chat', e);
+       try { addNotification({ type: 'error', message: 'Could not delete this chat.' }); } catch (_) {}
+       if (sessionToRestore) {
+           setAiSessions(prev => [...prev, sessionToRestore]);
+       }
+    });
   };
 
   useEffect(() => {
@@ -1252,11 +1295,7 @@ export default function PatientDashboard() {
     }
   };
 
-  useEffect(() => {
-    if (messages.length > 0) {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  }, [messages]);
+  useEffect(() => { if (messages.length > 0) { setTimeout(() => { if (chatEndRef.current) { const container = chatEndRef.current.parentElement; container.scrollTo({ top: container.scrollHeight, behavior: "smooth" }); } }, 150); } }, [messages, activeAiSessionId]);
 
   const handleChatSubmit = async (e) => {
     e.preventDefault();
@@ -1265,6 +1304,8 @@ export default function PatientDashboard() {
     const newMsg = { sender: 'user', text: inputMsg, id: Date.now() };
     setMessages(prev => [...prev, newMsg]);
     setInputMsg('');
+    const textarea = document.getElementById('chat-input-textarea');
+    if (textarea) textarea.style.height = 'auto';
     setIsAiProcessing(true);
     setProcessingState(null);
 
@@ -1427,7 +1468,6 @@ export default function PatientDashboard() {
           rejectOnce(new Error('Assistant websocket closed unexpectedly'));
         };
       });
-      loadAiSessions();
     } catch (err) {
       if (isMounted) {
         const errText = String(err?.message || '');
@@ -1492,7 +1532,9 @@ export default function PatientDashboard() {
         }
 
         formData.append('language', language);
-        formData.append('ai_session_id', activeAiSessionId || 'patient_ai');
+        if (activeAiSessionId) {
+          formData.append('ai_session_id', activeAiSessionId);
+        }
 
         const token = localStorage.getItem('doctalk_token');
         const response = await fetch('/api/explain_report', {
@@ -1540,7 +1582,9 @@ export default function PatientDashboard() {
       const formData = new FormData();
       formData.append('file_id', selectedDocForAnalysis);
       formData.append('language', language);
-      formData.append('ai_session_id', activeAiSessionId || 'patient_ai');
+      if (activeAiSessionId) {
+        formData.append('ai_session_id', activeAiSessionId);
+      }
 
       const token = localStorage.getItem('doctalk_token');
       const response = await fetch('/api/analyze_document', {
@@ -1691,10 +1735,42 @@ export default function PatientDashboard() {
         </nav>
 
         {/* Chat History Sidebar */}
-        <aside className={`neu-chat-history-sidebar ${chatHistoryCollapsed ? 'collapsed' : ''}`}>
-          <div className="neu-chat-history-header">
-            <h3 className="neu-chat-history-title">Chats</h3>
-            <button className="neu-new-chat-btn" onClick={handleNewChat} title="New chat">+</button>
+        <aside className={`neu-chat-history-sidebar flex flex-col ${chatHistoryCollapsed ? 'collapsed' : ''}`}>
+          <div className="neu-chat-history-header flex items-center justify-end mb-6" style={{ padding: '0 8px', marginTop: '12px' }}>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setChatHistoryCollapsed(true)}
+                className="neu-convex-sm flex items-center justify-center"
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  border: 'none',
+                  cursor: 'pointer',
+                  transition: 'all 150ms ease-in-out',
+                }}
+                title="Collapse sidebar"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-secondary)' }}><polyline points="15 18 9 12 15 6"></polyline></svg>
+              </button>
+              <button
+                onClick={handleNewChat}
+                className="neu-btn-accent flex items-center justify-center gap-1.5"
+                style={{
+                  height: '32px',
+                  padding: '0 14px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  fontFamily: 'var(--font-body)',
+                }}
+                title="New chat"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                New Chat
+              </button>
+            </div>
           </div>
           <div className="neu-chat-search">
             <input
@@ -1705,7 +1781,12 @@ export default function PatientDashboard() {
             />
           </div>
            <div className="neu-chat-history-list">
-             {aiSessions
+             {[...aiSessions]
+              .sort((a, b) => {
+                const dateA = new Date(a.updated_at || a.created_at || 0);
+                const dateB = new Date(b.updated_at || b.created_at || 0);
+                return dateB - dateA;
+              })
               .filter((s) => {
                 if (!chatSearchQuery.trim()) return true;
                 const q = chatSearchQuery.toLowerCase();
@@ -1732,22 +1813,23 @@ export default function PatientDashboard() {
                 >
                   <span className="neu-chat-history-item-title">{session.title || 'New Chat'}</span>
                   <span className="neu-chat-history-item-preview">
-                    {session.is_default ? 'Default chat' : 'Medical analysis session'}
+                    {'Medical analysis session'}
                   </span>
                   <span className="neu-chat-history-item-meta">
-                    {session.created_at ? new Date(session.created_at).toLocaleDateString() : ''}
+                    {session.updated_at || session.created_at ? new Date(session.updated_at || session.created_at).toLocaleDateString() : ''}
                   </span>
-                  <button
-                    className="neu-chat-history-delete-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteSession(session.id);
-                    }}
-                    disabled={session.is_default}
-                    title="Delete chat"
-                  >
-                    ×
-                  </button>
+                  {aiSessions.length > 1 && (
+                    <button
+                      className="neu-chat-history-delete-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteSession(session.id);
+                      }}
+                      title="Delete chat"
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
               ))}
             {aiSessions.length === 0 && (
@@ -1756,19 +1838,13 @@ export default function PatientDashboard() {
               </div>
             )}
           </div>
-           <div className="neu-chat-history-footer">
-             <button className="neu-chat-collapse-btn" onClick={() => setChatHistoryCollapsed(!chatHistoryCollapsed)}>
-               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
-               {chatHistoryCollapsed ? 'Expand' : 'Collapse'}
-             </button>
-           </div>
-           <button className="neu-chat-expand-tab" onClick={() => setChatHistoryCollapsed(false)}>
-             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>
-           </button>
-         </aside>
+          <button className="neu-chat-expand-tab" onClick={() => setChatHistoryCollapsed(false)}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>
+          </button>
+        </aside>
 
         {/* Main Content */}
-        <div className="main-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#F5F5F7', paddingTop: activePanel === 'explain' ? '0px' : '80px', position: 'relative' }}>
+        <div className="main-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: 'var(--bg-base)', paddingTop: activePanel === 'explain' ? '0px' : '80px', position: 'relative' }}>
           {activePanel === 'overview' && (
             <PatientOverview
               user={user}
@@ -1824,8 +1900,13 @@ export default function PatientDashboard() {
                 <form className="neu-chat-input-area" onSubmit={handleChatSubmit}>
                   <div className="neu-chat-input-form">
                     <textarea
+                      id="chat-input-textarea"
                       value={inputMsg}
-                      onChange={(e) => setInputMsg(e.target.value)}
+                      onChange={(e) => {
+                        setInputMsg(e.target.value);
+                        e.target.style.height = 'auto';
+                        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                      }}
                       placeholder="Ask AI Health Assistant..."
                       rows={1}
                       onKeyDown={(e) => {
@@ -1836,16 +1917,30 @@ export default function PatientDashboard() {
                       }}
                     />
                     <div className="neu-chat-input-actions">
-                      <select
-                        value={language}
-                        onChange={(e) => setLanguage(e.target.value)}
-                        className="neu-chat-language-select"
-                      >
-                        <option value="en">EN</option>
-                        <option value="es">ES</option>
-                        <option value="hi">HI</option>
-                        <option value="bn">BN</option>
-                      </select>
+                      <div style={{ position: 'relative' }}>
+                        <button
+                          type="button"
+                          className="neu-chat-language-select"
+                          onClick={() => setLangDropdownOpen(!langDropdownOpen)}
+                        >
+                          {language.toUpperCase()}
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: langDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', marginLeft: '2px' }}><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        </button>
+                        {langDropdownOpen && (
+                          <div className="neu-flat" style={{ position: 'absolute', bottom: 'calc(100% + 12px)', right: 0, display: 'flex', flexDirection: 'column', padding: '8px', borderRadius: '12px', gap: '4px', zIndex: 50, minWidth: '80px', background: 'var(--bg-base)' }}>
+                            {[{code: 'en', label: 'EN'}, {code: 'es', label: 'ES'}, {code: 'hi', label: 'HI'}, {code: 'bn', label: 'BN'}].map(lang => (
+                              <button
+                                key={lang.code}
+                                type="button"
+                                onClick={() => { setLanguage(lang.code); setLangDropdownOpen(false); }}
+                                style={{ background: language === lang.code ? 'var(--accent-primary)' : 'transparent', color: language === lang.code ? '#fff' : 'var(--text-secondary)', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', textAlign: 'center', transition: 'all 0.2s' }}
+                              >
+                                {lang.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <button type="submit" className="neu-chat-send-btn" disabled={!inputMsg.trim()}>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                       </button>
@@ -2048,15 +2143,15 @@ export default function PatientDashboard() {
           {activePanel === 'history' && (() => {
             // ── Shared helpers ──────────────────────────────────────────────
             const S = {
-              card:   { background:'#fff', borderRadius:'14px', padding:'20px 24px', boxShadow:'0 2px 12px rgba(0,0,0,0.06)', border:'1px solid #E2E8F0' },
-              label:  { fontSize:'11px', fontWeight:'700', color:'#64748B', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'4px', display:'block' },
-              input:  { padding:'9px 13px', borderRadius:'8px', border:'1px solid #E2E8F0', fontSize:'13px', outline:'none', width:'100%', boxSizing:'border-box', fontFamily:'inherit' },
-              select: { padding:'9px 13px', borderRadius:'8px', border:'1px solid #E2E8F0', fontSize:'13px', outline:'none', width:'100%', boxSizing:'border-box', fontFamily:'inherit', background:'#fff' },
-              addBtn: { padding:'8px 18px', background:'linear-gradient(135deg,#8B7EFF,#6C5CE7)', color:'#fff', border:'none', borderRadius:'50px', cursor:'pointer', fontWeight:'600', fontSize:'12px', display:'inline-flex', alignItems:'center', gap:'5px' },
-              cancelBtn: { padding:'8px 18px', borderRadius:'50px', border:'1px solid #E2E8F0', background:'#fff', cursor:'pointer', fontSize:'12px', fontWeight:'600', color:'#64748B' },
-              saveBtn:   { padding:'8px 22px', borderRadius:'50px', background:'linear-gradient(135deg,#8B7EFF,#6C5CE7)', color:'#fff', border:'none', cursor:'pointer', fontSize:'12px', fontWeight:'600', boxShadow:'0 3px 10px rgba(108,92,231,0.3)' },
-              delBtn:    { padding:'5px 10px', borderRadius:'7px', border:'1px solid #fecaca', background:'#fef2f2', cursor:'pointer', fontSize:'11px', color:'#ef4444', fontWeight:'600' },
-              editBtn:   { padding:'5px 10px', borderRadius:'7px', border:'1px solid #E2E8F0', background:'#F8FAFC', cursor:'pointer', fontSize:'11px', color:'#6C5CE7', fontWeight:'600' },
+              card:   { background:'var(--bg-base)', borderRadius:'24px', padding:'20px 24px', boxShadow:'6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light)', border:'1px solid var(--border-subtle)' },
+              label:  { fontSize:'11px', fontWeight:'700', color:'var(--text-secondary)', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:'4px', display:'block' },
+              input:  { padding:'12px 16px', borderRadius:'9999px', border:'1px solid var(--border-subtle)', fontSize:'13px', outline:'none', width:'100%', boxSizing:'border-box', fontFamily:'inherit', background:'var(--bg-base)', boxShadow:'inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light)' },
+              select: { padding:'12px 16px', borderRadius:'9999px', border:'1px solid var(--border-subtle)', fontSize:'13px', outline:'none', width:'100%', boxSizing:'border-box', fontFamily:'inherit', background:'var(--bg-base)', boxShadow:'inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light)' },
+              addBtn: { padding:'10px 20px', background:'var(--accent-primary)', color:'#fff', border:'none', borderRadius:'50px', cursor:'pointer', fontWeight:'600', fontSize:'12px', display:'inline-flex', alignItems:'center', gap:'5px', transition:'all 0.2s ease', boxShadow:'4px 4px 10px rgba(124,92,255,0.3)' },
+              cancelBtn: { padding:'10px 20px', borderRadius:'50px', border:'1px solid var(--border-subtle)', background:'var(--bg-base)', cursor:'pointer', fontSize:'12px', fontWeight:'600', color:'var(--text-secondary)', boxShadow:'4px 4px 10px var(--shadow-dark), -4px -4px 10px var(--shadow-light)' },
+              saveBtn:   { padding:'10px 24px', borderRadius:'50px', background:'var(--accent-primary)', color:'#fff', border:'none', cursor:'pointer', fontSize:'12px', fontWeight:'600', boxShadow:'4px 4px 10px rgba(124,92,255,0.3)' },
+              delBtn:    { padding:'6px 12px', borderRadius:'9999px', border:'none', background:'var(--bg-base)', cursor:'pointer', fontSize:'11px', color:'var(--accent-tertiary)', fontWeight:'600', boxShadow:'2px 2px 5px var(--shadow-dark), -2px -2px 5px var(--shadow-light)' },
+              editBtn:   { padding:'6px 12px', borderRadius:'9999px', border:'none', background:'var(--bg-base)', cursor:'pointer', fontSize:'11px', color:'var(--accent-primary)', fontWeight:'600', boxShadow:'2px 2px 5px var(--shadow-dark), -2px -2px 5px var(--shadow-light)' },
             };
             const FG = ({ label, children }) => (
               <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
@@ -2936,21 +3031,21 @@ export default function PatientDashboard() {
                 </div>
               </div>
               
-              <div className="profile-edit-container" style={{ display: 'flex', flexDirection: 'column', background: '#FFF', borderRadius: '16px', padding: '32px', overflowY: 'auto', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', maxWidth: '500px', width: '100%', boxSizing: 'border-box' }}>
+              <div className="profile-edit-container neu-convex" style={{ display: 'flex', flexDirection: 'column', borderRadius: '16px', padding: '32px', overflowY: 'auto', maxWidth: '500px', width: '100%', boxSizing: 'border-box' }}>
                 <form onSubmit={handleProfileUpdate} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B' }}>Display Name</label>
-                    <input type="text" name="display_name" defaultValue={user?.name || user?.display_name || ''} style={{ padding: '12px 16px', borderRadius: '8px', border: '1px solid #E2E8F0', outline: 'none', fontSize: '14px', background: '#F8FAFC' }} />
+                    <input type="text" name="display_name" defaultValue={user?.name || user?.display_name || ''} className="neu-input" style={{ fontSize: '14px' }} />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B' }}>Profile Picture</label>
-                    <input type="file" name="profile_pic" accept="image/*" style={{ padding: '12px 16px', borderRadius: '8px', border: '1px solid #E2E8F0', outline: 'none', fontSize: '14px', background: '#F8FAFC' }} />
+                    <input type="file" name="profile_pic" accept="image/*" className="neu-input" style={{ fontSize: '14px' }} />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748B' }}>New Password (leave blank to keep current)</label>
-                    <input type="password" name="password" placeholder="Enter new password..." style={{ padding: '12px 16px', borderRadius: '8px', border: '1px solid #E2E8F0', outline: 'none', fontSize: '14px', background: '#F8FAFC' }} />
+                    <input type="password" name="password" placeholder="Enter new password..." className="neu-input" style={{ fontSize: '14px' }} />
                   </div>
-                  <button type="submit" disabled={isUploadingProfile} style={{ marginTop: '12px', padding: '14px', borderRadius: '50px', background: 'linear-gradient(to right, #D67CFF, #6B5CE7)', color: '#FFF', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', transition: 'all 0.3s', opacity: isUploadingProfile ? 0.7 : 1, boxShadow: '0 4px 12px rgba(107, 92, 231, 0.3)' }}>
+                  <button type="submit" disabled={isUploadingProfile} className="neu-btn-accent" style={{ marginTop: '12px', padding: '14px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', transition: 'all 0.3s', opacity: isUploadingProfile ? 0.7 : 1 }}>
                     {isUploadingProfile ? 'Saving...' : 'Save Profile Changes'}
                   </button>
                 </form>
@@ -2973,11 +3068,11 @@ export default function PatientDashboard() {
                 </div>
                  <div style={{display: 'flex', gap: '10px'}}>
                   <input type="file" id="upload-doc-v2" style={{display: 'none'}} onChange={handleUploadAssetV2} />
-                  <button onClick={() => document.getElementById('upload-doc-v2').click()} style={{ background: '#6C5CE7', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Upload Files</button>
+                  <button onClick={() => document.getElementById('upload-doc-v2').click()} className="neu-btn-accent" style={{ padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Upload Files</button>
                 </div>
               </div>
 
-              <div className="documents-container" style={{ display: 'flex', flexDirection: 'column', flex: 1, background: '#FFF', borderRadius: '16px', padding: '32px', overflowY: 'auto', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', minHeight: 0, boxSizing: 'border-box' }}>
+              <div className="documents-container neu-convex" style={{ display: 'flex', flexDirection: 'column', flex: 1, borderRadius: '16px', padding: '32px', overflowY: 'auto', minHeight: 0, boxSizing: 'border-box' }}>
                 {previewFile && (
                   <FileViewer file={previewFile} onClose={() => setPreviewFile(null)} />
                 )}
@@ -3009,21 +3104,21 @@ export default function PatientDashboard() {
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {currentFolder === null && assets.folders.map((folderName, i) => (
-                    <div key={'f'+i} style={{ display: 'flex', alignItems: 'center', padding: '16px', border: '1px solid #E2E8F0', borderRadius: '12px', background: '#FAFAFA' }}>
-                      <div style={{ width: '40px', height: '40px', background: '#E2E8F0', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '16px', color: '#8B7EFF' }}>
+                    <div key={'f'+i} className="neu-flat" style={{ display: 'flex', alignItems: 'center', padding: '16px', marginBottom: '8px' }}>
+                      <div className="neu-convex" style={{ width: '40px', height: '40px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '16px', color: 'var(--accent-primary)' }}>
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="#8B7EFF"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
                       </div>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: '600', fontSize: '12px', color: '#1E293B', cursor: 'pointer' }} onClick={() => setCurrentFolder(folderName.path)}>{folderName.label}</div>
                         <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>Folder</div>
                       </div>
-                      <button onClick={() => setCurrentFolder(folderName.path)} style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>Open</button>
+                      <button onClick={() => setCurrentFolder(folderName.path)} className="neu-convex" style={{ textDecoration: 'none', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', color: 'var(--text-secondary)' }}>Open</button>
                     </div>
                   ))}
 
                   {assets.files.filter(f => (f.folder || '') === (currentFolder || '')).map((file, i) => (
-                    <div key={'file'+i} style={{ display: 'flex', alignItems: 'center', padding: '16px', border: '1px solid #E2E8F0', borderRadius: '12px', background: '#FFF' }}>
-                      <div style={{ width: '40px', height: '40px', background: file?.asset_kind === 'report' ? '#EEF2FF' : file?.asset_kind === 'prescription' ? '#ECFDF5' : '#F8FAFC', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '16px', color: file?.asset_kind === 'report' ? '#6366F1' : file?.asset_kind === 'prescription' ? '#16A34A' : '#475569' }}>
+                    <div key={'file'+i} className="neu-flat" style={{ display: 'flex', alignItems: 'center', padding: '16px', marginBottom: '8px' }}>
+                      <div className="neu-convex" style={{ width: '40px', height: '40px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '16px', color: file?.asset_kind === 'report' ? '#6366F1' : file?.asset_kind === 'prescription' ? '#16A34A' : 'var(--text-secondary)' }}>
                         {(() => {
                           const kind = String(file?.asset_kind || 'medical_image');
                           const mime = String(file?.mime_type || '').toLowerCase();
@@ -3044,11 +3139,11 @@ export default function PatientDashboard() {
                         <div style={{ fontSize: '10px', color: '#64748B', marginTop: '4px' }}>{file?.folder_label || 'General Uploads'}{file?.uploaded_at ? ` · ${new Date(file.uploaded_at).toLocaleString()}` : ''}</div>
                       </div>
 
-                      <button onClick={() => setPreviewFile(file)} style={{ textDecoration: 'none', padding: '8px 16px', background: '#F1F5F9', color: '#475569', borderRadius: '50px', fontSize: '11px', fontWeight: '600', transition: '0.2s', border: '1px solid #E2E8F0' }} onMouseEnter={(e)=> {e.target.style.background='#8B7EFF'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#F1F5F9'; e.target.style.color='#475569';}}>View</button>
+                      <button onClick={() => setPreviewFile(file)} className="neu-convex" style={{ padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', color: 'var(--text-secondary)' }}>View</button>
                       
-                      <button onClick={() => handleRenameAsset(file)} title="Rename this file" style={{ marginLeft: '8px', border: 'none', background: '#FFFBEB', color: '#D97706', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #FEF3C7' }}>Rename</button>
+                      <button onClick={() => handleRenameAsset(file)} title="Rename this file" className="neu-convex" style={{ marginLeft: '8px', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', color: '#D97706' }}>Rename</button>
 
-                      <button onClick={() => handleDeleteAssetV2(file)} title="Delete this file" style={{ marginLeft: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: '0.2s', border: '1px solid #fecaca' }} onMouseEnter={(e)=> {e.target.style.background='#ef4444'; e.target.style.color='#FFF';}} onMouseLeave={(e)=> {e.target.style.background='#fee2e2'; e.target.style.color='#ef4444';}}>Delete</button>
+                      <button onClick={() => handleDeleteAssetV2(file)} title="Delete this file" className="neu-convex" style={{ marginLeft: '8px', padding: '8px 16px', borderRadius: '50px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', color: 'var(--accent-tertiary)' }}>Delete</button>
                     </div>
                   ))}
 
@@ -3092,20 +3187,20 @@ export default function PatientDashboard() {
                   <h2 style={{ margin: 0, fontSize: '18px', color: '#6C5CE7', fontWeight: 'bold', textAlign: 'left', width: '100%', fontFamily: '"Poppins", system-ui, -apple-system, sans-serif', letterSpacing: '-0.5px' }}>Appointments Hub</h2>
                 </div>
               </div>
-              <div className="appointments-container" style={{ display: 'flex', flexDirection: 'column', flex: 1, background: '#FFF', borderRadius: '16px', padding: '32px', overflowY: 'auto', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', minHeight: 0, boxSizing: 'border-box' }}>
+              <div className="appointments-container neu-convex" style={{ display: 'flex', flexDirection: 'column', flex: 1, borderRadius: '16px', padding: '32px', overflowY: 'auto', minHeight: 0, boxSizing: 'border-box' }}>
               
                 <div style={{ display: 'flex', gap: '40px' }}>
                   <div style={{ flex: 1 }}>
                     <h3 style={{ fontSize: '11px', marginBottom: '24px', color: '#475569', borderBottom: '2px solid #F1F5F9', paddingBottom: '12px' }}>Your Scheduled Sessions</h3>
                     {appointments.length === 0 ? (
-                      <div style={{ padding: '48px 32px', textAlign: 'center', background: '#F8FAFC', borderRadius: '16px', border: '1px dashed #CBD5E1' }}>
+                      <div className="neu-flat" style={{ padding: '48px 32px', textAlign: 'center', borderRadius: '16px', border: '1px dashed var(--border-subtle)' }}>
                         <div style={{ fontSize: '20px', marginBottom: '16px' }}></div>
                         <p style={{ color: '#64748B', margin: 0, fontSize: '11px' }}>No upcoming appointments scheduled.</p>
                       </div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         {appointments.map((appt, i) => (
-                          <div key={i} className="session-card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', background: '#FFF', border: `1px solid ${String(appt.status || '').toUpperCase() === 'PAYMENT_PENDING' ? '#FED7AA' : '#E2E8F0'}`, borderRadius: '16px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', borderLeft: `4px solid ${String(appt.status || '').toUpperCase() === 'CONFIRMED' ? '#22c55e' : String(appt.status || '').toUpperCase() === 'PAYMENT_PENDING' ? '#f97316' : String(appt.status || '').toUpperCase() === 'REJECTED' || String(appt.status || '').toUpperCase() === 'CANCELLED' ? '#ef4444' : '#8B7EFF'}` }}>
+                          <div key={i} className="session-card neu-flat" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', border: `1px solid ${String(appt.status || '').toUpperCase() === 'PAYMENT_PENDING' ? '#FED7AA' : 'var(--border-subtle)'}`, borderRadius: '16px', borderLeft: `4px solid ${String(appt.status || '').toUpperCase() === 'CONFIRMED' ? '#22c55e' : String(appt.status || '').toUpperCase() === 'PAYMENT_PENDING' ? '#f97316' : String(appt.status || '').toUpperCase() === 'REJECTED' || String(appt.status || '').toUpperCase() === 'CANCELLED' ? '#ef4444' : 'var(--accent-primary)'}` }}>
                             <div>
                               <strong style={{ fontSize: '11px', color: '#1E293B' }}>Dr. {appt.doctor_display}</strong>
                               <div style={{ fontSize: '11px', color: '#64748B', marginTop: '6px' }}>Reason: {appt.reason}</div>
@@ -3130,13 +3225,14 @@ export default function PatientDashboard() {
                                   type="button"
                                   onClick={() => handlePayNow(appt)}
                                   disabled={paymentProcessing}
-                                  style={{ padding: '8px 14px', borderRadius: '50px', border: 'none', background: 'linear-gradient(135deg, #f97316, #ea580c)', color: '#FFF', fontSize: '10px', fontWeight: '700', cursor: paymentProcessing ? 'not-allowed' : 'pointer', boxShadow: '0 4px 12px rgba(249,115,22,0.3)' }}
+                                  className="neu-btn-accent"
+                                  style={{ padding: '8px 14px', background: '#f97316', fontSize: '10px', cursor: paymentProcessing ? 'not-allowed' : 'pointer' }}
                                 >
                                   {paymentProcessing ? '...' : '💳 Pay Now'}
                                 </button>
                               )}
                               {String(appt.status || '').toUpperCase() !== 'CANCELLED' && String(appt.status || '').toUpperCase() !== 'COMPLETED' && String(appt.status || '').toUpperCase() !== 'REJECTED' && (
-                                <button type="button" onClick={() => handleCancelAppointment(appt.id)} style={{ padding: '8px 14px', borderRadius: '50px', border: '1px solid #FCA5A5', background: '#FFF1F2', color: '#BE123C', fontSize: '10px', fontWeight: '700', cursor: 'pointer' }}>
+                                <button type="button" onClick={() => handleCancelAppointment(appt.id)} className="neu-convex" style={{ padding: '8px 14px', borderRadius: '50px', color: 'var(--accent-tertiary)', fontSize: '10px', fontWeight: '700', cursor: 'pointer' }}>
                                   Cancel
                                 </button>
                               )}
@@ -3149,14 +3245,14 @@ export default function PatientDashboard() {
 
                   <div style={{ flex: 1 }}>
                     <h3 style={{ fontSize: '11px', marginBottom: '24px', color: '#475569', borderBottom: '2px solid #F1F5F9', paddingBottom: '12px' }}>Book New Appointment</h3>
-                    <form onSubmit={handleInitiatePayment} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', padding: '20px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '16px', marginBottom: '24px' }}>
+                    <form onSubmit={handleInitiatePayment} className="neu-flat" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', padding: '20px', borderRadius: '16px', marginBottom: '24px' }}>
                       <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '10px' }}>
                         <button type="button" onClick={() => setBookingMode('direct')} style={{ flex: 1, padding: '10px 14px', borderRadius: '999px', border: bookingMode === 'direct' ? 'none' : '1px solid #CBD5E1', background: bookingMode === 'direct' ? '#6C5CE7' : '#FFF', color: bookingMode === 'direct' ? '#FFF' : '#475569', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>Pick a Time</button>
                         <button type="button" onClick={() => setBookingMode('open')} style={{ flex: 1, padding: '10px 14px', borderRadius: '999px', border: bookingMode === 'open' ? 'none' : '1px solid #CBD5E1', background: bookingMode === 'open' ? '#6C5CE7' : '#FFF', color: bookingMode === 'open' ? '#FFF' : '#475569', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>Send Open Request</button>
                       </div>
                       <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569' }}>
                         Doctor
-                        <select value={appointmentDraft.doctor_id} onChange={e => setAppointmentDraft(prev => ({ ...prev, doctor_id: e.target.value }))} style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF' }}>
+                        <select value={appointmentDraft.doctor_id} onChange={e => setAppointmentDraft(prev => ({ ...prev, doctor_id: e.target.value }))} className="neu-input" style={{ fontSize: '11px' }}>
                           <option value="">Select a doctor</option>
                           {doctors.map(doc => {
                             const doctorId = doc.doctor_id || doc.id;
@@ -3168,7 +3264,7 @@ export default function PatientDashboard() {
                       {bookingMode === 'direct' ? (
                         <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569' }}>
                           Available Slots
-                          <select value={selectedSlotId} onChange={e => setSelectedSlotId(e.target.value)} disabled={!appointmentDraft.doctor_id || slotLoading} style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF' }}>
+                          <select value={selectedSlotId} onChange={e => setSelectedSlotId(e.target.value)} disabled={!appointmentDraft.doctor_id || slotLoading} className="neu-input" style={{ fontSize: '11px' }}>
                             <option value="">{slotLoading ? 'Loading slots...' : 'Choose an available slot'}</option>
                             {availableSlots.map(slot => (
                               <option key={slot.id} value={slot.id}>{renderSlotLabel(slot)}</option>
@@ -3182,11 +3278,11 @@ export default function PatientDashboard() {
                       )}
                       <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569' }}>
                         Reason
-                        <input type="text" value={appointmentDraft.reason} onChange={e => setAppointmentDraft(prev => ({ ...prev, reason: e.target.value }))} placeholder="General consultation" style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF' }} />
+                        <input type="text" value={appointmentDraft.reason} onChange={e => setAppointmentDraft(prev => ({ ...prev, reason: e.target.value }))} placeholder="General consultation" className="neu-input" style={{ fontSize: '11px' }} />
                       </label>
                       <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#475569', gridColumn: '1 / -1' }}>
                         Note
-                        <textarea value={appointmentDraft.note} onChange={e => setAppointmentDraft(prev => ({ ...prev, note: e.target.value }))} placeholder="Optional context for the doctor" rows="3" style={{ padding: '10px 12px', border: '1px solid #E2E8F0', borderRadius: '12px', fontSize: '11px', background: '#FFF', resize: 'vertical' }} />
+                        <textarea value={appointmentDraft.note} onChange={e => setAppointmentDraft(prev => ({ ...prev, note: e.target.value }))} placeholder="Optional context for the doctor" rows="3" className="neu-input" style={{ fontSize: '11px', resize: 'vertical' }} />
                       </label>
                       {appointmentDraft.doctor_id && (() => {
                         const selDoc = doctors.find(d => String(d.doctor_id || d.id) === String(appointmentDraft.doctor_id));
@@ -3202,7 +3298,8 @@ export default function PatientDashboard() {
                         <button
                           type="submit"
                           disabled={bookingInProgress || paymentProcessing || (bookingMode === 'direct' && (!selectedSlotId || slotLoading))}
-                          style={{ padding: '12px 24px', borderRadius: '999px', border: 'none', background: bookingInProgress || paymentProcessing || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? '#C4B5FD' : 'linear-gradient(135deg, #8B7EFF, #6C5CE7)', color: '#FFF', fontSize: '11px', fontWeight: '700', cursor: bookingInProgress || paymentProcessing || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? 'not-allowed' : 'pointer', boxShadow: '0 8px 18px rgba(139,126,255,0.28)', display: 'flex', alignItems: 'center', gap: '6px' }}
+                          className="neu-btn-accent"
+                          style={{ padding: '12px 24px', borderRadius: '999px', fontSize: '11px', cursor: bookingInProgress || paymentProcessing || (bookingMode === 'direct' && (!selectedSlotId || slotLoading)) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
                         >
                           {bookingInProgress ? 'Creating Order…' : paymentProcessing ? 'Processing…' : '💳 Proceed to Pay'}
                         </button>
@@ -3215,7 +3312,7 @@ export default function PatientDashboard() {
                         const feePaise = doc.consultation_fee || 0;
                         const isSelected = appointmentDraft.doctor_id === doctorId;
                         return (
-                          <div key={doctorId} style={{ padding: '24px', border: `1px solid ${isSelected ? '#C4B5FD' : '#E2E8F0'}`, borderRadius: '16px', background: isSelected ? '#F3F0FF' : '#F8FAFC', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', transition: 'all 0.2s', boxShadow: isSelected ? '0 4px 16px rgba(108,92,231,0.15)' : 'none' }} onMouseEnter={(e) => e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.07)'} onMouseLeave={(e) => e.currentTarget.style.boxShadow=isSelected ? '0 4px 16px rgba(108,92,231,0.15)' : 'none'}>
+                          <div key={doctorId} className={isSelected ? 'neu-convex' : 'neu-flat'} style={{ padding: '24px', borderRadius: '16px', border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', transition: 'all 0.2s' }}>
                             <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: isSelected ? '#DDD6FE' : '#E2E8F0', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>👨‍⚕️</div>
                             <div style={{ fontWeight: '700', fontSize: '11px', color: '#1E293B', marginBottom: '2px' }}>Dr. {doc.name}</div>
                             <div style={{ fontSize: '10px', color: '#64748B', marginBottom: '6px' }}>{doc.category}</div>
@@ -3223,7 +3320,7 @@ export default function PatientDashboard() {
                               ? <div style={{ fontSize: '12px', fontWeight: '800', color: '#6C5CE7', marginBottom: '12px', background: '#EDE9FE', padding: '3px 10px', borderRadius: '50px' }}>₹{(feePaise / 100).toFixed(0)}</div>
                               : <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '12px' }}>Fee not set</div>
                             }
-                            <button onClick={() => handleSelectDoctorForAppointment(doctorId)} style={{ width: '100%', background: isSelected ? '#6C5CE7' : '#8B7EFF', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '50px', cursor: 'pointer', fontSize: '11px', fontWeight: '600', transition: 'all 0.2s' }}>{isSelected ? '✓ Selected' : 'Select Doctor'}</button>
+                            <button type="button" onClick={() => handleSelectDoctorForAppointment(doctorId)} className={isSelected ? 'neu-btn-accent' : 'neu-convex'} style={{ width: '100%', padding: '10px 16px', borderRadius: '50px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>{isSelected ? '✓ Selected' : 'Select Doctor'}</button>
                           </div>
                         );
                       })}
@@ -3250,10 +3347,10 @@ export default function PatientDashboard() {
 
           {activePanel === 'docchat' && (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingLeft: '32px', paddingRight: '32px', paddingBottom: '32px', minHeight: 0 }}>
-              <div className="human-chat-wrapper" style={{ display: 'flex', flex: 1, background: '#FFF', borderRadius: '16px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', overflow: 'hidden', border: '1px solid #E2E8F0', minHeight: 0 }}>
+              <div className="human-chat-wrapper neu-convex" style={{ display: 'flex', flex: 1, borderRadius: '24px', overflow: 'hidden', minHeight: 0 }}>
                 
-              <div className="contact-sidebar" style={{ width: '300px', borderRight: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column', background: '#FAFAFA' }}>
-                <div style={{ padding: '24px', borderBottom: '1px solid #E2E8F0', background: '#FFF' }}>
+              <div className="contact-sidebar" style={{ width: '300px', borderRight: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', background: 'var(--bg-base)' }}>
+                <div style={{ padding: '24px', borderBottom: '1px solid var(--border-subtle)' }}>
                   <h2 style={{ margin: 0, fontSize: '11px', color: '#1E293B' }}>My Doctors</h2>
                 </div>
                 <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -3264,7 +3361,7 @@ export default function PatientDashboard() {
                       <div 
                         key={doctorId || d.name} 
                         onClick={() => setActiveDocChat(doctorId)}
-                        style={{ padding: '16px 24px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', background: activeDocChat === doctorId ? '#F3F0FF' : 'transparent', borderLeft: activeDocChat === doctorId ? '4px solid #8B7EFF' : '4px solid transparent', display: 'flex', alignItems: 'center', gap: '16px' }}
+                        style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer', background: activeDocChat === doctorId ? 'var(--shadow-light)' : 'transparent', borderLeft: activeDocChat === doctorId ? '4px solid var(--accent-primary)' : '4px solid transparent', display: 'flex', alignItems: 'center', gap: '16px' }}
                       >
                         <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', position: 'relative' }}>
                           <div style={{ position: 'absolute', bottom: 0, right: 0, width: '12px', height: '12px', background: '#22C55E', borderRadius: '50%', border: '2px solid #FFF' }}></div>
@@ -3280,10 +3377,10 @@ export default function PatientDashboard() {
                 </div>
               </div>
 
-              <div className="active-conversation" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#FFF' }}>
+              <div className="active-conversation" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-base)' }}>
                 {activeDocChat ? (
                   <>
-                    <div className="conversation-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid #E2E8F0', height: '80px', boxSizing: 'border-box' }}>
+                    <div className="conversation-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid var(--border-subtle)', height: '80px', boxSizing: 'border-box' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                         <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}></div>
                         <div>
@@ -3292,12 +3389,12 @@ export default function PatientDashboard() {
                           <div style={{ fontSize: '10px', color: '#94A3B8' }}>{activeConsultationId ? `Consultation ${activeConsultationId}` : 'Waiting for consultation'}</div>
                         </div>
                       </div>
-                      <div style={{ color: '#8B7EFF', cursor: 'pointer', fontWeight: '600', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', background: '#F3F0FF', borderRadius: '50px' }}>
+                      <div className="neu-convex" style={{ color: 'var(--accent-primary)', cursor: 'pointer', fontWeight: '600', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '50px' }}>
                         Book Video Call
                       </div>
                     </div>
                     
-                    <div style={{ flex: 1, padding: '24px 28px 24px 28px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '18px', background: '#F8FAFC' }}>
+                    <div style={{ flex: 1, padding: '24px 28px 24px 28px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '18px', background: 'transparent' }}>
                       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '8px' }}>
                         <button onClick={handleLoadOlderDocMessages} style={{ fontSize: '12px', padding: '7px 14px', borderRadius: '999px', border: '1px solid #E2E8F0', background: '#FFF', color: '#334155', fontWeight: '600' }}>Load older messages</button>
                       </div>
@@ -3307,7 +3404,7 @@ export default function PatientDashboard() {
                         return (
                           <div key={m.id || idx} style={{ display: 'flex', flexDirection: 'column', alignItems: isPatient ? 'flex-end' : 'flex-start', gap: '4px' }}>
                             <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '2px', width: '100%', justifyContent: isPatient ? 'flex-end' : 'flex-start' }}>
-                              <div style={{ maxWidth: '74%' , background: isPatient ? '#8B7EFF' : '#FFF', color: isPatient ? '#FFF' : '#1E293B', padding: '14px 16px', borderRadius: isPatient ? '18px 18px 4px 18px' : '18px 18px 18px 4px', boxShadow: '0 2px 8px rgba(15,23,42,0.06)', border: isPatient ? '1px solid rgba(139,126,255,0.18)' : '1px solid #E2E8F0' }}>
+                              <div className={`neu-chat-bubble ${isPatient ? 'user' : 'assistant'}`}>
                                 <div style={{ fontSize: '14px', lineHeight: '1.55', fontWeight: '500', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.text}</div>
                                 {m.attachments && m.attachments.length > 0 && (
                                   <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -3334,7 +3431,7 @@ export default function PatientDashboard() {
                     </div>
 
                     <div style={{ padding: '12px 32px 32px 32px', background: 'transparent', flexShrink: 0 }}>
-                      <form onSubmit={handleDocChatSubmit} className="rich-input-row" style={{ display: 'flex', alignItems: 'center', padding: '8px 8px 8px 24px', background: '#F1F5F9', borderRadius: '50px', border: `1px solid ${docInputFocused ? 'rgba(139, 126, 255, 0.45)' : '#E2E8F0'}`, boxShadow: docInputFocused ? '0 0 0 3px rgba(139, 126, 255, 0.10), 0 8px 24px rgba(0,0,0,0.06)' : '0 8px 24px rgba(0,0,0,0.06)', transition: 'border-color 0.18s ease, box-shadow 0.18s ease' }}>
+                      <form onSubmit={handleDocChatSubmit} className="neu-chat-input-form" style={{ borderRadius: '50px', paddingLeft: '24px' }}>
                         <label title="Attach media" style={{ color: '#64748B', fontWeight: '300', fontSize: '18px', marginRight: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                           <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif" onChange={handleDocAttachChange} style={{ display: 'none' }} />
                           +
@@ -3364,7 +3461,38 @@ export default function PatientDashboard() {
             </div>
           )}
         </div>
-      </div>
+        </div>
+      
+        {/* Delete Confirmation Modal */}
+        {chatToDelete && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(255, 255, 255, 0.4)', backdropFilter: 'blur(8px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div className="neu-flat" style={{ width: '380px', padding: '32px', display: 'flex', flexDirection: 'column', gap: '24px', alignItems: 'center', textAlign: 'center' }}>
+              <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: '#FEE2E2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#EF4444' }}>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+              </div>
+              <div>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>Delete Chat?</h3>
+                <p style={{ margin: 0, fontSize: '14px', color: 'var(--text-secondary)' }}>Are you sure you want to delete this chat? This action cannot be undone.</p>
+              </div>
+              <div style={{ display: 'flex', gap: '16px', width: '100%', marginTop: '8px' }}>
+                <button 
+                  className="neu-flat"
+                  style={{ flex: 1, padding: '14px 0', borderRadius: '12px', border: 'none', cursor: 'pointer', fontWeight: 600, color: 'var(--text-secondary)' }}
+                  onClick={() => setChatToDelete(null)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  className="neu-btn-accent"
+                  style={{ flex: 1, padding: '14px 0', borderRadius: '12px', border: 'none', cursor: 'pointer', fontWeight: 600, background: 'linear-gradient(145deg, #EF4444, #DC2626)', boxShadow: '4px 4px 10px rgba(239, 68, 68, 0.3)' }}
+                  onClick={confirmDeleteChat}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
     </div>
   );
 }

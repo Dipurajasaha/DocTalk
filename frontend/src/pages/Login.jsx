@@ -349,7 +349,7 @@ export default function Login() {
               ))}
             </div>
 
-            <div key={view + category} className="fade-in">
+            <div key={view === 'login' ? view : view + category} className="fade-in">
 
               {/* ── Login form ── */}
               {view === 'login' && (
@@ -369,12 +369,14 @@ export default function Login() {
                         style={fieldErrors.lp ? { borderColor:'#ef4444' } : {}} />
                       <FieldError msg={fieldErrors.lp} />
                     </div>
-                    {category === 'admin' && (
-                      <div className="input-field">
-                        <label>MFA Code</label>
-                        <input type="text" name="mfa_code" placeholder="6-digit code if MFA is enabled" inputMode="numeric" />
+                    <div className={`mfa-wrapper ${category === 'admin' ? 'open' : ''}`}>
+                      <div className="mfa-inner">
+                        <div className="input-field">
+                          <label>MFA Code</label>
+                          <input type="text" name="mfa_code" placeholder="6-digit code if MFA is enabled" inputMode="numeric" />
+                        </div>
                       </div>
-                    )}
+                    </div>
 
                     {/* Forgot Password link */}
                     <div style={{ textAlign:'right', marginTop:'-8px' }}>

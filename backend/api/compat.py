@@ -102,13 +102,15 @@ async def _resolve_analysis_session_id(
     only honored when owned by the current user; otherwise we fall back to the
     default session (never leak into another user's session).
     """
-    base = "doctor_ai" if str(role or "").strip().lower() == "doctor" else "patient_ai"
-    default_id = f"{base}_{user_id}"
     provided = str(provided_id or "").strip()
-    if not provided or provided in {"patient_ai", "doctor_ai"}:
-        return default_id
-    owned = await chat_service.get_owned_ai_session(user_id, role, provided)
-    return provided if owned is not None else default_id
+    if provided:
+        owned = await chat_service.get_owned_ai_session(user_id, role, provided)
+        if owned is not None:
+            return provided
+    
+    # Create a new session on the fly if none provided or valid
+    new_session = await chat_service.create_ai_session(user_id, role, title="Document Analysis")
+    return new_session["id"]
 
 
 async def _extract_medicine_names_from_text(text: str) -> list[str]:

@@ -136,7 +136,7 @@ export default function RazorpayCheckout({
         appointment_id: order.appointment_id,
       },
       theme: {
-        color: '#6C5CE7',
+        color: '#8B7EFF',
       },
       modal: {
         ondismiss: () => {

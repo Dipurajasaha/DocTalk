@@ -128,7 +128,8 @@ export default function XrayAnalyzerPanel() {
           <select
             value={language}
             onChange={(event) => setLanguage(event.target.value)}
-            style={{ width: '100%', padding: '10px 16px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', fontSize: '11px', backgroundColor: '#FFF', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
+            className="neu-input"
+            style={{ width: '100%', fontSize: '11px', outline: 'none' }}
           >
             <option value="en">English</option>
             <option value="es">Spanish</option>
@@ -139,10 +140,10 @@ export default function XrayAnalyzerPanel() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 340px) minmax(0, 1fr)', gap: '24px', flex: 1, minHeight: 0 }}>
-        <div style={{ background: '#FFF', borderRadius: '16px', padding: '24px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8' }}>
+        <div className="neu-convex" style={{ borderRadius: '16px', padding: '24px' }}>
           <h4 style={{ margin: '0 0 14px', fontSize: '13px', color: '#6C5CE7', fontWeight: 'bold' }}>Upload Medical Image</h4>
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <label style={{ border: '2px dashed #CBD5E1', borderRadius: '16px', padding: '28px 16px', textAlign: 'center', background: '#F8FAFC', cursor: 'pointer', color: '#475569', fontSize: '12px', fontWeight: '600' }}>
+            <label className="neu-flat" style={{ border: '2px dashed var(--border-subtle)', borderRadius: '16px', padding: '28px 16px', textAlign: 'center', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600' }}>
               <input
                 type="file"
                 accept=".jpg,.jpeg,.png,.gif"
@@ -159,15 +160,12 @@ export default function XrayAnalyzerPanel() {
             <button
               type="submit"
               disabled={isSubmitting || !selectedFile}
+              className="neu-btn-accent"
               style={{
                 width: '100%',
                 padding: '12px',
-                borderRadius: '50px',
-                border: 'none',
                 cursor: isSubmitting || !selectedFile ? 'not-allowed' : 'pointer',
                 opacity: isSubmitting || !selectedFile ? 0.65 : 1,
-                color: '#FFF',
-                background: 'linear-gradient(to right, #D67CFF, #6B5CE7)',
                 fontWeight: '700',
                 fontSize: '12px',
               }}
@@ -183,11 +181,11 @@ export default function XrayAnalyzerPanel() {
           </form>
         </div>
 
-        <div style={{ background: '#FFF', borderRadius: '16px', padding: '24px', boxShadow: '0 24px 48px rgba(0,0,0,0.15), 0 12px 24px rgba(0,0,0,0.1)', border: '1px solid #e1e4e8', overflowY: 'auto', minHeight: 0 }}>
+        <div className="neu-convex" style={{ borderRadius: '16px', padding: '24px', overflowY: 'auto', minHeight: 0 }}>
           <h4 style={{ margin: '0 0 12px', fontSize: '13px', color: '#6C5CE7', fontWeight: 'bold' }}>Analysis Results</h4>
 
           {!result ? (
-            <div style={{ fontSize: '11px', color: '#64748B', background: '#F8FAFC', border: '1px dashed #CBD5E1', borderRadius: '12px', padding: '20px' }}>
+            <div className="neu-flat" style={{ fontSize: '11px', color: 'var(--text-secondary)', border: '1px dashed var(--border-subtle)', borderRadius: '12px', padding: '20px' }}>
               Upload a medical image to view the defect summary, highlighted image, and healthy comparison.
             </div>
           ) : (

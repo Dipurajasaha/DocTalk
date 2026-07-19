@@ -176,7 +176,7 @@ async def doctor_earnings(
                 }
             }
         },
-        order_by={"createdAt": "desc"},
+        order={"createdAt": "desc"},
     )
 
     now = datetime.now(timezone.utc)

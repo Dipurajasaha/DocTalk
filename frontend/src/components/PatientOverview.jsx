@@ -272,7 +272,7 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
   return (
-    <div className="h-full w-full flex bg-[#F5F5F7] text-[#1C1C1E]">
+    <div className="flex text-[#1C1C1E]" style={{ background: 'var(--bg-base)', transform: 'scale(0.8)', transformOrigin: 'top left', width: '125%', height: '125%' }}>
       {/* ── Center: Main content ───────────────────────────────────────── */}
       <main className="flex-1 min-w-0 overflow-y-auto px-8 py-7">
         {/* Header */}
@@ -289,7 +289,7 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
             <div className="relative">
               <button
                 onClick={() => setShowNotif((s) => !s)}
-                className="relative grid place-items-center w-11 h-11 rounded-full bg-white/70 border border-white/60 shadow-[0_8px_24px_rgba(209,209,214,0.5)] hover:-translate-y-0.5 transition"
+                className="relative grid place-items-center w-11 h-11 neu-convex hover:-translate-y-0.5 transition"
                 title="Notifications"
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1C1C1E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -306,7 +306,7 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
               {showNotif && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowNotif(false)} />
-                  <div className="absolute right-0 top-14 z-50 w-80 rounded-2xl bg-white/90 backdrop-blur-xl border border-white/60 p-4" style={{ boxShadow: cardShadow }}>
+                  <div className="absolute right-0 top-14 z-50 w-80 neu-flat p-4">
                     <div className="flex items-center justify-between mb-3">
                       <p className="text-sm font-semibold text-[#1C1C1E]">Notifications</p>
                       <button onClick={() => setShowNotif(false)} className="text-[#6E6E73] hover:text-[#1C1C1E] text-sm">✕</button>
@@ -350,8 +350,8 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
 
         {/* Wellbeing Overview */}
         <section
-          className="relative rounded-[28px] bg-white/70 backdrop-blur-xl border border-white/60 p-7 mb-6 overflow-hidden"
-          style={{ boxShadow: cardShadow }}
+          className="relative neu-flat p-7 mb-6 overflow-hidden"
+          style={{ minHeight: '190px' }}
         >
           <div
             className="absolute inset-0 pointer-events-none"
@@ -404,8 +404,7 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
               <button
                 key={s.key}
                 onClick={() => onNavigate && onNavigate('history')}
-                className="text-left rounded-2xl bg-white/80 border border-white/60 p-5 flex items-center gap-4 cursor-pointer hover:-translate-y-0.5 transition"
-                style={{ boxShadow: '0 8px 22px rgba(209,209,214,0.4)' }}
+                className="text-left neu-convex p-5 flex items-center gap-4 cursor-pointer hover:-translate-y-0.5 transition"
               >
                 <div
                   className="w-14 h-14 rounded-2xl grid place-items-center shrink-0"
@@ -430,11 +429,11 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
           <h2 className="text-lg font-semibold text-[#1C1C1E] mb-4">Health Vitals</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             {vitalsCards.map((vc) => (
-              <button
+              <div
                 key={vc.key}
                 onClick={() => onNavigate && onNavigate('history')}
-                className="text-left rounded-[22px] bg-white/70 backdrop-blur-xl border border-white/60 p-5 cursor-pointer hover:-translate-y-0.5 transition"
-                style={{ boxShadow: cardShadow }}
+                className="text-left neu-flat p-5 cursor-pointer hover:-translate-y-0.5 transition"
+                style={{ minHeight: '160px' }}
               >
                 <p className="text-xs font-medium text-[#6E6E73]">{vc.label}</p>
                 <div className="flex items-end gap-1.5 mt-2">
@@ -447,18 +446,16 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
                 <div className="mt-3">
                   <StatusPill label={vc.status} tone={vc.tone} />
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </section>
       </main>
 
-      {/* ── Right: Actions sidebar ──────────────────────────────────────── */}
-      <aside className="w-[360px] shrink-0 hidden lg:flex flex-col gap-6 px-2 py-7 pr-7 overflow-y-auto">
-        {/* Next Appointment */}
+      {/* ── Right: Sidebar ───────────────────────────────────────────── */}
+      <aside className="w-80 border-l border-[rgba(255,255,255,0.4)] flex flex-col p-7 shrink-0 hidden xl:flex" style={{ background: 'var(--bg-base)' }}>
         <section
-          className="rounded-[28px] bg-white/70 backdrop-blur-xl border border-white/60 p-6"
-          style={{ boxShadow: cardShadow }}
+          className="neu-flat p-6"
         >
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-base font-semibold text-[#1C1C1E]">Next Appointment</h2>
@@ -520,7 +517,7 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
 
               <button
                 onClick={() => onNavigate && onNavigate('docchat')}
-                className="w-full py-3.5 rounded-full text-white font-semibold text-sm bg-gradient-to-r from-[#7C5CFF] to-[#A88CFF] shadow-[0_10px_24px_rgba(124,92,255,0.45)] hover:-translate-y-0.5 transition active:translate-y-0"
+                className="w-full py-3.5 neu-btn-accent font-semibold text-sm transition hover:scale-105 active:scale-95"
               >
                 Join Now
               </button>
@@ -530,7 +527,7 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
               <p className="text-sm text-[#6E6E73]">No upcoming appointments</p>
               <button
                 onClick={() => onNavigate && onNavigate('appointments')}
-                className="mt-4 px-5 py-2.5 rounded-full text-sm font-semibold text-[#7C5CFF] bg-[#7C5CFF]/10 hover:bg-[#7C5CFF]/20 transition"
+                className="mt-4 px-5 py-2.5 neu-btn-accent text-sm font-semibold transition hover:scale-105 active:scale-95"
               >
                 Book a visit
               </button>

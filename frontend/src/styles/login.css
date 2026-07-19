@@ -56,13 +56,12 @@ body {
     width: 100%;
     max-width: 448px;
     height: auto;
-    max-height: 90vh;
-    overflow-y: auto;
     position: relative;
     z-index: 1;
-    transition: max-width 0.4s ease, max-height 0.4s ease, height 0.4s ease;
+    transition: max-width 0.4s ease, height 0.4s ease, transform 0.4s ease;
     box-sizing: border-box;
     border: none;
+    transform: scale(0.8);
 }
 /* Ensure scrollbar looks clean */
 .container::-webkit-scrollbar { width: 6px; }
@@ -72,7 +71,6 @@ body {
 
 .container.login-view {
     max-width: 440px;
-    max-height: 600px;
 }
 
 
@@ -89,6 +87,21 @@ body {
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
+}
+
+/* MFA Expansion Animation */
+.mfa-wrapper {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.3s ease-out, margin-top 0.3s ease-out;
+    margin-top: 0;
+}
+.mfa-wrapper.open {
+    grid-template-rows: 1fr;
+    margin-top: 16px;
+}
+.mfa-inner {
+    overflow: hidden;
 }
 
 h2 {
@@ -207,15 +220,17 @@ label {
     font-size: 14px;
 }
 
-input, select {
+input[type="text"], input[type="password"], input[type="email"], input[type="tel"], input[type="number"], input[type="date"], select {
     width: 100%;
     padding: 14px 16px;
     margin-bottom: 0px; 
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
+    background-color: #EDF2FA !important;
+    border: 0px solid transparent !important;
+    box-shadow: none !important;
+    border-radius: 9999px !important;
     color: #0C0C0C;
-    outline: none;
+    outline: none !important;
+    -webkit-appearance: none !important;
     transition: all 0.2s ease;
     box-sizing: border-box;
     font-size: 14px;

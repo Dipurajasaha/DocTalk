@@ -354,11 +354,6 @@ class ChatService:
 
         return await self.get_ai_chat_history(ai_session_id)
 
-    @staticmethod
-    def _default_ai_session_id(user_id: str, role: str) -> str:
-        base = "doctor_ai" if str(role or "").strip().lower() == "doctor" else "patient_ai"
-        return f"{base}_{user_id}"
-
     async def list_ai_sessions(self, user_id: str, role: str) -> list[dict[str, Any]]:
         sessions = await self.client.aichatsession.find_many(
             where={
@@ -367,8 +362,7 @@ class ChatService:
             },
             order={"updatedAt": "desc"},
         )
-        default_id = self._default_ai_session_id(user_id, role)
-        return [self._serialize_ai_session(item, is_default=str(item.id) == default_id) for item in sessions]
+        return [self._serialize_ai_session(item) for item in sessions]
 
     async def create_ai_session(
         self,
@@ -393,17 +387,12 @@ class ChatService:
 
     async def get_owned_ai_session(self, user_id: str, role: str, ai_session_id: str) -> Any | None:
         """Return the session row if it exists and belongs to the given user/role.
-
-        Generic ids (``patient_ai`` / ``doctor_ai``) are resolved to the user-scoped
-        default session. Returns ``None`` when missing or not owned by the caller.
         """
         normalized_user_id = str(user_id or "").strip()
         normalized_role = str(role or "").strip().lower()
         session_id = str(ai_session_id or "").strip()
         if not session_id:
             return None
-        if session_id in {"patient_ai", "doctor_ai"}:
-            session_id = self._default_ai_session_id(normalized_user_id, normalized_role)
 
         session = await self.client.aichatsession.find_unique(where={"id": session_id})
         if session is None:
@@ -436,12 +425,7 @@ class ChatService:
         if not session_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
-        default_id = self._default_ai_session_id(normalized_user_id, normalized_role)
-        if session_id in {"patient_ai", "doctor_ai", default_id}:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The default chat session cannot be deleted",
-            )
+        # Removed default session check to allow users to delete all sessions.
 
         owned = await self.get_owned_ai_session(normalized_user_id, normalized_role, session_id)
         if owned is None:
@@ -453,13 +437,12 @@ class ChatService:
         await self.client.aichatsession.delete(where={"id": session_id})
 
     @staticmethod
-    def _serialize_ai_session(record: Any, *, is_default: bool = False) -> dict[str, Any]:
+    def _serialize_ai_session(record: Any) -> dict[str, Any]:
         data = record.model_dump() if hasattr(record, "model_dump") else dict(record)
         return {
             "id": str(data.get("id") or ""),
             "title": data.get("title") or None,
             "mode": str(data.get("mode") or ""),
-            "is_default": bool(is_default),
             "created_at": data.get("createdAt"),
             "updated_at": data.get("updatedAt"),
         }

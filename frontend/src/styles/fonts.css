@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
 
 :root {
-    --font-primary: 'Poppins', system-ui, -apple-system, sans-serif;
+    --font-primary: 'Poppins', sans-serif;
     --text-primary: #1a1a1a;
     --text-secondary: #6b7280;
     --text-accent: #6C5CE7;

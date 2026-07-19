@@ -1,462 +1,776 @@
-# DocTalk AI Chat Workflow — Complete Context
+# DocTalk AI Chat Workflow — Complete Context Reference
 
-> This document describes the **entire** AI chat orchestration system for the DocTalk healthcare platform. It is designed to be fed as context to another LLM so it can understand, reason about, extend, or debug this workflow.
-> 
-> **Updated from source code on 2026-07-11.**
+> **Purpose**: This document describes the **entire** AI chat orchestration system for the DocTalk healthcare platform in full technical detail.
+> It is designed to serve two purposes:
+> 1. **Context for other LLMs**: Feed this file to any LLM to give it complete understanding of the system so it can debug, extend, or reason about any part of it.
+> 2. **Study/Viva reference**: Read it section by section to understand every design choice, data flow, and trade-off in the system.
+>
+> **Last updated from source code: 2026-07-17.**
 
 ---
 
-## 1. High-Level Architecture
+## Table of Contents
 
-The AI chat system is a **LangGraph state machine** that processes patient and doctor chat messages through a **linear pipeline of 8 nodes**. There is no branching at the graph level — role-based routing happens internally inside the `llm_orchestrator` node.
+1. [System Overview & Philosophy](#1-system-overview--philosophy)
+2. [LangGraph Pipeline (Execution Order)](#2-langgraph-pipeline-execution-order)
+3. [WorkflowState Schema (Shared Data Bus)](#3-workflowstate-schema-shared-data-bus)
+4. [Node-by-Node Deep Dive](#4-node-by-node-deep-dive)
+5. [Multi-Turn Appointment Booking Workflow (Payment Flow)](#5-multi-turn-appointment-booking-workflow-payment-flow)
+6. [RAG & Vector Search System](#6-rag--vector-search-system)
+7. [Conversation Memory System](#7-conversation-memory-system)
+8. [LLM Calls: Count, Routing, and Token Budget](#8-llm-calls-count-routing-and-token-budget)
+9. [External Dependencies & Services](#9-external-dependencies--services)
+10. [Data Models Reference](#10-data-models-reference)
+11. [File Index](#11-file-index)
+12. [Design Decisions & Known Limitations](#12-design-decisions--known-limitations)
 
-### Execution Flow
+---
+
+## 1. System Overview & Philosophy
+
+DocTalk's AI chat system is a **LangGraph state machine** that processes healthcare chat messages from patients and doctors through a strictly ordered, linear pipeline of **8 nodes**. Every incoming WebSocket message from a user triggers a complete run of this pipeline.
+
+### Why LangGraph (not just LangChain)?
+- **State Management**: A massive shared `WorkflowState` TypedDict accumulates data (evidence, triage decisions, payment orders, planner metadata) as it flows through nodes. LangGraph maintains this automatically via its checkpointer.
+- **Conditional Routing**: LangGraph allows the Input Guardrail to instantly halt the entire pipeline and jump to `END` (blocked queries), which is not natively possible in LangChain LCEL chains.
+- **Checkpointing**: Conversation continuity across turns is handled by LangGraph's `MemorySaver` checkpointer, keyed by `ai_session_id`. (Note: this resets on server restart — it is in-memory only.)
+
+### Why Sequential, Not Parallel?
+All task execution inside the `task_executor` node is **sequential**, not parallel (`asyncio.gather` is NOT used), because:
+1. Later tasks depend on data produced by earlier tasks (e.g., booking a slot depends on first finding the doctor's `doctorId`).
+2. Tasks mutate a shared `ExecutionContext` — parallel writes would cause race conditions.
+3. Sequential execution allows fast-failing without wasted compute on doomed downstream tasks.
+4. Healthcare database transactions (appointment holds) require strict ordering.
+
+### Role-Based Routing
+The system supports two roles:
+- **`patient`**: Full access to self-service health querying, booking, document analysis.
+- **`doctor`**: Scoped access to a specific patient's data for clinical review.
+
+Role-specific LLM routing happens inside the `llm_orchestrator` node — **the graph itself has no branching edges for roles**.
+
+---
+
+## 2. LangGraph Pipeline (Execution Order)
+
+Defined in `graph/unified_chat_graph.py`. The graph is built by `build_unified_chat_graph()` and compiled with `MemorySaver()`.
 
 ```
 User Message (via WebSocket)
        │
        ▼
-┌─────────────────────┐
-│   input_guardrail    │  Security: Prompt injection / jailbreak / role manipulation detection
-│                      │  Domain: TF-IDF cosine similarity validates medical relevance
-│                      │  Verdict: ALLOW → continue │ BLOCK → set final_response + END
-└──────────┬──────────┘
-           │ (conditional edge)
-           ▼
-┌─────────────────────┐
-│  log_entry_context   │  Logs user_id, target_patient_id, ai_session_id, role
-└──────────┬──────────┘
+┌──────────────────────┐
+│   input_guardrail    │  ← Regex security + Semantic Cache (Trie) + LLM fallback
+└──────────┬───────────┘
+           │ conditional edge (check_input_guardrail)
+           ├──── "blocked" ──→ END (immediate halt, final_response set)
+           │
+           ▼  "allowed"
+┌──────────────────────┐
+│  log_entry_context   │  ← Logs: user_id, role, ai_session_id, target_patient_id
+└──────────┬───────────┘
            │
            ▼
-┌─────────────────────┐
-│      planner         │  Intent parsing → Rule-based plan generation → LLM fallback planner
-│                      │  Hydrates conversation_memory → Produces execution_plan[]
-│                      │  Sets planner_metadata (query_type, active_workflow, entities, etc.)
-└──────────┬──────────┘
+┌──────────────────────┐
+│      planner         │  ← LLM Planner (primary) → Rule-Based Planner (fallback)
+│                      │    Hydrates conversation_memory first
+│                      │    Sets: execution_plan[], planner_metadata
+└──────────┬───────────┘
            │
            ▼
-┌─────────────────────┐
-│    authorization     │  Filters execution_plan by role-based allowed_roles from CapabilityMetadata
-│                      │  Rejects capabilities the current user's role is not authorized for
-└──────────┬──────────┘
+┌──────────────────────┐
+│    authorization     │  ← Filters execution_plan by allowed_roles per capability
+└──────────┬───────────┘
            │
            ▼
-┌─────────────────────┐
-│   task_executor      │  Executes PlannerTask queue (retrieve / action) via capability_registry
-│                      │  Supports task dependencies (depends_on, produces, consumes)
-│                      │  Tracks execution via ExecutionContext (evidence, timing, statistics)
-│                      │  Runs ConversationMemoryManager.update() at end
-└──────────┬──────────┘
+┌──────────────────────┐
+│   task_executor      │  ← Sequential queue runner (dependency-aware)
+│                      │    Calls capability handlers via REGISTRY
+│                      │    Collects evidence[], manages ExecutionContext
+│                      │    Runs ConversationMemoryManager.update() after all tasks
+└──────────┬───────────┘
            │
            ▼
-┌─────────────────────┐
-│ recommendation_engine│  Patient-only, evidence-driven specialist recommendation
-│                      │  Rule-based specialty detection (keyword matching on evidence)
-│                      │  Searches past consultations/appointments for previously seen doctors
-│                      │  Appends care_recommendation evidence block
-└──────────┬──────────┘
+┌──────────────────────┐
+│ recommendation_engine│  ← LLM call (patient-only, conditional)
+│                      │    Structured output: RecommendationPrediction
+│                      │    Appends care_recommendation evidence block
+└──────────┬───────────┘
            │
            ▼
-┌─────────────────────┐
-│  response_composer   │  Enriches evidence with consultation/history detail
-│                      │  Detects action capabilities (BOOK/CANCEL) → sets final_response directly
-│                      │  Otherwise, passes enriched evidence for LLM to consume
-└──────────┬──────────┘
+┌──────────────────────┐
+│  response_composer   │  ← Pure Python (no LLM)
+│                      │    Enriches evidence with DB context
+│                      │    If action capability succeeded → sets final_response directly
+└──────────┬───────────┘
            │
            ▼
-┌─────────────────────┐
-│   llm_orchestrator   │  Internal sub-routing (no graph edges):
-│                      │  • If final_response already set → wraps as AIMessage (action confirmation)
-│                      │  • Doctor + DOCTOR_PATIENT → doctor_scoped_llm
-│                      │  • Doctor + anything else → doctor_general_llm
-│                      │  • Patient → triage_evaluator → classify_intent → route to:
-│                      │    - emergency/patient_rag → patient_assistant_llm
-│                      │    - knowledge → patient_knowledge_llm
-│                      │    - patient_general → patient_general_llm
-│                      │  All LLM calls stream via adispatch_custom_event("llm_stream_chunk")
-└──────────┬──────────┘
+┌──────────────────────┐
+│   llm_orchestrator   │  ← 0-2 LLM calls depending on path
+│                      │    If final_response set → wraps AIMessage, 0 LLM calls
+│                      │    Doctor path → 1 call (doctor_scoped or doctor_general)
+│                      │    Patient path → triage_evaluator (1 call) + response LLM (1 call)
+│                      │    Streams via adispatch_custom_event("llm_stream_chunk")
+└──────────┬───────────┘
            │
            ▼
-┌─────────────────────┐
-│   output_guardrail   │  Scans AI response for:
-│                      │  • Diagnostic assertion patterns ("you have", "your diagnosis is")
-│                      │  • Treatment/prescription patterns ("I am prescribing", "you must take")
-│                      │  • Unsafe certainty ("I guarantee", "100% sure")
-│                      │  • Privacy leaks (UUID patterns)
-│                      │  • Metadata leaks ("system prompt:", "workflow status:")
-│                      │  Actions: Append disclaimer, redact UUIDs, increment session_risk_score
-└──────────┬──────────┘
+┌──────────────────────┐
+│   output_guardrail   │  ← Pure Regex (no LLM)
+│                      │    Blocks diagnosis assertions, UUID leaks, prescription language
+│                      │    Appends medical disclaimer if triggered
+└──────────┬───────────┘
            │
            ▼
-          END → Response sent via WebSocket
+          END → Final response sent via WebSocket to frontend
+```
+
+**Edge definitions** (from `unified_chat_graph.py`):
+```
+START → input_guardrail
+input_guardrail → [blocked → END] | [allowed → log_entry_context]
+log_entry_context → planner
+planner → authorization
+authorization → task_executor
+task_executor → recommendation_engine
+recommendation_engine → response_composer
+response_composer → llm_orchestrator
+llm_orchestrator → output_guardrail
+output_guardrail → END
 ```
 
 ---
 
-## 2. State Schema
+## 3. WorkflowState Schema (Shared Data Bus)
 
-Every node receives and returns a `WorkflowState` TypedDict. The full schema is defined in `graph/state.py`:
+Every node receives and returns a `WorkflowState` TypedDict (alias: `UnifiedChatState`). Defined in `graph/state.py`.
 
 ```python
 class WorkflowState(TypedDict):
-    # ── Core Chat Fields ──
-    messages: Annotated[list[BaseMessage], add_messages]  # Full conversation history
-    role: "patient" | "doctor"                            # Who is chatting
-    mode: "PATIENT" | "DOCTOR_GENERAL" | "DOCTOR_PATIENT" # Chat mode enum
-    user_id: str                                          # Authenticated user ID
-    target_patient_id: str | None                         # Patient ID for doctor-scoped queries
-    ai_session_id: str                                    # Unique AI session ID
-    language: str                                         # Language code (default: "en")
-    triage_level: str                                     # "routine" or "emergency"
-    context_payload: dict[str, Any]                       # Metadata accumulator (route info, triage)
-    final_response: str                                   # The final LLM response text
-    workflow_version: str                                 # Always "v1"
+    # ── Core Chat Fields ──────────────────────────────────────────────────
+    messages: Annotated[list[BaseMessage], add_messages]
+    # Full LangChain conversation history. add_messages reducer APPENDS
+    # new messages instead of replacing.
 
-    # ── Planner / Executor Fields ──
-    execution_plan: list[PlannerTask]                     # Tasks to execute (retrieve or action)
-    evidence: list[dict[str, Any]]                        # Collected evidence from all tasks
-    action_results: list[dict[str, Any]]                  # Results from action handlers
-    retrieval_strategy: str | None                        # Enum value from RetrievalStrategy
-    memory_context: list[dict[str, Any]]                  # Previous conversation messages
-    appointment_context: dict[str, Any]                   # Appointment data and action results
-    consultation_context: list[dict[str, Any]]            # Past doctor-patient consultations
-    asset_selection_context: dict[str, Any]               # Selected document/asset IDs
-    rag_scope: dict[str, Any]                             # Contains asset_ids for scoped RAG
-    patient_history_context: list[dict[str, Any]]         # Medical history entries
-    doctor_availability_context: list[dict[str, Any]]     # Available doctor time slots
-    planner_metadata: dict[str, Any]                      # Planner classification info
-    shadow_execution_completed: bool                      # Whether shadow pipeline finished
-    shadow_response: str                                  # Text summary from shadow pipeline
-    need_more_actions: bool                               # Whether executor loop should continue
-    execution_iteration: int                              # Current executor loop iteration
-    pending_tasks: list[PlannerTask]                      # Tasks spawned during execution
-    response_sections: list[dict[str, Any]]               # Structured response sections
+    role: ChatRole                # Literal["patient", "doctor"]
+    mode: ChatMode                # Literal["PATIENT", "DOCTOR_GENERAL", "DOCTOR_PATIENT"]
+    user_id: str                  # Authenticated user's username (from JWT)
+    target_patient_id: str | None # Doctor mode only: the patient being reviewed
+    ai_session_id: str            # Unique session ID = LangGraph thread_id
+    language: str                 # "en", "hi", etc. Default: "en"
+    triage_level: str             # "routine" or "emergency" (set by triage_evaluator)
+    context_payload: dict         # Accumulator for route info, triage data, payment flags
+    final_response: str           # The completed AI response text
+    workflow_version: str         # Always "v1"
 
-    # ── New Fields (v2 architecture) ──
-    timing_metrics: dict[str, float]                      # Performance timing per stage
-    conversation_memory: dict[str, Any]                   # Persistent cross-turn memory
-    recommendation_context: dict[str, Any]                # Specialist recommendation data
-    session_risk_score: int                               # Cumulative security risk score
-    input_guardrail_context: dict[str, Any]               # Input guardrail decision + rules
-    output_guardrail_context: dict[str, Any]              # Output guardrail decision + rules
+    # ── Planner / Executor Fields ─────────────────────────────────────────
+    execution_plan: list[PlannerTask]
+    evidence: list[dict]
+    action_results: list[dict]
+    retrieval_strategy: str | None
+    memory_context: list[dict]                # From MEMORY capability
+    appointment_context: dict                 # From APPOINTMENT capability
+    consultation_context: list[dict]          # From CONSULTATION capability
+    asset_selection_context: dict             # From ASSET_INDEX capability
+    rag_scope: dict                           # asset_ids for scoped RAG queries
+    patient_history_context: list[dict]       # From PATIENT_HISTORY capability
+    doctor_availability_context: list[dict]   # From DOCTOR_AVAILABILITY / SEARCH_SLOTS
+    planner_metadata: dict                    # Classification results from planner
+
+    # ── Multi-Turn State ──────────────────────────────────────────────────
+    shadow_execution_completed: bool
+    shadow_response: str
+    need_more_actions: bool
+    execution_iteration: int
+    pending_tasks: list[PlannerTask]
+    response_sections: list[dict]
+
+    # ── Payment ──────────────────────────────────────────────────────────
+    payment_order: dict | None    # Razorpay order data for frontend popup
+    active_workflow: dict | None  # Top-level active workflow state
+    payment_successful: bool | None
+    payment_failed: bool | None
+
+    # ── Memory & Metrics ──────────────────────────────────────────────────
+    conversation_memory: dict             # Cross-turn persistent state (4 slots)
+    timing_metrics: dict[str, float]      # e.g. {"planner": 120, "executor": 320}
+
+    # ── Guardrails & Security ─────────────────────────────────────────────
+    session_risk_score: Annotated[int, operator.add]  # Cumulative, uses add reducer
+    input_guardrail_context: dict
+    output_guardrail_context: dict
 ```
 
-**Aliases**: `UnifiedChatState = WorkflowState` (backward compat).
+**Key design note**: `session_risk_score` uses `operator.add` as its reducer. This means every node that returns `{"session_risk_score": N}` *adds* N to the existing score rather than replacing it. Both guardrails contribute to this cumulative risk score.
 
-**Factory functions**: `create_workflow_state()` and `create_unified_chat_state()` initialize all fields with safe defaults.
-
----
-
-## 3. Node-by-Node Breakdown
-
-### 3.1 Input Guardrail
-
-**File:** `guardrails/input_guardrail.py`
-
-A deterministic security gate that runs **before** any planning. It checks two dimensions:
-
-**Security Rules** (regex-based):
-- **Prompt Injection**: "ignore previous instructions", "disregard instructions", "system prompt", "new instructions"
-- **Jailbreak**: "DAN", "developer mode", "you are unrestricted"
-- **Role Manipulation**: "you are my doctor", "act as a human"
-- **Out of Scope**: "write a python script", "how to build a bomb"
-- **Strict Patterns** (only when `session_risk_score >= 3`): "translate this", "summarize this url", "forget", "bypass"
-
-**Domain Validation** (TF-IDF cosine similarity):
-- Uses a `TFIDFValidator` that builds a TF-IDF corpus from:
-  - `CORE_CONVERSATION` — greetings, thanks, bye
-  - `CORE_MEDICAL_KNOWLEDGE` — diseases, symptoms, lab terms
-  - Dynamically injected capability descriptions from `capability_registry.REGISTRY`
-- Classifies input as `"CONVERSATION"`, `"MEDICAL"`, or `"UNSUPPORTED"`
-- Contains a fast-path shortcut: if any token matches a hardcoded `medical_hint_terms` set, it returns `"MEDICAL"` immediately without TF-IDF
-- Threshold: `similarity < 0.05` → `"UNSUPPORTED"`
-- `"UNSUPPORTED"` queries are blocked
-
-**Risk Scoring**: Each triggered rule increments `session_risk_score` by `len(triggered_rules) * 2`. Higher risk unlocks stricter blocking rules.
-
-**Outputs when blocked**:
-- Security violation → `"Your request was blocked due to safety policies."`
-- Domain violation → `"I'm sorry, but DocTalk only supports healthcare-related conversations."`
+**Factory functions**: `create_workflow_state()` and `create_unified_chat_state()` accept `payment_order`, `payment_successful`, `payment_failed` as explicit parameters and initialize all other fields with safe defaults.
 
 ---
 
-### 3.2 Planner
+## 4. Node-by-Node Deep Dive
 
-**File:** `planner/planner.py`
+### 4.1 Input Guardrail
 
-The `PlanningEngine` class runs a rule-based goal determination pipeline:
+**File**: `guardrails/input_guardrail.py` + `guardrails/semantic_cache.py`
+**LLM Used**: ✅ Yes (conditional fallback only)
+**When it runs**: Always. First node.
 
-1. **ConversationMemory Hydration**: `ConversationMemoryManager.hydrate_planner_metadata()` reads `conversation_memory` to restore `active_workflow`, `doctor_name`, `booking_datetime`, `booking_ordinal`, and recommendation state from previous turns.
+#### Layer 1: Security Rule Matching (Regex, always runs)
 
-2. **Context Resolution**: `ContextResolver` (`planner/context_resolver.py`) analyzes the user's message in the context of prior state. It detects follow-up patterns (e.g., "what did they say?" refers to previous query type) and resolves references.
+Checks the raw user text against 4 pattern groups:
 
-3. **Intent Parsing**: `parse_intent()` from `planner/parsers/intent_parser.py` produces a `ParsedIntent` with:
-   - `intent_type`: "appointment", "symptom", "consultation", "patient_history", or None
-   - `entities`, `actions`, `doctor_name`, `booking_datetime`, `booking_ordinal`
-   - Boolean flags: `is_appointment`, `is_consultation`, `is_history`
+| Rule Group | Example Patterns | Behavior |
+|---|---|---|
+| Prompt Injection | `ignore\s+(all\s+)?(previous\s+)?instructions`, `system\s+prompt` | Block always |
+| Jailbreak | `\bdan\b`, `developer\s+mode`, `you\s+are\s+(now\s+)?unrestricted` | Block always |
+| Role Manipulation | `you\s+are\s+(now\s+)?(a\s+human\|my\s+doctor)` | Block always |
+| Out of Scope | `write\s+(a\s+)?(python\|javascript)`, `how\s+to\s+build\s+(a\s+)?bomb` | Block always |
+| Strict (HIGH/STRICT only) | `translate\s+this`, `bypass`, `forget` | Block when `risk_score >= 3` |
 
-4. **Goal Determination**: `determine_goal()` runs priority-ordered rules:
-   - Workflow cancellation detection ("never mind", "cancel this", "forget it")
-   - Appointment workflows (book, cancel, reschedule, upcoming, list)
-   - Active workflow continuation (booking confirmation flows)
-   - Document/report queries (latest, compare, analyze)
-   - Patient history queries
-   - Consultation queries
-   - Doctor availability queries
-   - Medical knowledge queries
+Risk level escalation: `LOW` (0) → `MEDIUM` (≥1) → `HIGH` (≥3) → `STRICT` (≥5). Each triggered rule adds `len(triggered_rules) * 2` to `session_risk_score`.
 
-5. **LLM Planner Fallback**: `planner/llm_planner.py` — If rule-based planning fails or returns an empty plan, the `LLMPlanningEngine` generates a JSON execution plan using structured output. Falls back to keyword rule planner if the LLM output is invalid.
+#### Layer 2: Semantic Cache Domain Validation (Trie + LLM fallback)
 
-6. **Plan Optimization**: `planner/plan_optimizer.py` — Deduplicates and validates the execution plan.
+The old TF-IDF approach has been **completely replaced** with a **Trie-based Semantic Cache** backed by the `SemanticCacheWord` PostgreSQL table.
 
-**Key output**: Sets `execution_plan` (list of `PlannerTask`s) and `planner_metadata` (includes `query_type`, `active_workflow`, `detected_entities`, etc.)
+**How it works**:
+1. Tokenizes user text into lowercase words, strips stopwords.
+2. **Fast path**: If any token matches `ALLOWED_MEDICAL_TERMS` set (`consultation`, `appointment`, `blood`, `report`, `record`, `history`), immediately allows.
+3. **Trie lookup** via `SemanticCacheManager`:
+   - Loads words from `semantic_cache_words` DB table into two in-memory Tries (one for ALLOWED, one for BLOCKED).
+   - **Blocked Trie** uses `search_prefix()` (prefix match — more aggressive blocking).
+   - **Allowed Trie** uses `search()` (exact match — more conservative allowing).
+   - Returns `"ALLOWED"`, `"BLOCKED"`, or `"UNKNOWN"` (cache miss).
+4. **LLM Fallback** (on cache miss only): Calls `complete_text()` with a structured prompt asking the LLM to classify the query as `ALLOWED` or `REJECTED` and extract 1-3 domain keywords. On success, the extracted keywords are **persisted** back to the DB via `add_allowed()` / `add_blocked()` so future lookups hit the cache.
+5. **Self-seeding**: If the `semantic_cache_words` table is empty on first load, `_seed_initial()` populates it with ~35 default words (medical terms for ALLOWED, coding/attack terms for BLOCKED).
 
----
-
-### 3.3 Authorization
-
-**File:** `auth/authorization.py` + `auth/authorization_service.py`
-
-Runs after the planner, before execution. Filters the `execution_plan` by checking each task's `capability_name` against the `allowed_roles` metadata in the capability registry.
-
-- Supported roles: `["patient", "doctor"]`
-- Unsupported roles get their entire plan cleared
-- Each capability defines its `allowed_roles` in `CapabilityMetadata`
-
-**Example role restrictions from the registry**:
-
-| Capability | Allowed Roles |
-|-----------|--------------|
-| `MEMORY` | patient, doctor |
-| `CONSULTATION` | patient, doctor |
-| `PATIENT_HISTORY` | patient, doctor |
-| `ASSET_INDEX` | patient, doctor |
-| `APPOINTMENT` | patient, doctor |
-| `DOCTOR_AVAILABILITY` | doctor |
-| `APPOINTMENT_BOOK` | patient |
-| `APPOINTMENT_CANCEL` | patient |
-| `APPOINTMENT_RESCHEDULE` | patient |
-| `APPOINTMENT_SEARCH_SLOTS` | patient |
+#### Outputs
+- **Allowed**: `{"input_guardrail_context": {"status": "allowed", "domain": "MEDICAL"}, "session_risk_score": 0}`
+- **Blocked (security)**: Sets `final_response = "Your request was blocked due to safety policies."` → routes to END
+- **Blocked (domain)**: Sets `final_response = "I'm sorry, but DocTalk only supports healthcare-related conversations."` → routes to END
 
 ---
 
-### 3.4 Task Executor
+### 4.2 Log Entry Context
 
-**File:** `executor/task_executor.py`
-
-Executes the `execution_plan` queue. Each `PlannerTask` is dispatched to the `capability_registry` by `capability_name`.
-
-**Execution loop**:
-1. Picks the next task whose `depends_on` list is fully satisfied (all deps in `completed_task_ids`)
-2. Evaluates freshness policy (`executor/freshness_policy.py`) — decides if capability needs fresh execution or can reuse cached data
-3. Calls the capability handler with `(state, params)`
-4. Merges result into `ExecutionContext` — routes data to `shared_context` via `produces`/`target_context_keys`
-5. Appends any `pending_tasks` from the result to the queue
-6. Safety limit: `MAX_PENDING_TASK_DEPTH = 20`
-
-**ExecutionContext** (`models/execution_context.py`):
-- Tracks: `completed_task_ids`, `produced_data`, `consumed_data`, `shared_context`, `evidence`, `warnings`, `metadata`, `stats`
-- `merge_result()` handles data routing via explicit `produces` keys or implicit `target_context_keys` from capability metadata
-- `finalize()` computes total execution timing
-
-After execution, runs `ConversationMemoryManager.update()` to persist state across turns.
+**File**: `graph/unified_chat_graph.py` (inline `log_entry_context` function)
+**LLM Used**: ❌ No
+**Purpose**: Emits a structured log line with `user_id`, `target_patient_id`, `ai_session_id`, `role`. Returns empty dict `{}` (does not mutate state).
 
 ---
 
-### 3.5 Capability Registry
+### 4.3 Planner
 
-**File:** `executor/capability_registry.py`
+**File**: `planner/planner.py`, `planner/llm_planner.py`
+**LLM Used**: ✅ Yes (primary path via `LLMPlanningEngine`)
+**Output**: Sets `execution_plan`, `planner_metadata`, `retrieval_strategy`, `timing_metrics`.
 
-A flat `REGISTRY: dict[str, Capability]` mapping capability names to handlers and metadata. Each capability is a TypedDict:
+The Planner converts a natural language user message into a structured list of tasks.
+
+#### Step 0: Memory Hydration
+`ConversationMemoryManager(state).hydrate_planner_metadata()` runs first. Reads `conversation_memory` to restore:
+- `active_workflow` (mid-booking state, unless status is `completed`/`confirmed`/`cancelled`)
+- `doctor_name`, `booking_datetime`, `booking_ordinal` (booking entities)
+- `appointment_id`, `slot_id`, `amount`, `currency` (payment context)
+- `recommended_specialty`, `recommended_doctor_id`, `recommended_doctor_name`
+
+Also reads top-level `state["active_workflow"]` and `state["payment_order"]` which the task_executor sets directly.
+
+#### Step 1: LLM Planner (Primary — `USE_LLM_PLANNER=true`)
+`LLMPlanningEngine` makes 1 LLM call using `complete_text()` with a structured prompt expecting JSON:
+```json
+{
+  "confidence": 0.95,
+  "reasoning": "User wants to book appointment",
+  "query_type": "workflow",
+  "tasks": [...],
+  "metadata": {...}
+}
+```
+Validated by `PlanningValidator`. If confidence < threshold or validation fails → falls back to rule-based planner.
+
+#### Step 2: Rule-Based Planner (Fallback — `PlanningEngine`)
+Runs a goal detection pipeline:
+
+1. **`ContextResolver`** (`planner/context_resolver.py`) — resolves follow-up references, ordinal selections ("the first one"), affirmations ("yes", "confirm")
+2. **`IntentParser`** (`planner/parsers/intent_parser.py`) — extracts `intent_type`, `entities`, `actions`, `doctor_name`, `booking_datetime`, `booking_ordinal`
+3. **`determine_goal()`** — keyword + intent mapping to goals:
+   - Workflow cancellation ("never mind", "cancel this") → clears active_workflow
+   - `manage_appointment` → when explicit appointment actions detected
+   - `check_doctor_availability` → when availability/booking keywords detected
+   - `review_consultation` → when consultation history requested
+   - `review_patient_history` → when medical history/medication requested
+   - `review_document` → when report/analysis keywords detected
+   - `access_memory` → when "remember"/"recall" keywords detected
+   - `general_chat` → default fallback
+4. **`determine_required_information()`** — sets `query_type` in metadata
+5. **`build_execution_plan()`** — converts goals to `PlannerTask` objects with correct `capability_name`
+6. **`order_tasks()`** → deduplicates via `ExecutionPlan.deduplicate()`
+
+#### Step 3: Plan Optimizer
+`PlanOptimizer.optimize(plan, state)` — removes duplicate capabilities, tracks optimization stats (`original_tasks`, `optimized_tasks`, `duplicates_removed`, `context_reused`, `skipped_retrievals`).
+
+#### Booking Confirmation Detection
+The planner has complex logic to detect booking confirmations. It checks:
+- If `active_workflow.status` is `waiting_confirmation` or `waiting_payment_confirmation` AND user says "yes"/"confirm"/"proceed"/"ok"/"sure"/"go ahead"
+- If `payment_successful` flag is set (from frontend callback)
+- Sets `payment_confirmation_requested` and `payment_successful` in metadata accordingly
+
+---
+
+### 4.4 Authorization
+
+**File**: `auth/authorization.py` + `auth/authorization_service.py`
+**LLM Used**: ❌ No
+
+Filters `execution_plan` by checking each task's `capability_name` against `allowed_roles` in the capability registry.
+
+**Full role permission table** (from `capability_registry.py` REGISTRY):
+
+| Capability | Type | Allowed Roles |
+|---|---|---|
+| `MEMORY` | retriever | patient, doctor |
+| `CONSULTATION` | retriever | patient, doctor |
+| `PATIENT_HISTORY` | retriever | patient, doctor |
+| `ASSET_INDEX` | retriever | patient, doctor |
+| `APPOINTMENT` | retriever | patient, doctor |
+| `DOCTOR_AVAILABILITY` | retriever | **doctor only** |
+| `APPOINTMENT_BOOK` | action | **patient only** |
+| `APPOINTMENT_CANCEL` | action | **patient only** |
+| `APPOINTMENT_RESCHEDULE` | action | **patient only** |
+| `APPOINTMENT_SEARCH_SLOTS` | action | **patient only** |
+
+Unsupported role → entire plan cleared. Individual unauthorized tasks → removed from plan.
+
+---
+
+### 4.5 Task Executor
+
+**File**: `executor/task_executor.py`
+**LLM Used**: ❌ No
+
+Runs the `execution_plan` queue one task at a time (strictly sequential).
 
 ```python
-class Capability(TypedDict):
-    name: str
-    handler: Callable[[UnifiedChatState, dict[str, Any]], Awaitable[CapabilityResult]]
-    metadata: CapabilityMetadata
+while queue:
+    if loops >= MAX_PENDING_TASK_DEPTH (20):
+        break
+
+    # Find next task whose depends_on are all in completed_task_ids
+    ready_task = find_next_ready(queue, ctx.completed_task_ids)
+    if not ready_task:
+        break  # Dependency cycle
+
+    queue.remove(ready_task)
+
+    # Evaluate freshness policy
+    decision = evaluate_freshness_policy(capability_metadata, state, task)
+
+    # Execute
+    result = await execute_single_task(state, task, ctx)
+
+    # Merge into ExecutionContext
+    ctx.merge_result(task, result)
+
+    # Spawn follow-up tasks if any
+    queue.extend(ctx.pending_tasks)
+    ctx.pending_tasks = []
+    loops += 1
+
+ctx.finalize()
 ```
 
-**Retrievers** (query data, no side effects):
+#### Post-Execution State Propagation
+After the loop, the executor:
+1. Merges `ctx.shared_context` into the result dict (populates state keys like `appointment_context`, `consultation_context`, etc.)
+2. If `ctx.metadata["payment_order"]` exists → sets `result_dict["payment_order"]`
+3. If `ctx.metadata["active_workflow"]` exists → sets both `result_dict["active_workflow"]` and updates `planner_metadata["active_workflow"]`
+4. If `ctx.metadata["clear_payment_order"]` → sets `payment_order = None`
+5. Calls `ConversationMemoryManager(state).update(result_dict)` to persist state for next turn
 
-| Name | Handler | What it retrieves |
-|------|---------|-------------------|
-| `MEMORY` | `handle_memory_retrieve` | Previous AI conversation messages from `AiChatMessage` |
-| `CONSULTATION` | `handle_consultation_retrieve` | Past doctor-patient consultations |
-| `PATIENT_HISTORY` | `handle_patient_history_retrieve` | Structured medical history (vitals, conditions) |
-| `ASSET_INDEX` | `handle_asset_index_retrieve` | Document/report selection + scoped RAG vector search |
-| `APPOINTMENT` | `handle_appointment_retrieve` | Upcoming/past appointments |
-| `DOCTOR_AVAILABILITY` | `handle_doctor_availability_retrieve` | Available doctor time slots |
+---
 
-**Actions** (write operations):
+### 4.6 Capability Registry
 
-| Name | Handler | Effect |
-|------|---------|--------|
-| `APPOINTMENT_BOOK` | `handle_appointment_book` | Creates appointment + marks slot as booked (DB transaction) |
-| `APPOINTMENT_CANCEL` | `handle_appointment_cancel` | Cancels appointment + releases slot |
-| `APPOINTMENT_RESCHEDULE` | `handle_appointment_reschedule` | Stub — returns context message only |
-| `APPOINTMENT_SEARCH_SLOTS` | `handle_appointment_search_slots` | Searches available slots by doctor name/specialty |
+**File**: `executor/capability_registry.py`
+**LLM Used**: ❌ No (all pure Python + DB queries)
 
-**CapabilityMetadata** (`models/capability_metadata.py`):
+`REGISTRY: dict[str, Capability]` — maps capability names to handler functions + metadata.
+
+#### All 10 Registered Capabilities
+
+**Retrievers** (6):
+
+| Name | Handler | DB Tables | What it fetches |
+|---|---|---|---|
+| `MEMORY` | `handle_memory_retrieve` | `AiChatMessage` | Recent AI chat messages for session |
+| `CONSULTATION` | `handle_consultation_retrieve` | `Consultation`, `ConsultationMessage` | Past doctor-patient sessions |
+| `PATIENT_HISTORY` | `handle_patient_history_retrieve` | `PatientMedicalHistory` | Vitals, conditions, medications |
+| `ASSET_INDEX` | `handle_asset_index_retrieve` | `AssetIndex` + `rag_documents` | Document index + vector search |
+| `APPOINTMENT` | `handle_appointment_retrieve` | `Appointment`, `Doctor`, `DoctorSlot` | Upcoming/past appointments |
+| `DOCTOR_AVAILABILITY` | `handle_doctor_availability_retrieve` | `Doctor`, `DoctorSlot` | Available slots per doctor |
+
+**Actions** (4):
+
+| Name | Handler | What it does |
+|---|---|---|
+| `APPOINTMENT_BOOK` | `handle_appointment_book` | Multi-stage booking with Razorpay (see Section 5) |
+| `APPOINTMENT_CANCEL` | `handle_appointment_cancel` | Cancels appointment + releases DoctorSlot |
+| `APPOINTMENT_RESCHEDULE` | `handle_appointment_reschedule` | Returns context message (stub) |
+| `APPOINTMENT_SEARCH_SLOTS` | `handle_appointment_search_slots` | Searches DoctorSlot by doctor name/specialty |
+
+#### CapabilityMetadata Fields (`models/capability_metadata.py`)
+
 ```python
 class CapabilityMetadata(BaseModel):
     capability_name: str
-    capability_type: "retriever" | "action"
-    always_refresh: bool          # Force fresh execution every time
-    allow_memory: bool            # Result can persist to memory
-    allow_cache: bool             # Result can be cached
-    priority: int                 # Execution priority (lower = higher)
-    supports_parallel_execution: bool
-    description: str              # Human-readable (also used by TF-IDF validator)
-    target_context_keys: list[str]  # State keys where results are merged
-    evidence_behavior: str        # Always "pass_through"
-    allowed_roles: list[str]      # Authorization whitelist
+    capability_type: str         # "retriever" | "action"
+    always_refresh: bool         # True = always re-execute, skip cache
+    allow_memory: bool           # Result can persist to conversation memory
+    allow_cache: bool            # Result can be cached for reuse
+    priority: int                # Lower = higher priority (10 for retrievers, 20 for actions)
+    supports_parallel_execution: bool  # Metadata-only; executor is sequential
+    description: str             # Human-readable (used in guardrail TF-IDF corpus)
+    target_context_keys: list[str]     # State keys where results are merged
+    evidence_behavior: str       # Always "pass_through"
+    allowed_roles: list[str]     # Authorization whitelist
 ```
 
----
-
-### 3.6 Recommendation Engine
-
-**File:** `recommendation/recommendation_engine.py`
-
-Patient-only node that runs after execution and before the LLM. It generates specialist referral recommendations.
-
-**When it runs**:
-- Skipped for doctors (`mode` is `DOCTOR_GENERAL` or `DOCTOR_PATIENT`)
-- Skipped if there's an `active_workflow` in planner_metadata
-- Only executes when `query_type` is `rag`, `knowledge`, or `general`
-- Only executes when evidence contains medical evidence (`type` in `["rag", "symptom_analysis", "medical_analysis"]`)
-
-**Specialty detection** (rule-based keyword matching on evidence text):
-1. Endocrinologist — HbA1c, FBS, diabetes
-2. Cardiologist — ECG, chest pain, troponin
-3. Nephrologist — creatinine, eGFR, kidney
-4. Gastroenterologist — SGPT, SGOT, bilirubin, liver
-5. Pulmonologist — respiratory, asthma, COPD
-6. Dermatologist — skin, rash
-7. Ophthalmologist — eye, vision
-8. Neurologist — seizure, stroke, brain
-9. Orthopedic Surgeon — bone, fracture, joint
-10. Urologist — urinary, bladder
-11. Hematologist — severe + blood terms
-12. General Physician — hemoglobin, CBC, RBC
-
-**Doctor matching**: Searches `consultation_context` and `appointment_context` for a previously seen doctor matching the recommended specialty.
-
-**Output**: Appends a `care_recommendation` evidence block and populates `recommendation_context` with `recommended_specialty`, `recommended_doctor_id/name`, and confidence.
+#### Freshness Policy (`executor/freshness_policy.py`)
+For each task, checks `capability_metadata.always_refresh`:
+- `True` → forces fresh DB query (used by: `APPOINTMENT`, `DOCTOR_AVAILABILITY`, all actions)
+- `False` → permits reuse of cached/in-state data (used by: `MEMORY`, `CONSULTATION`, `PATIENT_HISTORY`, `ASSET_INDEX`)
 
 ---
 
-### 3.7 Response Composer
+### 4.7 Recommendation Engine
 
-**File:** `composer/response_composer.py`
+**File**: `recommendation/recommendation_engine.py`
+**LLM Used**: ✅ Yes (1 structured output call via `with_structured_output(RecommendationPrediction)`)
 
-Enriches evidence blocks with detailed context:
-- Consultation evidence gets `consultation_context` details appended (sanitized via `sanitize_for_llm`)
-- Patient history evidence gets `patient_history_context` details appended
+#### When SKIPPED (returns `{}` immediately):
+- `mode` is `"DOCTOR_GENERAL"` or `"DOCTOR_PATIENT"` (doctor sessions)
+- `planner_metadata` contains `"active_workflow"` (mid-booking flow)
+- `query_type` is not `"rag"`, `"knowledge"`, or `"general"`
+- No latest message in state
 
-**Action capability handling**: If evidence contains a result from `APPOINTMENT_BOOK`, `APPOINTMENT_CANCEL`, or `APPOINTMENT_RESCHEDULE`, the composer sets `final_response` directly from the evidence content. This causes the LLM orchestrator to skip the LLM call entirely and return the action confirmation as-is.
-
----
-
-### 3.8 LLM Orchestrator
-
-**File:** `llm/llm_orchestrator.py`
-
-Replaces the previous graph-level role-based routing with a single node that handles all sub-routing internally.
-
-**Flow**:
-1. If `final_response` is already set (by response_composer for action confirmations) → wraps as `AIMessage` and returns immediately
-2. **Doctor path**:
-   - `mode == "DOCTOR_PATIENT"` → `doctor_scoped_llm()` (RAG against target patient)
-   - Otherwise → `doctor_general_llm()` (clinical reasoning copilot, no RAG)
-3. **Patient path** (three sub-steps in sequence):
-   - `triage_evaluator()` — structured LLM classification (`TriageEvaluation`)
-   - `classify_intent()` — keyword + planner metadata routing
-   - Route to one of:
-     - `patient_assistant_llm()` — for `emergency` or `patient_rag` (medical report interpretation with RAG)
-     - `patient_knowledge_llm()` — for `knowledge` (general medical education, no RAG, no evidence)
-     - `patient_general_llm()` — for `patient_general` (empathetic assistant with evidence context)
-
-**Patient Intent Classification** (`llm/patient/routing.py`):
+#### When it RUNS:
+1. Takes last 4 messages from conversation as context.
+2. Makes 1 LLM call (`temperature=0.0`) with structured output:
+```python
+class RecommendationPrediction(BaseModel):
+    needs_doctor: bool       # True if symptoms suggest medical consultation
+    recommended_specialty: str | None  # "Cardiologist", "General Physician", etc.
+    reasoning: str           # Brief explanation
 ```
-PatientIntent = "patient_rag" | "patient_general" | "emergency" | "knowledge" | "workflow"
-
-Priority order:
-1. Emergency terms → "emergency"
-2. planner_metadata.query_type == "knowledge" → "knowledge"
-3. planner_metadata.query_type == "rag" → "patient_rag"
-4. planner_metadata.query_type in ("workflow", "appointment") → "workflow"
-5. planner_metadata.query_type == "general" → "patient_general"
-6. Clinical keyword fallback → "patient_rag"
-7. Default → "patient_general"
-```
-
-**All LLM calls stream** via `adispatch_custom_event("llm_stream_chunk", content)`.
+3. If `needs_doctor == True` and specialty found:
+   - Queries `prisma.doctor.find_many()` for up to 2 doctors matching specialty (case-insensitive substring search on `specialization` field)
+   - Falls back to "General Physician" if no exact match found
+   - Formats doctor names with prefix: `"" if d.name.startswith("Dr.") else "Dr. "`
+4. Appends `care_recommendation` evidence block to state and sets `recommendation_context`.
 
 ---
 
-### 3.9 Output Guardrail
+### 4.8 Response Composer
 
-**File:** `guardrails/output_guardrail.py`
+**File**: `composer/response_composer.py`
+**LLM Used**: ❌ No
 
-Scans the last AI message for safety violations:
+#### Evidence Enrichment
+- Evidence with `type == "consultation"` → appended with `consultation_context` JSON (sanitized)
+- Evidence with `type == "patient_history"` → appended with `patient_history_context` details
 
-| Rule Category | Patterns | Action |
-|--------------|----------|--------|
-| Diagnostic Assertion | "you have", "your diagnosis is", "this confirms you", "I diagnose you" | Append medical disclaimer |
+#### Action Short-Circuit (critical design)
+If evidence contains a source from `ACTION_CAPABILITIES` (`APPOINTMENT_BOOK`, `APPOINTMENT_CANCEL`, `APPOINTMENT_RESCHEDULE`), sets `result_dict["final_response"]` directly from the evidence content.
+
+This causes the LLM Orchestrator to skip ALL LLM calls and return the action confirmation verbatim.
+
+---
+
+### 4.9 LLM Orchestrator
+
+**File**: `llm/llm_orchestrator.py`
+**LLM Used**: ✅ Yes (0-2 calls depending on path)
+
+#### Fast Path (0 LLM calls)
+If `state["final_response"]` is already set:
+- Wraps as `AIMessage`
+- Copies `payment_order` and `active_workflow` from state
+- Returns immediately
+
+#### Doctor Path (1 LLM call)
+- `mode == "DOCTOR_PATIENT"` → `doctor_scoped_llm()` — evidence injected as context, RAG-capable
+- Otherwise → `doctor_general_llm()` — clinical reasoning copilot
+
+Both use `temperature=0.1` and evidence is included in the system message if present.
+
+#### Patient Path (2 LLM calls)
+1. **`triage_evaluator()`** — 1 LLM structured output call:
+```python
+class TriageEvaluation(BaseModel):
+    is_emergency: bool   # Chest pain, stroke, bleeding, seizure, etc.
+    rationale: str
+```
+System prompt detects life-threatening symptoms. Sets `triage_level = "emergency"` if triggered.
+
+2. **`classify_intent()`** — Pure Python (no LLM). Routes based on `triage_level` + `planner_metadata.query_type`:
+
+| Intent | Condition | LLM Called |
+|---|---|---|
+| `emergency` | Emergency terms found in message text | `patient_assistant_llm` |
+| `knowledge` | `query_type == "knowledge"` | `patient_knowledge_llm` |
+| `patient_rag` | `query_type == "rag"` | `patient_assistant_llm` |
+| `workflow` | `query_type in ("workflow", "appointment")` | `patient_general_llm` |
+| `patient_general` | `query_type == "general"` or default | `patient_general_llm` |
+
+3. **Response LLM** — 1 streaming LLM call:
+
+| LLM | System Prompt Focus | Evidence? | Temperature |
+|---|---|---|---|
+| `patient_assistant_llm` | Strict medical report interpreter. NEVER diagnose. Only explain lab values + reference ranges. Must include care_recommendation if present. | ✅ Injected into system prompt | 0.1 |
+| `patient_general_llm` | Empathetic assistant. Use ONLY retrieved context. Never invent doctor names. Mention care_recommendation doctors. Handles payment failure acknowledgment. | ✅ Injected into system prompt | 0.1 |
+| `patient_knowledge_llm` | Medical educator. General health info from training data. No diagnosis. | ❌ No evidence | 0.1 |
+
+**Message deduplication**: `_dedupe_messages()` removes exact `(type, content)` duplicates from the conversation history before sending to the LLM. This prevents prompt bloat from the WebSocket reloading full DB history each turn + LangGraph checkpointer accumulation.
+
+**Payment failure handling**: `patient_general_llm` explicitly detects `payment_failed`, `"payment not successful"`, `"payment cancelled"` in the latest message and instructs the LLM to NOT start a new booking but offer retry.
+
+**Streaming**: All calls use `async for chunk in llm.astream(messages)` with `adispatch_custom_event("llm_stream_chunk", content)`.
+
+---
+
+### 4.10 Output Guardrail
+
+**File**: `guardrails/output_guardrail.py`
+**LLM Used**: ❌ No
+
+Scans the last `AIMessage` in `state["messages"]` for safety violations.
+
+#### Rules
+
+| Rule Category | Trigger Patterns | Action |
+|---|---|---|
+| Diagnosis Language | "you have", "you are suffering from", "your diagnosis is", "I diagnose you", "this confirms you" | Append medical disclaimer |
 | Treatment/Prescription | "I am prescribing", "you must take", "you should take 500mg" | Append medical disclaimer |
 | Unsafe Certainty | "I am 100% sure", "I guarantee" | Append medical disclaimer |
-| Privacy Leak | UUID patterns (`[0-9a-f]{8}-...`) | Replace with `[REDACTED]` |
+| Privacy Leak | UUID regex `[0-9a-f]{8}-...-[0-9a-f]{12}` | Replace with `[REDACTED]` |
 | Metadata Leak | "system prompt:", "workflow status:" | Replace with `[REDACTED]` |
 
-**Context-aware relaxation**: For `query_type == "knowledge"`, only privacy/metadata leak rules are checked (diagnosis language is acceptable for educational content).
+**Context-aware relaxation**: For `query_type == "knowledge"`, only rules containing `"Leak"` in their name are enforced. Diagnostic language is acceptable for educational content.
 
-**Risk scoring**: `session_risk_delta = len(triggered_rules)`, added to `session_risk_score`.
-
-**Medical disclaimer** (appended when diagnosis/treatment/certainty rules trigger):
+**Medical disclaimer** (appended when diagnosis/treatment rules trigger):
 > *This is general health information and not a definitive diagnosis. Please consult a licensed physician for personalized medical advice.*
 
----
-
-## 4. Conversation Memory Manager
-
-**File:** `memory/conversation_memory.py`
-
-A cross-turn memory system that persists workflow state across conversation turns. Stored in `state["conversation_memory"]` as a nested dict with four slots:
-
-| Slot | Purpose | Example keys |
-|------|---------|-------------|
-| `workflow` | Active multi-turn workflow state | `active_workflow`, `doctor_name`, `booking_datetime` |
-| `semantic` | Semantic references for follow-ups | (reserved for future use) |
-| `short_term` | Short-term turn context | `last_query_type`, `last_capabilities` |
-| `recommendation` | Persisted specialist recommendations | `recommended_specialty`, `recommended_doctor_id` |
-
-**`hydrate_planner_metadata()`**: Called at the start of each planner turn to restore context from the previous turn's memory into `planner_metadata`.
-
-**`update(result_dict)`**: Called at the end of task execution to persist the current turn's state into memory for the next turn.
+**Risk scoring**: `session_risk_delta = len(triggered_rules)` is added via the `operator.add` reducer.
 
 ---
 
-## 5. Data Models
+## 5. Multi-Turn Appointment Booking Workflow (Payment Flow)
+
+The `APPOINTMENT_BOOK` capability handles a 2-4 turn payment flow using Razorpay.
+
+### Stage 1: Slot Search (Turn 1)
+User: *"Book an appointment with Dr. Manish"*
+- Planner creates `APPOINTMENT_SEARCH_SLOTS` task
+- Capability queries `DoctorSlot` table for available unbooked slots
+- Returns evidence listing available time slots
+
+### Stage 2: Slot Selection & Payment Order (Turn 2)
+User: *"Book the first available slot"*
+
+`handle_appointment_book()`:
+1. `PaymentService.release_expired_payment_holds()` — cleans stale holds
+2. Resolves slot by `booking_ordinal` ("first" → `slots[0]`) or `booking_datetime` (exact time match)
+3. Falls back to `slots[0]` if no match
+4. `PaymentService.create_order_for_appointment()`:
+   - Creates `PAYMENT_PENDING` appointment
+   - Soft-locks `DoctorSlot.isBooked = True`
+   - Creates Razorpay order via REST API
+   - Returns `{order_id, appointment_id, key_id, amount, currency}`
+5. Doctor name formatting: `if not name.startswith("Dr."): name = f"Dr. {name}"`
+6. Returns evidence with `action = "confirm_payment"` + `payment_order` in metadata
+7. Message: *"Your appointment with Dr. X on July 22 at 4:00 PM has been reserved. The consultation fee is Rs. 500. Do you want to proceed to payment?"*
+
+`payment_order` propagates: `capability → task_executor (ctx.metadata) → state → llm_orchestrator → WebSocket payload → frontend`
+
+### Stage 3: User Confirms → Razorpay Popup (Turn 3)
+User: *"ok proceed"*
+
+`handle_appointment_book()` (with existing `appointment_id`):
+1. Fetches the pending appointment
+2. Gets or creates `pending_payment_order` via `PaymentService.get_pending_payment_order()`
+3. Returns `action = "open_razorpay"` + full `payment_order` data
+4. Frontend detects `payment_order` → opens Razorpay checkout popup
+
+### Stage 4: Payment Verification & Confirmation (After Payment)
+Razorpay callback → Frontend → `POST /api/payments/verify` → Backend verifies HMAC → appointment `CONFIRMED`
+
+Next chat turn with `payment_successful = True`:
+1. Fetches confirmed appointment by ID
+2. Returns: *"Your payment was successful and your appointment with Dr. X has been confirmed."*
+3. Sets `metadata.clear_payment_order = True` and workflow `status = "completed"`
+
+### Consultation Fee Logic
+- `DEFAULT_CONSULTATION_FEE_PAISE = 50000` (Rs. 500)
+- Source: `doctor.consultationFee` field in DB
+- Fallback: if null/0, uses default 50000 paise
+
+---
+
+## 6. RAG & Vector Search System
+
+### Document Ingestion
+1. **Text Extraction**: PDF/image text extracted
+2. **Chunking** (`asset_service.py`): `RecursiveCharacterTextSplitter` with `chunk_size=1500`, `overlap=150`, separators `["\n\n", "\n", " ", ""]`
+3. **Embedding** (`ai/core_services/embeddings.py`): `text-embedding-004` (Google), **768 dimensions**
+4. **Storage** (`ai/vectorstore/pgvector_service.py`): `rag_documents` table, raw SQL INSERT with `$7::vector`
+
+### Similarity Search
+```sql
+SELECT id, patient_id, content, summary, metadata,
+       1 - (embedding <=> $1::vector) AS similarity
+FROM rag_documents
+WHERE patient_id = $2
+ORDER BY embedding <=> $1::vector
+LIMIT $6
+```
+- **Distance**: Cosine (`<=>` operator)
+- **Score**: `1 - cosine_distance` (0.0 to 1.0)
+- **Threshold**: `similarity_threshold = 0.30`
+- **top_k**: 5
+- **Asset-scoped**: Filters by `metadata->>'asset_id'` when `rag_scope.asset_ids` is set
+
+### RAG Tools (`capabilities/tools/rag_tools.py`)
+- `patient_rag_tool`: Scoped to `state["user_id"]`
+- `doctor_rag_tool`: Scoped to `state["target_patient_id"]`
+
+---
+
+## 7. Conversation Memory System
+
+**File**: `memory/conversation_memory.py`
+
+Persists workflow context across turns in `state["conversation_memory"]` — nested dict with 4 slots:
+
+```python
+conversation_memory = {
+    "workflow": {
+        "active_workflow": {...},
+        "doctor_name": "Dr. Manish",
+        "booking_datetime": "2026-07-22T10:30:00+05:30",
+        "booking_ordinal": "first",
+        "appointment_id": "uuid-...",
+        "slot_id": "uuid-...",
+        "amount": 50000,
+        "currency": "INR",
+    },
+    "short_term": {
+        "last_query_type": "rag",
+        "last_capabilities": ["ASSET_INDEX"],
+    },
+    "recommendation": {
+        "recommended_specialty": "Cardiologist",
+        "recommended_doctor_id": "doc_manish_rao_6",
+        "recommended_doctor_name": "Dr. Manish Rao",
+    },
+    "semantic": {
+        "doctor_availability_context": [...]
+    }
+}
+```
+
+**`hydrate_planner_metadata()`** — START of each turn: injects memory into planner context. Terminal workflows (`completed`/`confirmed`/`cancelled`) clear all booking-related keys.
+
+**`update(result_dict)`** — END of task execution: persists active_workflow, recommendation, and semantic data. If a workflow query has no active_workflow, it expires the previous one along with recommendation.
+
+**Persistence**: Via LangGraph `MemorySaver`. **Resets on server restart.**
+
+---
+
+## 8. LLM Calls: Count, Routing, and Token Budget
+
+### LLM Call Count Per Turn
+
+| Scenario | LLM Calls | Which LLMs |
+|---|---|---|
+| Simple greeting ("Hi") | 2 | Planner + patient_general_llm |
+| Medical question (knowledge) | 3 | Planner + Recommendation + patient_knowledge_llm |
+| Medical report analysis | 4 | Planner + Triage + Recommendation + patient_assistant_llm |
+| Appointment booking (action) | 1 | Planner only (response_composer sets final_response) |
+| Input guardrail cache miss | +1 | Guardrail LLM fallback |
+| **Min** | **1** | Planner only (action flows) |
+| **Max** | **5** | Guardrail + Planner + Triage + Recommendation + Response |
+| **Typical** | **3-4** | — |
+
+### Model Configuration
+
+| Setting | Value | Override |
+|---|---|---|
+| Chat model | `gemini-2.0-flash` | `GEMINI_MODEL` env var |
+| Embedding model | `text-embedding-004` | Settings |
+| Embedding dimension | 768 | Settings |
+| Temperature (most nodes) | `0.1` (via `get_workflow_model()`) | — |
+| Temperature (recommendation) | `0.0` (deterministic) | — |
+| Temperature (guardrail fallback) | `0.0` | — |
+
+---
+
+## 9. External Dependencies & Services
+
+### 9.1 WebSocket Chat Router (`api/chat/router.py`)
+- FastAPI WebSocket endpoint with JWT auth via query param
+- Builds `WorkflowState` via `create_workflow_state()` — passes `payment_order`, `payment_successful`, `payment_failed` from client
+- Invokes `unified_chat_graph.astream_events()` for streaming
+- Listens for `"llm_stream_chunk"` events → forwards to frontend
+- Final message includes `payment_order` from state for frontend Razorpay popup
+
+### 9.2 Payment Service (`services/payment_service.py`)
+- `create_order_for_appointment()` — Creates provisional appointment + Razorpay order
+- `verify_payment()` — Verifies Razorpay HMAC, promotes to CONFIRMED
+- `get_pending_payment_order()` — Fetches pending order for re-display
+- `release_expired_payment_holds()` — Cleans stale PAYMENT_PENDING appointments
+- `DEFAULT_CONSULTATION_FEE_PAISE = 50000`
+
+### 9.3 LLM Client (`ai/core_services/llm_client.py`)
+- `get_chat_model(temperature)` → `ChatGoogleGenerativeAI`
+- `complete_text(messages, temperature)` → Non-streaming LLM call
+- `_extract_json(text)` → Strips markdown fences from LLM JSON output
+
+### 9.4 Database (Prisma ORM)
+
+| Table | Prisma Model | Used By |
+|---|---|---|
+| `appointments` | `Appointment` | APPOINTMENT, APPOINTMENT_BOOK, APPOINTMENT_CANCEL |
+| `doctors` | `Doctor` | DOCTOR_AVAILABILITY, APPOINTMENT_BOOK, Recommendation |
+| `doctor_slots` | `DoctorSlot` | DOCTOR_AVAILABILITY, APPOINTMENT_BOOK |
+| `consultations` | `Consultation` | CONSULTATION retriever |
+| `messages` | `Message` | CONSULTATION retriever |
+| `ai_chat_messages` | `AiChatMessage` | MEMORY retriever |
+| `asset_indexes` | `AssetIndex` | ASSET_INDEX retriever |
+| `patient_medical_histories` | `PatientMedicalHistory` | PATIENT_HISTORY retriever |
+| `rag_documents` | `RagDocument` | pgvector RAG search (raw SQL) |
+| `payments` | `Payment` | PaymentService |
+| `semantic_cache_words` | `SemanticCacheWord` | Input Guardrail Trie cache |
+
+---
+
+## 10. Data Models Reference
 
 ### PlannerTask (`models/planner_task.py`)
 ```python
 @dataclass
 class PlannerTask:
-    task_type: str                    # "retrieve" | "action" | "general_response"
-    retriever: str | None             # Registry key (e.g., "APPOINTMENT", "PATIENT_HISTORY")
-    action_handler: str | None        # Registry key (e.g., "APPOINTMENT_BOOK")
-    action: str | None                # Sub-action (e.g., "latest", "upcoming")
-    parameters: dict[str, Any]        # Extra params (booking_datetime, doctor_name, etc.)
-
-    # Dependency metadata
-    task_id: str | None               # Unique task identifier for dependency tracking
-    depends_on: list[str] | None      # Task IDs this task depends on
-    produces: list[str] | None        # State keys this task produces
-    consumes: list[str] | None        # State keys this task consumes
+    task_type: str          # "retrieve" | "action" | "general_response"
+    retriever: str | None   # Registry key e.g. "APPOINTMENT"
+    action_handler: str | None  # Registry key e.g. "APPOINTMENT_BOOK"
+    action: str | None      # Sub-action e.g. "latest", "upcoming"
+    parameters: dict        # Extra params
+    task_id: str | None     # For dependency tracking
+    depends_on: list[str]   # Task IDs that must complete first
+    produces: list[str]     # State keys this task writes
+    consumes: list[str]     # State keys this task reads
 
     @property
-    capability_name -> str | None     # Returns retriever or action_handler based on task_type
+    def capability_name -> str | None  # Returns retriever or action_handler
 ```
 
 ### CapabilityResult (`models/capability_result.py`)
@@ -464,220 +778,162 @@ class PlannerTask:
 @dataclass
 class CapabilityResult:
     capability_name: str
-    status: str = "SUCCESS"           # "SUCCESS" | "FAILED"
-    evidence: list[dict[str, Any]]    # Evidence blocks produced
-    pending_tasks: list[...]          # Dynamically spawned follow-up tasks
-    data: Any                         # Generic result data
-    metadata: dict[str, Any]          # Flags (e.g., clear_doctor_availability)
-    warnings: list[str]
-    errors: list[str]
-    timing_ms: float
+    status: str = "SUCCESS"
+    evidence: list[dict] = []
+    pending_tasks: list = []
+    data: Any = None
+    metadata: dict = {}    # payment_order, active_workflow, clear_payment_order, etc.
+    warnings: list[str] = []
+    errors: list[str] = []
+    timing_ms: float = 0.0
 ```
 
 ### ExecutionContext (`models/execution_context.py`)
-- Central accumulator for the entire execution cycle
-- Tracks: `completed_task_ids`, `produced_data`, `consumed_data`, `shared_context`, `evidence`, `warnings`, `metadata`, `stats`
-- `merge_result()` routes capability data into `shared_context` via `produces` keys or `target_context_keys`
+- `completed_task_ids: set[str]` — dependency tracking
+- `shared_context: dict` — data produced by tasks
+- `evidence: list[dict]` — all evidence blocks
+- `metadata: dict` — flags (payment_order, active_workflow, clear_*)
+- `stats: ExecutionStatistics` — timing
 
 ### ActiveWorkflow (`models/active_workflow.py`)
-- Represents a multi-turn workflow (e.g., appointment booking flow)
-- Fields: `workflow_type`, `status`, `context` (dict), `started_at`
-
-### FreshnessDecision (`models/freshness_decision.py`)
-- Output of the freshness policy evaluator
-- Fields: `execute_fresh`, `reuse_existing`, `ignore_memory`, `ignore_cache`, `reason`
-
-### ResolvedContext (`models/resolved_context.py`)
-- Output of the context resolver
-- Fields: `has_reference`, `resolved_type`, `resolved_data`
+- `type`: `"appointment_booking"`
+- `status`: `"waiting_selection"` | `"waiting_confirmation"` | `"waiting_payment_confirmation"` | `"executing"` | `"completed"` | `"confirmed"` | `"cancelled"`
+- `context`: dict with `doctor_name`, `appointment_id`, `slot_id`, `amount`, `currency`, `booking_datetime`, `booking_ordinal`, `available_slots`, `payment_stage`
 
 ---
 
-## 6. RAG Tools
-
-**File:** `capabilities/tools/rag_tools.py`
-
-Two LangChain `@tool` decorated functions that query the pgvector vector store:
-
-### `patient_rag_tool`
-- Scoped to `state["user_id"]`
-- If `rag_scope.asset_ids` exists → `pgvector_service.search_documents_by_assets()`
-- Otherwise → `pgvector_service.search_documents()`
-- Default: `top_k=5`, `similarity_threshold=0.30`
-
-### `doctor_rag_tool`
-- Scoped to `state["target_patient_id"]`
-- Same logic as patient_rag_tool but for a different user scope.
-
----
-
-## 7. Utility Modules
-
-### Sanitizer (`utils/sanitizer.py`)
-- `sanitize_for_llm(data)` — Recursively strips internal IDs (`id`, `_id`, `*_id`, `*Id`), `uuid`, and `metadata` keys from dicts before passing to LLMs. Prevents UUID/PII leakage.
-
-### Logger (`utils/logger.py`)
-- `log_section()`, `log_key_value()`, `log_trace()`, `log_error()`, `format_duration()`
-- `log_trace()` only outputs when `DEBUG_VERBOSE=true` env var is set
-
----
-
-## 8. External Dependencies (Outside `workflows/`)
-
-### 8.1 Chat Router (`backend/api/chat/router.py`)
-- FastAPI WebSocket endpoint that receives user messages
-- Authenticates via JWT token in query params
-- Builds `WorkflowState` via `create_workflow_state()`
-- Invokes `unified_chat_graph` via `astream_events()` for token streaming
-- **Streaming**: Listens for custom `"llm_stream_chunk"` events dispatched by LLM nodes
-- **Loading UI**: Emits user-friendly node transition statuses using a strict whitelist to prevent internal LangChain runnables from flooding the frontend
-- Persists messages to `AiChatMessage` table
-
-### 8.2 LLM Client (`backend/ai/core_services/llm_client.py`)
-- Provides `get_chat_model()` returning a LangChain-compatible chat model
-- Configured via env vars: `GEMINI_API_KEY`, `GEMINI_MODEL` (default: `gemini-2.0-flash`)
-- Default temperature: `0.2` (overridden to `0.1` in triage evaluator)
-
-### 8.3 Vector Store (`backend/ai/vectorstore/pgvector_service.py`)
-- `pgvector_service.search_documents()` — similarity search scoped to a patient
-- `pgvector_service.search_documents_by_assets()` — similarity search scoped to specific asset IDs
-- Embeddings via `text-embedding-004` (768 dims)
-
-### 8.4 Prompt Templates (`backend/ai/prompts/templates.py`)
-- `PromptService` / `medical_prompt_service` with templates for summary, X-ray analysis, consultation review
-- Includes `_language_hint()` for multilingual support
-- Includes `_context_block()` with prompt injection defense
-
-### 8.5 Database (Prisma ORM)
-- Tables accessed by capabilities: `Appointment`, `Doctor`, `DoctorSlot`, `Consultation`, `ConsultationMessage`, `AiChatMessage`, `AssetIndex`, `PatientMedicalHistory`
-
-### 8.6 Checkpointer
-- `MemorySaver()` — in-memory LangGraph checkpointer
-- Conversation continuity is keyed by `ai_session_id`
-- **Resets on server restart** (no persistent checkpointing)
-
----
-
-## 9. LLM Model Configuration
-
-| Setting | Value |
-|---------|-------|
-| Chat Model | `gemini-2.0-flash` (override: `GEMINI_MODEL` env var) |
-| Embeddings | `text-embedding-004` (768 dims) |
-| Temperature | `0.1` (triage) / `0.2` (all other nodes) |
-| API Key | `GEMINI_API_KEY` (required) |
-
----
-
-## 10. File Index
+## 11. File Index
 
 ```
 backend/workflows/
 ├── WORKFLOW_CONTEXT.md               ← This file
-├── __init__.py                       ← Package init
+├── __init__.py
 ├── unified_chat_graph.py             ← Re-exports from graph/
 ├── state.py                          ← Re-exports from graph/
 │
 ├── graph/
-│   ├── unified_chat_graph.py         ← Main graph definition (8-node linear pipeline)
-│   ├── state.py                      ← WorkflowState TypedDict & factory functions
-│   └── common.py                     ← get_workflow_model(), latest_message_text()
+│   ├── unified_chat_graph.py         ← LangGraph 8-node DAG + build_unified_chat_graph()
+│   ├── state.py                      ← WorkflowState TypedDict + factory functions
+│   └── common.py                     ← get_workflow_model(), latest_message_text(), message_content_text()
 │
 ├── guardrails/
-│   ├── input_guardrail.py            ← Input security + TF-IDF domain validation
-│   └── output_guardrail.py           ← Output safety scanning + disclaimer injection
+│   ├── input_guardrail.py            ← Regex security + Semantic Cache Trie + LLM fallback
+│   ├── output_guardrail.py           ← Regex output safety + disclaimer injection
+│   └── semantic_cache.py             ← Trie data structure + SemanticCacheManager (DB-backed)
 │
 ├── auth/
-│   ├── authorization.py              ← Authorization node (filters plan by role)
-│   └── authorization_service.py      ← filter_authorized_plan() logic
+│   ├── authorization.py              ← Authorization node
+│   └── authorization_service.py      ← filter_authorized_plan()
 │
 ├── planner/
-│   ├── planner.py                    ← PlanningEngine class (main planner node)
-│   ├── llm_planner.py               ← LLM-based fallback planner
-│   ├── context_resolver.py           ← Follow-up / reference resolution
-│   ├── plan_optimizer.py             ← Plan deduplication / validation
-│   ├── planning_validator.py         ← Plan validation rules
+│   ├── planner.py                    ← PlanningEngine (rule-based) + planner_node entry point
+│   ├── llm_planner.py               ← LLMPlanningEngine (primary, LLM call)
+│   ├── context_resolver.py           ← ContextResolver (follow-up, ordinal, affirmation)
+│   ├── plan_optimizer.py             ← Deduplication + validation
+│   ├── planning_validator.py         ← Plan structure validation
 │   ├── retrieval_strategy.py         ← RetrievalStrategy enum
-│   ├── planner_rule_config.py        ← Keyword configs
-│   ├── planner_rule_order.py         ← Rule execution order
+│   ├── planner_rule_config.py        ← Keyword sets for rule-based planner
+│   ├── planner_rule_order.py         ← Rule priority order
 │   ├── planner_rule_loader.py        ← Rule loader
-│   ├── planner_rule_registry.py      ← Planner rules
-│   ├── task_template_registry.py     ← Converts TaskTemplate → PlannerTask
+│   ├── planner_rule_registry.py      ← Rule handler functions
+│   ├── task_template_registry.py     ← TaskTemplate → PlannerTask conversion
 │   └── parsers/
 │       ├── intent_parser.py          ← ParsedIntent extraction
 │       └── document_query_parser.py  ← DocumentQueryIntent extraction
 │
 ├── executor/
-│   ├── capability_registry.py        ← REGISTRY: all capability handlers + metadata
-│   ├── task_executor.py              ← Task executor node (queue-based loop)
-│   └── freshness_policy.py           ← Freshness decision evaluator
+│   ├── capability_registry.py        ← REGISTRY dict + all 10 capability handler functions
+│   ├── task_executor.py              ← Sequential task loop + task_executor_node
+│   └── freshness_policy.py           ← FreshnessDecision evaluator
 │
 ├── recommendation/
-│   └── recommendation_engine.py      ← Specialist recommendation engine (patient-only)
+│   └── recommendation_engine.py      ← LLM-powered specialist recommendation (patient-only)
 │
 ├── composer/
-│   └── response_composer.py          ← Evidence enrichment + action response composer
+│   └── response_composer.py          ← Evidence enrichment + action short-circuit
 │
 ├── llm/
-│   ├── llm_orchestrator.py           ← Unified LLM orchestrator node
+│   ├── llm_orchestrator.py           ← Unified orchestrator (role + intent routing)
 │   ├── patient/
 │   │   ├── patient_nodes.py          ← triage_evaluator, patient_general_llm,
-│   │   │                                patient_knowledge_llm, patient_assistant_llm
-│   │   └── routing.py               ← classify_intent() (keyword + metadata routing)
+│   │   │                                patient_knowledge_llm, patient_assistant_llm,
+│   │   │                                TriageEvaluation model, _dedupe_messages()
+│   │   └── routing.py               ← classify_intent() — keyword + metadata routing
 │   └── doctor/
 │       └── doctor_nodes.py           ← doctor_general_llm, doctor_scoped_llm
 │
 ├── memory/
-│   └── conversation_memory.py        ← ConversationMemoryManager (cross-turn state)
+│   └── conversation_memory.py        ← ConversationMemoryManager (4-slot cross-turn state)
 │
 ├── capabilities/
-│   ├── retrievers/                   ← DB retriever implementations
-│   ├── actions/                      ← Action handler implementations
-│   └── tools/                        ← RAG tools (pgvector queries)
+│   ├── retrievers/
+│   │   ├── appointment_retriever.py
+│   │   ├── asset_index_retriever.py
+│   │   ├── asset_scoped_rag.py       ← pgvector asset-scoped similarity search
+│   │   ├── consultation_retriever.py
+│   │   ├── conversation_memory.py
+│   │   ├── doctor_availability_retriever.py
+│   │   └── patient_history_retriever.py
+│   ├── actions/
+│   │   └── __init__.py               ← Empty (handlers in capability_registry.py)
+│   └── tools/
+│       ├── rag_tools.py              ← @tool decorated RAG query functions
+│       └── appointment_tools.py
 │
 ├── models/
-│   ├── planner_task.py               ← PlannerTask dataclass (with dependency metadata)
-│   ├── capability_metadata.py        ← CapabilityMetadata Pydantic model
-│   ├── capability_result.py          ← CapabilityResult dataclass
-│   ├── execution_context.py          ← ExecutionContext + ExecutionStatistics
-│   ├── execution_plan.py             ← ExecutionPlan container
-│   ├── active_workflow.py            ← ActiveWorkflow (multi-turn workflow state)
-│   ├── freshness_decision.py         ← FreshnessDecision Pydantic model
-│   ├── resolved_context.py           ← ResolvedContext dataclass
-│   ├── composed_response.py          ← ComposedResponse
-│   ├── evidence.py                   ← Evidence model
-│   └── task_template.py              ← TaskTemplate
+│   ├── planner_task.py
+│   ├── capability_metadata.py
+│   ├── capability_result.py
+│   ├── execution_context.py
+│   ├── execution_plan.py
+│   ├── active_workflow.py
+│   ├── freshness_decision.py
+│   ├── resolved_context.py
+│   ├── composed_response.py
+│   ├── evidence.py
+│   └── task_template.py
 │
-├── utils/
-│   ├── logger.py                     ← Structured console logging utilities
-│   └── sanitizer.py                  ← sanitize_for_llm() (strips IDs/metadata)
-│
-├── parsers/                          ← (legacy directory, parsers moved to planner/parsers/)
-├── nodes/                            ← (legacy directory, __init__.py re-exports only)
-├── retrievers/                       ← (legacy directory)
-└── tools/                            ← (legacy directory)
+└── utils/
+    ├── logger.py                     ← log_section(), log_key_value(), log_trace(), format_duration()
+    └── sanitizer.py                  ← sanitize_for_llm() (strips IDs/UUIDs)
 ```
 
 ---
 
-## 11. Key Design Decisions & Known Limitations
+## 12. Design Decisions & Known Limitations
 
-1. **Linear pipeline, internal routing**: The graph is a flat 8-node pipeline with no branching edges. All role/intent-based routing happens inside `llm_orchestrator_node`. This simplifies graph visualization and checkpointing, but means the graph structure doesn't reflect the actual control flow.
+### Design Decisions
 
-2. **Capability-centric architecture**: The old separate retrieval/action registries have been unified into a single `capability_registry.py` with `CapabilityMetadata` governing execution policy, authorization, freshness, and evidence behavior per capability.
+1. **Linear DAG, no loops**: The LangGraph pipeline has no cycles. The planner generates a complete task list in one shot. No agentic re-planning loops. This bounds compute cost and prevents runaway healthcare workflows.
 
-3. **Authorization is separate from planning**: The planner generates a maximal plan; the authorization layer then strips unauthorized capabilities. This separation of concerns allows the planner to evolve without worrying about role checks.
+2. **Sequential task execution**: No `asyncio.gather`. Tasks mutate shared `ExecutionContext` and have data dependencies. Race conditions in booking flows are unacceptable.
 
-4. **Dual guardrails (input + output)**: Input guardrail uses regex + TF-IDF for domain validation. Output guardrail uses regex for response safety. Both contribute to a cumulative `session_risk_score` that escalates blocking sensitivity.
+3. **Actions bypass the LLM**: When `APPOINTMENT_BOOK` or `APPOINTMENT_CANCEL` succeeds, `response_composer` sets `final_response` directly. The LLM Orchestrator detects this and skips all LLM calls. Prevents hallucinated booking details.
 
-5. **Conversation memory is in-state**: `conversation_memory` is stored inside `WorkflowState` and persists via the LangGraph checkpointer. It resets on server restart because `MemorySaver()` is in-memory.
+4. **Dual guardrails (input + output)**: Input uses Trie + LLM, output uses regex. Both contribute to cumulative `session_risk_score` via `operator.add` reducer.
 
-6. **Task dependency support**: `PlannerTask` supports `depends_on`, `produces`, and `consumes` fields for DAG-based execution ordering, though most current capabilities run independently.
+5. **Semantic Cache replaces TF-IDF**: The old `TFIDFValidator` was replaced with a persistent Trie-based cache (`SemanticCacheWord` table). LLM-classified keywords are saved to DB, making future lookups instant. The cache is self-learning — it grows as users interact.
 
-7. **Action capabilities bypass the LLM**: When an action like `APPOINTMENT_BOOK` succeeds, the response composer sets `final_response` directly, and the LLM orchestrator wraps it as an `AIMessage` without calling any LLM. This avoids the LLM hallucinating additional details about the booking.
+6. **Payment order propagation**: `payment_order` flows through `capability → ctx.metadata → task_executor → state → llm_orchestrator → WebSocket payload → frontend Razorpay popup`.
 
-8. **Recommendation engine is rule-based**: Uses keyword matching on evidence text to determine specialty. No LLM is used for recommendation. Matches against previously consulted doctors from consultation/appointment history.
+7. **Doctor name sanitization**: `if not name.startswith("Dr."): name = f"Dr. {name}"` prevents double-prefix.
 
-9. **TF-IDF domain validator is rebuilt per request**: The `TFIDFValidator` constructs its corpus fresh on every `input_guardrail_node` call. This is intentional for correctness (the capability registry could change) but is a performance concern at scale.
+8. **LLM Planner with rule-based fallback**: Primary path uses LLM for flexible intent parsing. Falls back to deterministic rule-based planner on low confidence or validation failure. Dual-path ensures reliability.
 
-10. **`patient_knowledge_llm` is a pure LLM call**: Unlike `patient_general_llm` and `patient_assistant_llm`, the knowledge LLM receives no evidence context — it relies entirely on the LLM's training data for medical education responses.
+9. **Message deduplication**: `_dedupe_messages()` in patient LLM nodes removes `(type, content)` duplicates caused by WebSocket history reload + LangGraph checkpointer accumulation.
+
+10. **Payment failure detection in LLM prompt**: `patient_general_llm` explicitly checks for `payment_failed` state and injects a system prompt instruction to NOT start a new booking but offer retry.
+
+### Known Limitations
+
+**A. MemorySaver resets on restart**: All conversation continuity lost on backend restart. Needs Redis/PostgreSQL-backed checkpointer.
+
+**B. `APPOINTMENT_RESCHEDULE` is a stub**: Returns context message only; no actual DB modification.
+
+**C. `patient_knowledge_llm` has no evidence**: Relies entirely on LLM training data. Cannot reference patient's uploaded reports.
+
+**D. `DOCTOR_AVAILABILITY` is doctor-only**: Patients must use `APPOINTMENT_SEARCH_SLOTS` instead.
+
+**E. Semantic Cache cold-start**: On first boot with empty `semantic_cache_words` table, `_seed_initial()` populates ~35 words, but unusual medical terms will miss until the LLM fallback classifies them.
+
+**F. Chunking is character-based**: `RecursiveCharacterTextSplitter(1500/150)` doesn't understand clinical document structure. A lab test header might be split from its value.

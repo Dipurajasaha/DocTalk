@@ -90,6 +90,11 @@ export async function apiRequest(path, options = {}) {
         const message = (data && (data.detail || data.error || data.message)) || `Request failed (${response.status})`;
         const apiError = new ApiError(message, response.status, data);
 
+        if (response.status === 401) {
+          localStorage.removeItem('doctalk_token');
+          window.location.href = '/login';
+        }
+
         if (attempt < retries && shouldRetry(apiError, response.status)) {
           await sleep(retryDelayMs * (attempt + 1));
           attempt += 1;

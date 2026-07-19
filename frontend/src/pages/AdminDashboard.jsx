@@ -5,11 +5,13 @@ import { useNotifications } from '../contexts';
 
 const pageStyles = {
   page: {
-    minHeight: '100vh',
+    height: '100vh',
+    overflowY: 'auto',
     background: 'radial-gradient(circle at top left, rgba(139,126,255,0.18), transparent 28%), linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%)',
     color: '#0f172a',
     padding: '24px',
     boxSizing: 'border-box',
+    fontFamily: '"Poppins", sans-serif',
   },
   shell: {
     maxWidth: '1400px',
@@ -24,9 +26,6 @@ const pageStyles = {
     gap: '16px',
     padding: '22px 24px',
     borderRadius: '28px',
-    background: 'linear-gradient(135deg, #111827 0%, #1f2a44 55%, #4f46e5 100%)',
-    color: '#fff',
-    boxShadow: '0 20px 60px rgba(15,23,42,0.22)',
   },
   brand: {
     display: 'flex',
@@ -39,19 +38,20 @@ const pageStyles = {
     borderRadius: '18px',
     display: 'grid',
     placeItems: 'center',
-    background: 'rgba(255,255,255,0.12)',
-    border: '1px solid rgba(255,255,255,0.14)',
     fontSize: '22px',
+    fontWeight: 'bold',
+    color: 'var(--accent-primary)',
   },
   title: {
     margin: 0,
     fontSize: '26px',
     lineHeight: 1.1,
     letterSpacing: '-0.03em',
+    fontWeight: 'bold',
   },
   subtitle: {
     margin: '4px 0 0',
-    color: 'rgba(255,255,255,0.78)',
+    color: 'var(--text-secondary)',
     fontSize: '14px',
   },
   actionRow: {
@@ -61,20 +61,16 @@ const pageStyles = {
   },
   button: {
     border: '0',
-    borderRadius: '14px',
     padding: '12px 16px',
     fontWeight: 700,
     cursor: 'pointer',
   },
   primaryBtn: {
-    background: '#8B7EFF',
-    color: '#fff',
-    boxShadow: '0 10px 24px rgba(139,126,255,0.28)',
   },
   ghostBtn: {
-    background: 'rgba(255,255,255,0.12)',
-    color: '#fff',
-    border: '1px solid rgba(255,255,255,0.18)',
+    background: 'transparent',
+    color: '#334155',
+    border: 'none',
   },
   statGrid: {
     display: 'grid',
@@ -82,10 +78,6 @@ const pageStyles = {
     gap: '16px',
   },
   card: {
-    background: '#fff',
-    borderRadius: '24px',
-    boxShadow: '0 16px 48px rgba(15,23,42,0.08)',
-    border: '1px solid rgba(148,163,184,0.18)',
   },
   statCard: {
     padding: '22px',
@@ -123,6 +115,7 @@ const pageStyles = {
     margin: '0 0 4px',
     fontSize: '22px',
     letterSpacing: '-0.03em',
+    fontWeight: 'bold',
   },
   sectionSub: {
     margin: '0 0 18px',
@@ -139,9 +132,7 @@ const pageStyles = {
     alignItems: 'center',
     gap: '12px',
     padding: '14px 16px',
-    borderRadius: '18px',
-    background: '#f8fbff',
-    border: '1px solid #e2e8f0',
+    background: 'transparent',
   },
   rowMeta: {
     display: 'grid',
@@ -170,22 +161,18 @@ const pageStyles = {
     fontWeight: 700,
   },
   dangerBtn: {
-    border: '1px solid rgba(220,38,38,0.18)',
-    background: '#fff1f2',
     color: '#b91c1c',
-    borderRadius: '12px',
     padding: '8px 12px',
     fontWeight: 700,
     cursor: 'pointer',
   },
   mutedBtn: {
-    border: '1px solid #e2e8f0',
-    background: '#fff',
     color: '#334155',
-    borderRadius: '12px',
     padding: '8px 12px',
     fontWeight: 700,
     cursor: 'pointer',
+    background: 'transparent',
+    border: 'none',
   },
   profileGrid: {
     display: 'grid',
@@ -204,27 +191,33 @@ const pageStyles = {
   },
   input: {
     width: '100%',
+    height: '100%',
     boxSizing: 'border-box',
-    padding: '12px 14px',
-    borderRadius: '14px',
-    border: '1px solid #dbe3ef',
-    background: '#fff',
+    padding: '12px 16px',
     color: '#0f172a',
     outline: 'none',
     fontSize: '14px',
+    background: 'transparent',
+    border: 'none',
+    fontFamily: 'inherit',
+    borderRadius: 'inherit',
+    WebkitAppearance: 'none'
   },
   textarea: {
     width: '100%',
+    height: '100%',
     boxSizing: 'border-box',
-    padding: '12px 14px',
-    borderRadius: '14px',
-    border: '1px solid #dbe3ef',
-    background: '#fff',
+    padding: '12px 16px',
     color: '#0f172a',
     outline: 'none',
     fontSize: '14px',
     minHeight: '110px',
     resize: 'vertical',
+    background: 'transparent',
+    border: 'none',
+    fontFamily: 'inherit',
+    borderRadius: 'inherit',
+    WebkitAppearance: 'none'
   },
   toast: {
     padding: '12px 14px',
@@ -242,7 +235,7 @@ const statusPill = (label, tone = 'neutral') => ({
 
 function StatCard({ label, value, meta }) {
   return (
-    <div style={{ ...pageStyles.card, ...pageStyles.statCard }}>
+    <div className="neu-flat" style={{ ...pageStyles.card, ...pageStyles.statCard }}>
       <div style={pageStyles.statLabel}>{label}</div>
       <div style={pageStyles.statValue}>{value}</div>
       <div style={pageStyles.statMeta}>{meta}</div>
@@ -293,7 +286,7 @@ export default function AdminDashboard() {
       } catch (err) {
         if (!cancelled) {
           setError(err?.message || 'Failed to load admin dashboard.');
-          try { addNotification?.({ type: 'error', message: 'Failed to load admin dashboard.' }); } catch (e) {}
+          try { addNotification?.({ type: 'error', message: 'Failed to load admin dashboard.' }); } catch (e) { }
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -331,7 +324,7 @@ export default function AdminDashboard() {
       setBusyId(`patient:${username}`);
       await adminApi.deletePatient(username);
       await refresh();
-      try { addNotification?.({ type: 'success', message: `Removed patient ${username}.` }); } catch (e) {}
+      try { addNotification?.({ type: 'success', message: `Removed patient ${username}.` }); } catch (e) { }
     } catch (err) {
       setError(err?.message || 'Could not remove patient.');
     } finally {
@@ -346,7 +339,7 @@ export default function AdminDashboard() {
       setBusyId(`doctor:${doctorId}`);
       await adminApi.banDoctor(doctorId, reason.trim());
       await refresh();
-      try { addNotification?.({ type: 'success', message: `Doctor ${doctorId} banned.` }); } catch (e) {}
+      try { addNotification?.({ type: 'success', message: `Doctor ${doctorId} banned.` }); } catch (e) { }
     } catch (err) {
       setError(err?.message || 'Could not ban doctor.');
     } finally {
@@ -361,7 +354,7 @@ export default function AdminDashboard() {
       setError('');
       await adminApi.updateProfile(profileForm);
       await refresh();
-      try { addNotification?.({ type: 'success', message: 'Admin profile updated.' }); } catch (e) {}
+      try { addNotification?.({ type: 'success', message: 'Admin profile updated.' }); } catch (e) { }
     } catch (err) {
       setError(err?.message || 'Failed to update profile.');
     } finally {
@@ -374,7 +367,7 @@ export default function AdminDashboard() {
     try {
       const response = await adminApi.createInvite(inviteForm);
       setInviteResult(response);
-      try { addNotification?.({ type: 'success', message: 'Invite token created.' }); } catch (e) {}
+      try { addNotification?.({ type: 'success', message: 'Invite token created.' }); } catch (e) { }
     } catch (err) {
       setError(err?.message || 'Failed to create invite token.');
     }
@@ -384,7 +377,7 @@ export default function AdminDashboard() {
     try {
       const response = await adminApi.setupMfa();
       setMfaSetup(response);
-      try { addNotification?.({ type: 'success', message: 'MFA secret generated.' }); } catch (e) {}
+      try { addNotification?.({ type: 'success', message: 'MFA secret generated.' }); } catch (e) { }
     } catch (err) {
       setError(err?.message || 'Failed to start MFA setup.');
     }
@@ -396,7 +389,7 @@ export default function AdminDashboard() {
       setMfaSetup(null);
       setMfaCode('');
       await refresh();
-      try { addNotification?.({ type: 'success', message: 'MFA enabled for this admin.' }); } catch (e) {}
+      try { addNotification?.({ type: 'success', message: 'MFA enabled for this admin.' }); } catch (e) { }
     } catch (err) {
       setError(err?.message || 'Failed to confirm MFA code.');
     }
@@ -410,20 +403,21 @@ export default function AdminDashboard() {
   return (
     <div style={pageStyles.page}>
       <div style={pageStyles.shell}>
-        <header style={pageStyles.topbar}>
+        <header className="neu-flat" style={pageStyles.topbar}>
           <div style={pageStyles.brand}>
-            <div style={pageStyles.badge}>{initials}</div>
+            <div className="neu-convex" style={pageStyles.badge}>{initials}</div>
             <div>
               <h1 style={pageStyles.title}>Admin Control Center</h1>
               <p style={pageStyles.subtitle}>Patient and doctor governance, profile settings, and system oversight in one place.</p>
             </div>
           </div>
           <div style={pageStyles.actionRow}>
-            <button type="button" style={{ ...pageStyles.button, ...pageStyles.ghostBtn }} onClick={() => refresh()}>
+            <button type="button" className="neu-pressed" style={{ ...pageStyles.button, ...pageStyles.ghostBtn }} onClick={() => refresh()}>
               Refresh
             </button>
             <button
               type="button"
+              className="neu-btn-accent"
               style={{ ...pageStyles.button, ...pageStyles.primaryBtn }}
               onClick={async () => { await logout(); }}
             >
@@ -442,18 +436,19 @@ export default function AdminDashboard() {
         </section>
 
         <section style={pageStyles.contentGrid}>
-          <div style={{ ...pageStyles.card, ...pageStyles.sectionCard }}>
+          <div className="neu-flat" style={{ ...pageStyles.card, ...pageStyles.sectionCard }}>
             <h2 style={pageStyles.sectionTitle}>Patient Management</h2>
             <p style={pageStyles.sectionSub}>Remove patient accounts when needed. Linked data is deleted by the database cascade.</p>
             <div style={pageStyles.list}>
               {(recentPatients || []).map((patient) => (
-                <div key={patient.username} style={pageStyles.row}>
+                <div key={patient.username} className="neu-convex" style={pageStyles.row}>
                   <div style={pageStyles.rowMeta}>
                     <div style={pageStyles.rowTitle}>{patient.name || patient.username}</div>
                     <div style={pageStyles.rowSub}>{patient.username}{patient.email ? ` · ${patient.email}` : ''}{patient.mobile ? ` · ${patient.mobile}` : ''}</div>
                   </div>
                   <button
                     type="button"
+                    className="neu-pressed"
                     style={pageStyles.dangerBtn}
                     disabled={busyId === `patient:${patient.username}`}
                     onClick={() => handleDeletePatient(patient.username)}
@@ -466,57 +461,67 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div style={{ ...pageStyles.card, ...pageStyles.sectionCard }}>
+          <div className="neu-flat" style={{ ...pageStyles.card, ...pageStyles.sectionCard }}>
             <h2 style={pageStyles.sectionTitle}>Admin Profile Settings</h2>
             <p style={pageStyles.sectionSub}>Update the public-facing profile attached to this admin account.</p>
             <form onSubmit={handleSaveProfile} style={pageStyles.profileGrid}>
               <div style={pageStyles.field}>
                 <label style={pageStyles.label}>Name</label>
-                <input
-                  style={pageStyles.input}
-                  value={profileForm.name}
-                  onChange={(event) => setProfileForm((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="Admin name"
-                />
+                <div className="neu-pressed">
+                  <input
+                    style={pageStyles.input}
+                    value={profileForm.name}
+                    onChange={(event) => setProfileForm((prev) => ({ ...prev, name: event.target.value }))}
+                    placeholder="Admin name"
+                  />
+                </div>
               </div>
               <div style={pageStyles.field}>
                 <label style={pageStyles.label}>Display Name</label>
-                <input
-                  style={pageStyles.input}
-                  value={profileForm.display_name}
-                  onChange={(event) => setProfileForm((prev) => ({ ...prev, display_name: event.target.value }))}
-                  placeholder="How your name appears in the app"
-                />
+                <div className="neu-pressed">
+                  <input
+                    style={pageStyles.input}
+                    value={profileForm.display_name}
+                    onChange={(event) => setProfileForm((prev) => ({ ...prev, display_name: event.target.value }))}
+                    placeholder="How your name appears in the app"
+                  />
+                </div>
               </div>
               <div style={pageStyles.field}>
                 <label style={pageStyles.label}>Email</label>
-                <input
-                  style={pageStyles.input}
-                  type="email"
-                  value={profileForm.email}
-                  onChange={(event) => setProfileForm((prev) => ({ ...prev, email: event.target.value }))}
-                  placeholder="admin@doctalk.local"
-                />
+                <div className="neu-pressed">
+                  <input
+                    style={pageStyles.input}
+                    type="email"
+                    value={profileForm.email}
+                    onChange={(event) => setProfileForm((prev) => ({ ...prev, email: event.target.value }))}
+                    placeholder="admin@doctalk.local"
+                  />
+                </div>
               </div>
               <div style={pageStyles.field}>
                 <label style={pageStyles.label}>Profile Picture URL</label>
-                <input
-                  style={pageStyles.input}
-                  value={profileForm.profile_pic}
-                  onChange={(event) => setProfileForm((prev) => ({ ...prev, profile_pic: event.target.value }))}
-                  placeholder="https://..."
-                />
+                <div className="neu-pressed">
+                  <input
+                    style={pageStyles.input}
+                    value={profileForm.profile_pic}
+                    onChange={(event) => setProfileForm((prev) => ({ ...prev, profile_pic: event.target.value }))}
+                    placeholder="https://..."
+                  />
+                </div>
               </div>
               <div style={pageStyles.field}>
                 <label style={pageStyles.label}>Bio</label>
-                <textarea
-                  style={pageStyles.textarea}
-                  value={profileForm.bio}
-                  onChange={(event) => setProfileForm((prev) => ({ ...prev, bio: event.target.value }))}
-                  placeholder="Brief admin bio or role description"
-                />
+                <div className="neu-pressed">
+                  <textarea
+                    style={pageStyles.textarea}
+                    value={profileForm.bio}
+                    onChange={(event) => setProfileForm((prev) => ({ ...prev, bio: event.target.value }))}
+                    placeholder="Brief admin bio or role description"
+                  />
+                </div>
               </div>
-              <button type="submit" style={{ ...pageStyles.button, ...pageStyles.primaryBtn }} disabled={savingProfile}>
+              <button type="submit" className="neu-btn-accent" style={{ ...pageStyles.button, ...pageStyles.primaryBtn }} disabled={savingProfile}>
                 {savingProfile ? 'Saving...' : 'Save Profile'}
               </button>
             </form>
@@ -524,12 +529,12 @@ export default function AdminDashboard() {
         </section>
 
         <section style={pageStyles.contentGrid}>
-          <div style={{ ...pageStyles.card, ...pageStyles.sectionCard }}>
+          <div className="neu-flat" style={{ ...pageStyles.card, ...pageStyles.sectionCard }}>
             <h2 style={pageStyles.sectionTitle}>Doctors</h2>
             <p style={pageStyles.sectionSub}>Ban accounts that violate policy or no longer meet platform requirements.</p>
             <div style={pageStyles.list}>
               {(recentDoctors || []).map((doctor) => (
-                <div key={doctor.doctor_id} style={pageStyles.row}>
+                <div key={doctor.doctor_id} className="neu-convex" style={pageStyles.row}>
                   <div style={pageStyles.rowMeta}>
                     <div style={pageStyles.rowTitle}>{doctor.name || doctor.doctor_id}</div>
                     <div style={pageStyles.rowSub}>
@@ -546,6 +551,7 @@ export default function AdminDashboard() {
                   </div>
                   <button
                     type="button"
+                    className="neu-pressed"
                     style={pageStyles.mutedBtn}
                     disabled={doctor.is_banned || busyId === `doctor:${doctor.doctor_id}`}
                     onClick={() => handleBanDoctor(doctor.doctor_id)}
@@ -558,25 +564,25 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div style={{ ...pageStyles.card, ...pageStyles.sectionCard }}>
+          <div className="neu-flat" style={{ ...pageStyles.card, ...pageStyles.sectionCard }}>
             <h2 style={pageStyles.sectionTitle}>Account Snapshot</h2>
             <p style={pageStyles.sectionSub}>Current profile and system state for the signed-in admin.</p>
             <div style={{ display: 'grid', gap: '12px' }}>
-              <div style={pageStyles.row}>
+              <div className="neu-convex" style={pageStyles.row}>
                 <div style={pageStyles.rowMeta}>
                   <div style={pageStyles.rowTitle}>Signed in as</div>
                   <div style={pageStyles.rowSub}>{session?.user_id || adminName}</div>
                 </div>
                 <span style={statusPill('Admin', 'success')}>Admin</span>
               </div>
-              <div style={pageStyles.row}>
+              <div className="neu-convex" style={pageStyles.row}>
                 <div style={pageStyles.rowMeta}>
                   <div style={pageStyles.rowTitle}>Total admins</div>
                   <div style={pageStyles.rowSub}>Accounts with administrative access</div>
                 </div>
                 <span style={statusPill(String(dashboard?.admin_count ?? 1), 'warn')}>{dashboard?.admin_count ?? 1}</span>
               </div>
-              <div style={pageStyles.row}>
+              <div className="neu-convex" style={pageStyles.row}>
                 <div style={pageStyles.rowMeta}>
                   <div style={pageStyles.rowTitle}>Profile status</div>
                   <div style={pageStyles.rowSub}>{profileForm.bio || 'No bio set yet'}</div>
@@ -588,20 +594,26 @@ export default function AdminDashboard() {
             </div>
 
             <div style={{ marginTop: '18px', display: 'grid', gap: '14px' }}>
-              <div style={pageStyles.row}>
+              <div className="neu-convex" style={pageStyles.row}>
                 <div style={pageStyles.rowMeta}>
                   <div style={pageStyles.rowTitle}>Create invite token</div>
                   <div style={pageStyles.rowSub}>Invite another admin without exposing a public signup form.</div>
                 </div>
-                <button type="button" style={pageStyles.mutedBtn} onClick={handleCreateInvite}>Generate</button>
+                <button type="button" className="neu-pressed" style={pageStyles.mutedBtn} onClick={handleCreateInvite}>Generate</button>
               </div>
-              <form onSubmit={handleCreateInvite} style={{ display: 'grid', gap: '10px' }}>
-                <input style={pageStyles.input} type="email" value={inviteForm.invitee_email} onChange={(event) => setInviteForm((prev) => ({ ...prev, invitee_email: event.target.value }))} placeholder="Invitee email (optional)" />
-                <input style={pageStyles.input} value={inviteForm.note} onChange={(event) => setInviteForm((prev) => ({ ...prev, note: event.target.value }))} placeholder="Short note (optional)" />
-                <input style={pageStyles.input} type="number" min="5" max="10080" value={inviteForm.expires_in_minutes} onChange={(event) => setInviteForm((prev) => ({ ...prev, expires_in_minutes: Number(event.target.value) || 60 }))} placeholder="Expiry in minutes" />
+              <form onSubmit={handleCreateInvite} style={{ display: 'grid', gap: '14px' }}>
+                <div className="neu-pressed">
+                  <input style={pageStyles.input} type="email" value={inviteForm.invitee_email} onChange={(event) => setInviteForm((prev) => ({ ...prev, invitee_email: event.target.value }))} placeholder="Invitee email (optional)" />
+                </div>
+                <div className="neu-pressed">
+                  <input style={pageStyles.input} value={inviteForm.note} onChange={(event) => setInviteForm((prev) => ({ ...prev, note: event.target.value }))} placeholder="Short note (optional)" />
+                </div>
+                <div className="neu-pressed">
+                  <input style={pageStyles.input} type="number" min="5" max="10080" value={inviteForm.expires_in_minutes} onChange={(event) => setInviteForm((prev) => ({ ...prev, expires_in_minutes: Number(event.target.value) || 60 }))} placeholder="Expiry in minutes" />
+                </div>
               </form>
               {inviteResult && (
-                <div style={{ ...pageStyles.row, alignItems: 'flex-start', flexDirection: 'column' }}>
+                <div className="neu-convex" style={{ ...pageStyles.row, alignItems: 'flex-start', flexDirection: 'column' }}>
                   <div style={pageStyles.rowTitle}>Invite token</div>
                   <div style={pageStyles.rowSub}>
                     Share this token once: {inviteResult.invite_token}
@@ -612,24 +624,26 @@ export default function AdminDashboard() {
                 </div>
               )}
 
-              <div style={pageStyles.row}>
+              <div className="neu-convex" style={pageStyles.row}>
                 <div style={pageStyles.rowMeta}>
                   <div style={pageStyles.rowTitle}>Enable MFA</div>
                   <div style={pageStyles.rowSub}>Generate a TOTP secret, then confirm with a 6-digit code.</div>
                 </div>
-                <button type="button" style={pageStyles.mutedBtn} onClick={handleSetupMfa}>Setup</button>
+                <button type="button" className="neu-pressed" style={pageStyles.mutedBtn} onClick={handleSetupMfa}>Setup</button>
               </div>
               {mfaSetup && (
                 <div style={{ display: 'grid', gap: '10px' }}>
                   <div style={pageStyles.rowSub}>Secret: {mfaSetup.mfa_secret}</div>
                   <div style={pageStyles.rowSub}>OTP URL: {mfaSetup.otpauth_url}</div>
-                  <input
-                    style={pageStyles.input}
-                    value={mfaCode}
-                    onChange={(event) => setMfaCode(event.target.value)}
-                    placeholder="Enter the 6-digit code from your authenticator app"
-                  />
-                  <button type="button" style={pageStyles.primaryBtn} onClick={handleConfirmMfa}>Confirm MFA</button>
+                  <div className="neu-pressed">
+                    <input
+                      style={pageStyles.input}
+                      value={mfaCode}
+                      onChange={(event) => setMfaCode(event.target.value)}
+                      placeholder="Enter the 6-digit code from your authenticator app"
+                    />
+                  </div>
+                  <button type="button" className="neu-btn-accent" style={{ ...pageStyles.button, ...pageStyles.primaryBtn }} onClick={handleConfirmMfa}>Confirm MFA</button>
                 </div>
               )}
             </div>
