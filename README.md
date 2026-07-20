@@ -36,9 +36,11 @@ Under the hood, DocTalk orchestrates AI workflows using **LangGraph** state mach
 - **Clinical Reasoning Copilot** — An AI assistant with a medical-specialist persona that uses clinical terminology, differential reasoning, and red-flag assessment to support decision-making.
 - **Patient-Scoped RAG** — When viewing a specific patient, the copilot retrieves and reasons over that patient's full document and record history — reports, consultations, and medical timeline.
 - **Slot-Based Scheduling** — Create availability windows, accept or reject incoming appointment requests, and manage your calendar.
+- **Digital Prescriptions & QR Verification** — Compose structured prescriptions, attach a digital signature, and generate verifiable public QR codes for pharmacies to validate authenticity.
 - **Real-Time Consultation Chat** — WebSocket-powered messaging with patients during active consultations.
 
 ### Platform-Wide
+- **Neumorphic & 3D User Interface** — A premium, modern UI featuring a custom Neumorphic design system, GSAP micro-animations, and interactive 3D elements powered by ThreeJS and React Three Fiber.
 - **Medical Safety Guardrail** — A terminal AI node that scans every response for diagnostic overreach (e.g., "you have..." / "I diagnose...") and replaces it with a professional disclaimer. Zero hallucinated diagnoses reach the user.
 - **Role-Based Access Control** — JWT-authenticated sessions with strict route guards. Patients only see patient features; doctors only see doctor features. Every API endpoint and React route enforces this.
 - **Streaming AI Responses** — WebSocket connections stream tokens in real-time with node-level status updates, so users see the AI "thinking" through each stage.
@@ -108,12 +110,14 @@ When a user sends a message through the AI chat WebSocket, it passes through a *
 
 | Layer | Technologies |
 |---|---|
-| **Frontend** | React 19, Vite 8, React Router 7, Recharts, react-markdown |
+| **Frontend** | React 19, Vite 8, React Router 7, Radix UI, Recharts, react-markdown |
+| **UI & Animations** | Custom Neumorphism, TailwindCSS, ThreeJS (`@react-three/fiber`), GSAP |
 | **Backend** | Python 3.11+, FastAPI 0.118, Uvicorn, Pydantic v2 |
 | **Database** | PostgreSQL (Supabase), Prisma ORM (async Python client), pgvector |
 | **AI / LLM** | LangChain 1.2, LangGraph 1.1, OpenAI-compatible API, Google Gemini (vision + embeddings) |
 | **Auth** | JWT (PyJWT), PBKDF2-SHA256 password hashing, bcrypt (legacy support) |
-| **File Processing** | PyMuPDF (PDF), Tesseract OCR (images), Pillow |
+| **Integrations** | Razorpay (payments API) |
+| **File Processing** | PyMuPDF (PDF), Tesseract OCR (images), Pillow, qrcode |
 | **Security** | cryptography (file encryption), role-based route guards |
 
 ---
@@ -259,43 +263,50 @@ npx prisma migrate dev --schema=backend/prisma/schema.prisma
 DocTalk/
 ├── backend/
 │   ├── main.py                    # FastAPI app entry point
-│   ├── core/
-│   │   ├── config.py              # Settings (Pydantic BaseSettings, .env)
-│   │   ├── database.py            # Prisma client lifecycle
-│   │   └── security.py            # JWT, password hashing, auth deps
-│   ├── api/
-│   │   ├── auth.py                # Login, signup, profile endpoints
-│   │   ├── appointments.py        # Slot management, booking, actions
-│   │   ├── chat/router.py         # REST + WebSocket chat & AI endpoints
-│   │   ├── medical_assets.py      # File upload, download, management
-│   │   ├── image_analysis.py      # Vision AI (Gemini / Imagga)
-│   │   └── compat.py              # Legacy: explain_report, analyze_xray
-│   ├── schemas/                   # Pydantic request/response models
+│   ├── core/                      # Settings, db client, security auth
+│   ├── api/                       # REST API Routers
+│   │   ├── auth.py, users.py      # Auth & Profile management
+│   │   ├── appointments.py        # Scheduling & Bookings
+│   │   ├── chat/                  # WebSocket & REST AI Chat
+│   │   ├── payments.py            # Razorpay integration
+│   │   ├── prescriptions.py       # Digital prescriptions & QR
+│   │   └── hospital.py, stats.py  # Admin & hospital operations
+│   ├── schemas/                   # Pydantic data models
 │   ├── services/                  # Business logic layer
-│   ├── workflows/
-│   │   ├── unified_chat_graph.py  # LangGraph compiled state machine
-│   │   ├── state.py               # WorkflowState TypedDict (28 fields)
-│   │   ├── nodes/                 # Graph nodes (planner, executor, LLMs)
-│   │   ├── retrievers/            # Data retrieval strategies
-│   │   ├── models/                # PlannerTask, ComposedResponse, etc.
-│   │   ├── action_registry.py     # Appointment booking/cancel handlers
-│   │   └── retrieval_registry.py  # Registry of 6 retrieval strategies
-│   ├── ai/
-│   │   ├── core_services/         # LLM client, OCR, embedding services
-│   │   ├── vectorstore/           # pgvector integration
-│   │   └── prompts/               # Prompt templates
+│   ├── workflows/                 # LangGraph Agent Engine
+│   │   ├── auth/                  # Token & context verification
+│   │   ├── capabilities/          # RAG, Booking, DB retrieval tasks
+│   │   ├── composer/              # Response synthesis
+│   │   ├── executor/              # Capability-based executor
+│   │   ├── graph/                 # Main StateGraph definitions
+│   │   ├── guardrails/            # Medical safety checks
+│   │   ├── llm/                   # LLM node execution
+│   │   ├── memory/                # Session and context memory
+│   │   ├── models/                # Graph state TypedDicts
+│   │   ├── planner/               # Intent classification node
+│   │   ├── recommendation/        # Dynamic suggestions & next steps
+│   │   └── utils/                 # Helper functions & formatters
+│   ├── ai/                        # Embeddings, Vision, and LLM clients
+│   ├── scripts/                   # Bootstrap scripts (admin creation)
+│   ├── tests/                     # Integration and API tests
 │   └── prisma/
-│       └── schema.prisma          # Database schema (all models)
+│       └── schema.prisma          # Database schema (Prisma ORM)
+├── challenges/                    # Interactive verification/test challenges
+├── data/                          # DB initialization scripts and user uploads
 ├── frontend/
 │   └── src/
 │       ├── App.jsx                # React Router + role guards
 │       ├── contexts/              # SessionContext, NotificationContext
-│       ├── pages/                 # Dashboard, Login, Home, etc.
-│       └── components/            # Shared UI components
-├── .env                           # Environment configuration
+│       ├── pages/                 # Dashboards, Home, Login, Composer, Verify
+│       ├── components/            # Shared UI components (3D Canvas, Copilot)
+│       └── styles/                # Custom Neumorphic CSS (patient, doctor, home)
+├── .env.example                   # Example environment configuration template
+├── appointment_rules.md           # Business rules for doctor appointments
+├── DOCUMENTATION.md               # Detailed technical documentation
+├── flowLogic.md                   # LangGraph state machine flow logic
 ├── start_dev.ps1                  # One-click dev launcher (PowerShell)
 ├── start_dev.bat                  # One-click dev launcher (CMD)
-└── package.json                   # Root scripts (npm run dev)
+└── package.json                   # Root scripts & launch configurations (concurrently)
 ```
 
 ---
@@ -309,8 +320,10 @@ The backend exposes a REST + WebSocket API at `http://127.0.0.1:8000`. Key endpo
 | `/api/auth` | Authentication | `POST /patient/login`, `POST /doctor/signup`, `GET /api/me` |
 | `/api/appointments` | Scheduling | `POST /slots`, `POST /book/direct`, `PUT /{id}/action` |
 | `/api/chat` | Consultations & AI | `GET /consultations`, `WS /ai/patient/ws`, `WS /ai/doctor/ws` |
+| `/api/prescriptions`| Digital Prescriptions | `POST /create`, `GET /{id}`, `GET /public/verify/{qr}` |
+| `/api/payments` | Razorpay integration | `POST /create-order`, `POST /verify` |
 | `/api/assets` | Medical documents | `POST /upload`, `GET /{id}/download`, `DELETE /{id}` |
-| `/api/images` | Vision analysis | `POST /analyze`, `POST /analyze/base64`, `GET /providers` |
+| `/api/images` | Vision analysis | `POST /analyze`, `POST /analyze/base64` |
 | `/health` | System | `GET /health`, `GET /health/db` |
 
 All authenticated endpoints require a `Bearer` token in the `Authorization` header. WebSocket endpoints accept the token as a `?token=` query parameter.
