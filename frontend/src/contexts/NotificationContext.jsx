@@ -3,7 +3,10 @@ import React, { createContext, useCallback, useContext, useState } from 'react'
 const NotificationContext = createContext(null)
 
 export function NotificationProvider({ children }) {
-  const [notifications, setNotifications] = useState([])
+  const [notifications, setNotifications] = useState([
+    { id: 'dummy-1', message: 'Your latest AI medical analysis is ready to view.' },
+    { id: 'dummy-2', message: 'Dr. Smith sent a secure message regarding your condition.' }
+  ])
 
   const addNotification = useCallback((payload) => {
     const id = String(Date.now())

@@ -297,8 +297,10 @@ class ChatService:
     async def get_ai_chat_history(self, ai_session_id: str) -> list[dict[str, Any]]:
         messages = await self.client.aichatmessage.find_many(
             where={"sessionId": ai_session_id},
-            order={"createdAt": "asc"},
+            order={"createdAt": "desc"},
+            take=100
         )
+        messages.reverse()
         return [self._serialize_ai_message(msg) for msg in messages]
 
     async def append_ai_chat_exchange(

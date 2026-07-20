@@ -4,30 +4,36 @@ body { margin: 0; padding: 0; }
 .doc-app-wrapper {
     display: flex;
     flex-direction: column;
-    height: 111.11vh;
+    height: 100vh;
     overflow: hidden;
-    zoom: 0.9;
+    zoom: 1;
 }
 
 .doc-layout { display: flex; flex: 1; width: 100%; background: var(--bg-base); font-family: var(--font-primary); height: 100%; overflow: hidden; }
 .doc-sidebar { height: 100%; overflow-y: auto; align-self: flex-start; box-sizing: border-box; width: 250px; background: var(--bg-base); color: #0C0C0C; display: flex; flex-direction: column; align-items: center; padding: 28px 18px; border-right: none; box-shadow: 6px 0 12px var(--shadow-dark); z-index: 10; }
 .doc-sidebar img { width: 110px; height: 110px; border-radius: 50%; object-fit: cover; box-shadow: 4px 4px 8px var(--shadow-dark), -4px -4px 8px var(--shadow-light); }
 .doc-name { margin-top: 14px; font-weight: 600; font-size: 17px; text-align: center;  color: var(--text-primary); }
-.doc-nav { margin-top: 32px; width: 100%; display: flex; flex-direction: column; gap: 4px; }
-.doc-nav button { display: block; width: 100%; text-align: left; padding: 12px 18px; border-radius: 9999px; text-transform: capitalize; background: transparent; color: var(--text-secondary); border: none; cursor: pointer; transition: .25s; font-size: 14px; font-weight: 600; font-family: var(--font-primary); }
-.doc-nav button:hover { background: rgba(108, 92, 231, 0.08); color: var(--accent-primary); }
-.doc-nav button.active { background: var(--bg-base); color: var(--accent-primary); box-shadow: inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light); font-weight: 700; }
+.doc-nav { margin-top: 16px; width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.doc-nav button { display: block; width: 100%; text-align: left; padding: 12px 18px; border-radius: 9999px; text-transform: capitalize; background: transparent; color: var(--text-secondary); border: none; cursor: pointer; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); font-size: 14.5px; font-weight: 600; font-family: var(--font-primary); }
+.doc-nav button:hover { background: rgba(108, 92, 231, 0.08); color: var(--accent-primary); transform: translateX(6px); }
+.doc-nav button.active { background: var(--bg-base); color: var(--accent-primary); box-shadow: inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light); font-weight: 700; transform: scale(1.02); }
 .doc-logout-btn { margin-top: auto; width: 100%; background: var(--bg-base); color: var(--text-secondary); border: none; padding: 12px 18px; border-radius: 9999px; font-weight: 600; cursor: pointer; font-family: var(--font-primary); transition: 0.2s; box-shadow: 4px 4px 8px var(--shadow-dark), -4px -4px 8px var(--shadow-light); }
 .doc-logout-btn:hover { box-shadow: inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light); color: var(--text-primary); }
+@keyframes docTabFadeIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .doc-main { flex: 1; padding: 32px 40px; display: flex; flex-direction: column; gap:  20px; max-width: 1600px; margin: 0 auto; width: 100%; box-sizing: border-box; background: var(--bg-base); height: 100%; overflow-y: auto; }
+.doc-main > * { animation: docTabFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 .doc-h1 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -1px; background: linear-gradient(135deg, #8b7eff, #6c5ce7); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .doc-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:  16px; }
 .doc-card { background: var(--bg-base); border: 1px solid var(--border-subtle); padding: 16px 20px; border-radius: 14px; box-shadow: 6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light); display: flex; flex-direction: column; gap: 4px; transition: transform 0.2s, box-shadow 0.2s; }
 .doc-card:hover { transform: translateY(-2px); box-shadow: inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light); }
 .doc-card h3 { margin: 0; font-size: 12px; letter-spacing: .5px; font-weight: 600; color: var(--accent-primary); text-transform: uppercase; }
 .doc-value { font-size: 22px; font-weight: 700; color: var(--text-primary); }
-.doc-section { background: var(--bg-base); border: 1px solid var(--border-subtle); padding: 20px 24px; border-radius: 16px; box-shadow: 6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light); }
+.doc-section { background: var(--bg-base); border: 1px solid var(--border-subtle); padding: 20px 24px; border-radius: 16px; box-shadow: 6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light); overflow: hidden; }
 .doc-section h3 { margin-top: 0; margin-bottom: 12px; font-size: 16px; color: var(--accent-primary); font-weight: 700; }
+.doc-table-wrapper { width: 100%; overflow-x: auto; }
 .doc-table { border-collapse: collapse; width: 100%; font-size: 13px; }
 .doc-table th, .doc-table td { padding: 14px 10px; border-bottom: 1px solid var(--border-subtle); text-align: left; }
 .doc-table th { background: transparent; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: var(--accent-primary); font-weight: 700; }
@@ -47,7 +53,7 @@ body { margin: 0; padding: 0; }
   .doc-sidebar img { width: 64px; height: 64px; }
   .doc-name { margin-top: 0; min-width: 120px; text-align: left;  color: var(--text-primary); }
   .doc-nav { margin-top: 0; flex: 1; flex-direction: row; flex-wrap: wrap; gap: 6px; }
-  .doc-nav button { display: block; width: 100%; text-align: left; padding: 12px 18px; border-radius: 9999px; text-transform: capitalize; background: transparent; color: var(--text-secondary); border: none; cursor: pointer; transition: .25s; font-size: 14px; font-weight: 600; font-family: var(--font-primary); }
+  .doc-nav button { display: block; width: 100%; text-align: left; padding: 14px 20px; border-radius: 9999px; text-transform: capitalize; background: transparent; color: var(--text-secondary); border: none; cursor: pointer; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); font-size: 15px; font-weight: 600; font-family: var(--font-primary); }
   .doc-logout-btn { margin-top: auto; width: 100%; background: var(--bg-base); color: var(--text-secondary); border: none; padding: 12px 18px; border-radius: 9999px; font-weight: 600; cursor: pointer; font-family: var(--font-primary); transition: 0.2s; box-shadow: 4px 4px 8px var(--shadow-dark), -4px -4px 8px var(--shadow-light); }
   .doc-logout-btn:hover { box-shadow: inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light); color: var(--text-primary); }
   .doc-main { padding: 16px; }
@@ -88,3 +94,89 @@ body { margin: 0; padding: 0; }
 
 
 
+
+/* --- MOBILE RESPONSIVE OVERRIDES --- */
+@media (max-width: 768px) {
+  .doc-app-wrapper {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+  
+  .doc-layout {
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .doc-mobile-header {
+    display: flex !important;
+    align-items: center;
+    padding: 12px 20px;
+    background: var(--bg-base);
+    border-bottom: 1px solid var(--border-subtle);
+    justify-content: space-between;
+    height: 60px;
+    box-sizing: border-box;
+    z-index: 1000;
+  }
+
+  .doc-mobile-menu-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .doc-sidebar {
+    position: fixed !important;
+    top: 0;
+    left: -100%;
+    height: 100%;
+    width: 280px !important;
+    max-width: 80%;
+    z-index: 10000;
+    transition: left 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    border-radius: 0 24px 24px 0;
+    box-shadow: 20px 0 40px rgba(0,0,0,0.1);
+    background: rgba(245, 245, 247, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  .doc-sidebar.mobile-open {
+    left: 0;
+  }
+
+  .doc-mobile-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.3);
+    backdrop-filter: blur(4px);
+    z-index: 9999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+
+  .doc-mobile-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .doc-main {
+    flex: 1;
+    padding: 16px;
+    height: calc(100vh - 60px);
+    height: calc(100dvh - 60px);
+    overflow-y: auto;
+    margin: 0;
+  }
+}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { prescriptionApi } from '../lib/api';
+import BackButton from '../components/BackButton';
 import SignaturePad from '../components/SignaturePad';
 import '../styles/prescription.css';
 
@@ -34,7 +35,7 @@ export default function DoctorSignatureSetup() {
 
   return (
     <div className="rx-page">
-      <button onClick={() => navigate(-1)} className="rx-btn-ghost" style={{ marginBottom: 12 }}>← Back</button>
+      <BackButton />
       <h1 className="rx-h1">Your signature</h1>
       <p className="rx-sub">Saved once, then stamped automatically on every prescription you issue.</p>
 

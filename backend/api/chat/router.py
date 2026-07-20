@@ -554,21 +554,68 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 async def _run_ai_websocket(
     websocket: WebSocket,
     *,
-    ai_session_id: str,
+    ai_session_id: str | None = None,
     expected_role: str,
     target_patient_id: str | None = None,
 ) -> None:
-    current_user = await _authenticate_websocket_user(websocket, expected_role=expected_role)
-    if current_user is None:
+    # -----------------------------------------------------------------------
+    # IMPORTANT: accept() MUST be called immediately.
+    # The browser WebSocket handshake will time out (and produce code 1006)
+    # if the server does not call accept() before doing any async I/O (auth,
+    # DB queries, etc.).  We accept first, then validate and set up state.
+    # -----------------------------------------------------------------------
+    await websocket.accept()
+    print(f"[DEBUG][WS] Accepted connection for session={ai_session_id} role={expected_role}")
+
+    async def _reject(code: int = 1008, message: str | None = None) -> None:
+        if message:
+            try:
+                await websocket.send_json({"type": "error", "content": message})
+            except Exception:
+                pass
+        try:
+            await websocket.close(code=code)
+        except Exception:
+            pass
+
+    # --- Authentication ---
+    token = websocket.query_params.get("token")
+    if not token:
+        await _reject(1008, "Missing authentication token")
         return
 
+    try:
+        payload_decoded = decode_access_token(token)
+    except HTTPException:
+        await _reject(1008, "Invalid authentication token")
+        return
+
+    user_id = str(payload_decoded.get("user_id") or "").strip()
+    role = _normalize_role(payload_decoded.get("role"))
+    if not user_id or role not in {"patient", "doctor"}:
+        await _reject(1008, "Invalid user credentials")
+        return
+
+    if expected_role is not None and role != expected_role:
+        await _reject(1008, "Role mismatch")
+        return
+
+    current_user = CurrentUser(user_id=user_id, role=role)
+    print(f"[DEBUG][WS] Authenticated user: {current_user.user_id} role: {current_user.role}")
+
     chat_service = get_chat_service()
+
+    # Generate a unique default session ID for the user if none provided
+    is_default_session = False
+    if not ai_session_id:
+        ai_session_id = f"default_{expected_role}_{current_user.user_id}"
+        is_default_session = True
 
     # Scope/authorize the session id.
     # Explicit ids must be owned by the current user.
     owned = await chat_service.get_owned_ai_session(current_user.user_id, current_user.role, ai_session_id)
-    if owned is None:
-        await websocket.close(code=1008)
+    if owned is None and not is_default_session:
+        await _reject(1008, "Not authorized to access this session")
         return
 
     normalized_target_patient_id = str(target_patient_id or "").strip() or None
@@ -600,19 +647,24 @@ async def _run_ai_websocket(
             ai_session_id=ai_session_id,
             target_patient_id=normalized_target_patient_id,
         )
-
-        await websocket.accept()
+        print(f"[DEBUG][WS] Session ensured: mode={mode} namespace={namespace}")
 
         db_history = await chat_service.get_ai_chat_history(ai_session_id)
+        print(f"[DEBUG][WS] Fetched {len(db_history)} history messages for {ai_session_id}")
         await websocket.send_json(
             {
                 "type": "history",
                 "messages": _format_db_messages_for_ws(db_history, role=current_user.role),
             }
         )
+        print(f"[DEBUG][WS] Sent chat history to client, waiting for messages...")
 
         while True:
-            raw_text = (await websocket.receive_text()).strip()
+            try:
+                raw_text = (await websocket.receive_text()).strip()
+            except Exception as e:
+                print(f"[DEBUG][WS] Exception in receive_text: {repr(e)}")
+                raise
             if not raw_text:
                 continue
 
@@ -895,7 +947,7 @@ async def patient_ai_websocket(websocket: WebSocket) -> None:
 async def doctor_ai_websocket(websocket: WebSocket) -> None:
     await _run_ai_websocket(
         websocket,
-        ai_session_id=websocket.query_params.get("ai_session_id") or "doctor_ai",
+        ai_session_id=websocket.query_params.get("ai_session_id"),
         expected_role="doctor",
         target_patient_id=websocket.query_params.get("target_patient_id"),
     )

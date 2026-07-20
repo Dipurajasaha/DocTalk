@@ -9,7 +9,14 @@
     padding: 16px;
     margin: 0;
     position: relative;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.login-page::-webkit-scrollbar {
+    display: none;
 }
 
 /* Medical-themed SVG background overlay */

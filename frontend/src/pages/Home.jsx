@@ -106,11 +106,11 @@ const Home = () => {
   }, []);
 
   const catConfig = {
-    alert:        { color: '#ef4444', bg: '#fef2f2', icon: '🚨' },
+    alert: { color: '#ef4444', bg: '#fef2f2', icon: '🚨' },
     announcement: { color: '#3b82f6', bg: '#eff6ff', icon: '📢' },
     'health-tip': { color: '#22c55e', bg: '#f0fdf4', icon: '💡' },
-    research:     { color: '#8b5cf6', bg: '#f5f3ff', icon: '🔬' },
-    general:      { color: '#6C5CE7', bg: '#EDE9FE', icon: '📋' },
+    research: { color: '#8b5cf6', bg: '#f5f3ff', icon: '🔬' },
+    general: { color: '#6C5CE7', bg: '#EDE9FE', icon: '📋' },
   };
 
   return (
@@ -164,7 +164,7 @@ const Home = () => {
             <div className="hero-cta-row">
               <button onClick={() => navigate('/login')} className="btn-primary-hero">
                 Start for Free
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
               </button>
               <a href="#about" className="btn-ghost-hero">
                 Learn more
@@ -185,7 +185,7 @@ const Home = () => {
               <div className="hero-main-card">
                 <div className="hmc-header">
                   <div className="hmc-avatar">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6C5CE7" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6C5CE7" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
                   </div>
                   <div>
                     <div className="hmc-name">AI Health Assistant</div>
@@ -200,21 +200,21 @@ const Home = () => {
                 <div className="hmc-input-row">
                   <span className="hmc-input-fake">Type a message...</span>
                   <button className="hmc-send">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
                   </button>
                 </div>
               </div>
               {/* Floating chips */}
               <div className="hero-chip chip-1">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
                 Appointment booked
               </div>
               <div className="hero-chip chip-2">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6C5CE7" strokeWidth="2.5"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6C5CE7" strokeWidth="2.5"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                 Report analyzed
               </div>
               <div className="hero-chip chip-3">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
                 Reminder: 3 PM
               </div>
             </div>
@@ -294,9 +294,9 @@ const Home = () => {
               DocTalk AI is a final-year Computer Science engineering project designed to solve real healthcare access problems. We combine large language models, real-time communication, and medical record management into one seamless platform.
             </p>
             <ul className="check-list">
-              {['Automated AI pre-screening & triage','Secure end-to-end encrypted messaging','Centralised medical record storage','Smart appointment scheduling','Real-time doctor–patient chat','Hospital-wide analytics & reporting'].map(item => (
+              {['Automated AI pre-screening & triage', 'Secure end-to-end encrypted messaging', 'Centralised medical record storage', 'Smart appointment scheduling', 'Real-time doctor–patient chat', 'Hospital-wide analytics & reporting'].map(item => (
                 <li key={item}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6C5CE7" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6C5CE7" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
                   {item}
                 </li>
               ))}
@@ -306,7 +306,7 @@ const Home = () => {
             <div className="about-visual">
               <div className="av-card av-card-top">
                 <div className="av-icon-wrap" style={{ background: '#EDE9FE' }}>
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6C5CE7" strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 10.8 19.79 19.79 0 01.1 2.22 2 2 0 012.08 0h3a2 2 0 012 1.72 12.8 12.8 0 00.7 2.81 2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.8 12.8 0 002.81.7A2 2 0 0122 16.92z"/></svg>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6C5CE7" strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 10.8 19.79 19.79 0 01.1 2.22 2 2 0 012.08 0h3a2 2 0 012 1.72 12.8 12.8 0 00.7 2.81 2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.8 12.8 0 002.81.7A2 2 0 0122 16.92z" /></svg>
                 </div>
                 <div>
                   <div style={{ fontSize: '13px', fontWeight: '700', color: '#1e293b' }}>Real-time Consultation</div>
@@ -315,7 +315,7 @@ const Home = () => {
               </div>
               <div className="av-card av-card-mid">
                 <div className="av-icon-wrap" style={{ background: '#f0fdf4' }}>
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
                 </div>
                 <div>
                   <div style={{ fontSize: '13px', fontWeight: '700', color: '#1e293b' }}>Data Encrypted</div>
@@ -324,7 +324,7 @@ const Home = () => {
               </div>
               <div className="av-card av-card-bot">
                 <div className="av-icon-wrap" style={{ background: '#fff7ed' }}>
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"/></svg>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22" /></svg>
                 </div>
                 <div>
                   <div style={{ fontSize: '13px', fontWeight: '700', color: '#1e293b' }}>Open Source</div>
@@ -346,35 +346,12 @@ const Home = () => {
             </p>
           </div>
           <div className="features-grid">
-            <FeatureCard delay={0}   icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>} title="AI Symptom Chat" desc="Describe your symptoms to our AI and get instant preliminary assessments, triage recommendations, and suggested next steps." />
-            <FeatureCard delay={80}  icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>} title="Smart Scheduling" desc="Browse doctor availability in real time. Book, reschedule, or cancel appointments with just a few clicks, any time." />
-            <FeatureCard delay={160} icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>} title="Medical Records Hub" desc="Upload, organise, and share prescriptions, lab reports, and X-rays. All your health documents in one secure place." />
-            <FeatureCard delay={240} icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>} title="Med Image Analysis" desc="Upload medical imaging for AI-assisted analysis. Get structured reports highlighting potential areas of concern instantly." />
-            <FeatureCard delay={320} icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>} title="Doctor Network" desc="Patients can search for verified specialists by specialty, location, or availability and initiate consultations directly." />
-            <FeatureCard delay={400} icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>} title="Hospital Analytics" desc="Centralised dashboards for hospital admins with disease surveillance, severity tracking, and exportable datasets." />
-          </div>
-        </section>
-
-        {/* ══════════════════════════════════ HOW IT WORKS ══════════════════════════════════ */}
-        <section className="how-section">
-          <div className="section-header-center">
-            <div className="section-eyebrow">How It Works</div>
-            <h2 className="section-title">Up and running in minutes</h2>
-          </div>
-          <div className="steps-row">
-            {[
-              { num: '01', icon: '👤', title: 'Create your account', desc: 'Sign up as a patient, doctor, or hospital in under 2 minutes. No paperwork.' },
-              { num: '02', icon: '🔍', title: 'Find or connect', desc: 'Search for specialists, upload your health records, or set up your doctor profile.' },
-              { num: '03', icon: '💬', title: 'Consult & manage', desc: 'Chat with your doctor, get AI analysis, book appointments, and track your health.' },
-            ].map((step, i) => (
-              <div key={i} className="step-card">
-                <div className="step-num">{step.num}</div>
-                <div className="step-icon">{step.icon}</div>
-                <h3>{step.title}</h3>
-                <p>{step.desc}</p>
-                {i < 2 && <div className="step-arrow">→</div>}
-              </div>
-            ))}
+            <FeatureCard delay={0} icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>} title="AI Symptom Chat" desc="Describe your symptoms to our AI and get instant preliminary assessments, triage recommendations, and suggested next steps." />
+            <FeatureCard delay={80} icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>} title="Smart Scheduling" desc="Browse doctor availability in real time. Book, reschedule, or cancel appointments with just a few clicks, any time." />
+            <FeatureCard delay={160} icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>} title="Medical Records Hub" desc="Upload, organise, and share prescriptions, lab reports, and X-rays. All your health documents in one secure place." />
+            <FeatureCard delay={240} icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>} title="Med Image Analysis" desc="Upload medical imaging for AI-assisted analysis. Get structured reports highlighting potential areas of concern instantly." />
+            <FeatureCard delay={320} icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" /></svg>} title="Doctor Network" desc="Patients can search for verified specialists by specialty, location, or availability and initiate consultations directly." />
+            <FeatureCard delay={400} icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>} title="Hospital Analytics" desc="Centralised dashboards for hospital admins with disease surveillance, severity tracking, and exportable datasets." />
           </div>
         </section>
 
@@ -382,17 +359,18 @@ const Home = () => {
         <section id="team" className="team-section">
           <div className="section-header-center">
             <div className="section-eyebrow">The Team</div>
-            <h2 className="section-title">Built by CSE students,<br/>for real people</h2>
+            <h2 className="section-title">Built by CSE (AIML) students,<br />for real people</h2>
             <p className="section-body" style={{ maxWidth: '480px', margin: '0 auto' }}>
-              A four-person final-year capstone team tackling healthcare access through technology.
+              A five-person final-year capstone team tackling healthcare access through AI.
             </p>
           </div>
           <div className="team-grid">
             {[
-              { name: 'Developer 1', role: 'Frontend & UI/UX', icon: '🎨', color: '#EDE9FE', iconColor: '#6C5CE7' },
-              { name: 'Developer 2', role: 'Backend & APIs',   icon: '⚙️', color: '#fef3c7', iconColor: '#d97706' },
-              { name: 'Developer 3', role: 'AI & ML Integration', icon: '🤖', color: '#dbeafe', iconColor: '#2563eb' },
-              { name: 'Developer 4', role: 'Database & Security', icon: '🔐', color: '#dcfce7', iconColor: '#16a34a' },
+              { name: 'Shuvankar Dhara', role: <>Team Lead <br/> Backend & APIs</>, icon: '⚙️', color: '#fef3c7', iconColor: '#d97706' },
+              { name: 'Dipu Raja Saha', role: 'AI & ML Integration', icon: '🤖', color: '#dbeafe', iconColor: '#2563eb' },
+              { name: 'Sumit Paul', role: 'Workflow & Security', icon: '🔐', color: '#dcfce7', iconColor: '#16a34a' },
+              { name: 'Subhobrata Maity', role: 'Frontend & UI/UX', icon: '🎨', color: '#EDE9FE', iconColor: '#6C5CE7' },
+              { name: 'Swapnil Chatterjee', role: 'Database Architecture', icon: '🗄️', color: '#fce7f3', iconColor: '#db2777' },
             ].map((dev, i) => (
               <div key={i} className="team-card">
                 <div className="team-avatar" style={{ background: dev.color }}>
@@ -400,10 +378,6 @@ const Home = () => {
                 </div>
                 <h3>{dev.name}</h3>
                 <p className="team-role">{dev.role}</p>
-                <div className="team-socials">
-                  <a href="#" className="social-pill" aria-label="LinkedIn">in</a>
-                  <a href="#" className="social-pill" aria-label="GitHub">gh</a>
-                </div>
               </div>
             ))}
           </div>
@@ -417,7 +391,7 @@ const Home = () => {
             <p>Join thousands of patients and doctors already using DocTalk AI.</p>
             <button onClick={() => navigate('/login')} className="cta-main-btn">
               Get Started for Free
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
             </button>
             <div className="cta-trust">No credit card required · Free forever plan available</div>
           </div>

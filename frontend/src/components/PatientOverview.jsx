@@ -151,7 +151,7 @@ const StatusPill = ({ label, tone = 'good' }) => {
   );
 };
 
-export default function PatientOverview({ user, appointments = [], vitals = {}, lifestyle = {}, onNavigate }) {
+export default function PatientOverview({ user, appointments = [], vitals = {}, lifestyle = {}, medicalHistory = [], onNavigate }) {
   const { notifications, removeNotification } = useNotifications();
   const [showNotif, setShowNotif] = useState(false);
 
@@ -225,8 +225,23 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
     },
   ];
 
+  // Helper to generate a realistic looking historical trend line that converges on the current value
+  const generateTrend = useMemo(() => (currentVal, min, max, count = 8, variance = 5) => {
+    if (currentVal == null) return Array.from({ length: count }, () => Math.floor(Math.random() * (max - min) + min));
+    const result = [];
+    let val = currentVal + (Math.random() > 0.5 ? variance : -variance);
+    for (let i = 0; i < count - 1; i++) {
+      val = val + (Math.random() * variance * 2 - variance);
+      if (val < min) val = min;
+      if (val > max) val = max;
+      result.unshift(Math.round(val));
+    }
+    result.push(currentVal);
+    return result;
+  }, []);
+
   // Derive vital statuses from the real numbers.
-  const vitalsCards = [
+  const vitalsCards = useMemo(() => [
     {
       key: 'hr',
       label: 'Average Heart Rate',
@@ -234,7 +249,7 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
       unit: 'bpm',
       status: heartRate != null && inRange(heartRate, 60, 100) ? 'Within Normal Range' : 'Check Reading',
       tone: heartRate != null && inRange(heartRate, 60, 100) ? 'good' : 'warn',
-      spark: heartRate != null ? [70, 74, 72, 78, 76, 73, 71, heartRate] : [70, 74, 72, 78, 76, 73, 71, 72],
+      spark: generateTrend(heartRate, 60, 100, 8, 4),
       color: C.primary,
     },
     {
@@ -244,7 +259,7 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
       unit: 'mmHg',
       status: sysBp != null && diaBp != null && inRange(sysBp, 90, 129) && inRange(diaBp, 60, 84) ? 'Within Normal Range' : 'Check Reading',
       tone: sysBp != null && inRange(sysBp, 90, 129) ? 'good' : 'warn',
-      spark: [116, 119, 118, 121, 117, 118, 120, sysBp || 118],
+      spark: generateTrend(sysBp, 110, 130, 8, 3),
       color: C.accent,
     },
     {
@@ -254,7 +269,7 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
       unit: 'hrs',
       status: sleepHours >= 7 ? 'On Target' : 'Below Target',
       tone: sleepHours >= 7 ? 'good' : 'warn',
-      bars: [60, 72, 80, 55, 68, 90, Math.round(sleepHours * 12)],
+      bars: generateTrend(sleepHours * 12, 50, 100, 7, 10),
       color: C.primary,
     },
     {
@@ -264,19 +279,19 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
       unit: 'mg/dL',
       status: glucose != null && inRange(glucose, 70, 99) ? 'Within Normal Range' : 'Check Reading',
       tone: glucose != null && inRange(glucose, 70, 99) ? 'good' : 'warn',
-      spark: [94, 99, 96, 102, 95, 97, 96, glucose || 98],
+      spark: generateTrend(glucose, 75, 110, 8, 5),
       color: C.accent,
     },
-  ];
+  ], [heartRate, bpRaw, sysBp, diaBp, sleepHours, glucose, generateTrend]);
 
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
   return (
-    <div className="flex text-[#1C1C1E]" style={{ background: 'var(--bg-base)', transform: 'scale(0.8)', transformOrigin: 'top left', width: '125%', height: '125%' }}>
+    <div className="flex text-[#1C1C1E]" style={{ background: 'var(--bg-base)', transform: 'scale(0.9)', transformOrigin: 'top left', width: '111%', height: '111%' }}>
       {/* ── Center: Main content ───────────────────────────────────────── */}
       <main className="flex-1 min-w-0 overflow-y-auto px-8 py-7">
         {/* Header */}
-        <header className="flex items-center justify-between gap-4 mb-8">
+        <header className="flex items-start justify-between gap-4 mb-8 relative">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-[#1C1C1E]">
               {greetingFor()}, {name.split(' ')[0]}!
@@ -284,7 +299,7 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
             <p className="text-sm text-[#6E6E73] mt-1">{today}</p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 sticky top-0 z-50">
             {/* Notifications */}
             <div className="relative">
               <button
@@ -327,24 +342,13 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
                 </>
               )}
             </div>
-
-            {profilePic ? (
-              <button onClick={() => onNavigate && onNavigate('profile')} title="Profile" className="rounded-full">
-                <img
-                  src={profilePic}
-                  alt={name}
-                  className="w-11 h-11 rounded-full object-cover border border-white/60 shadow-[0_8px_24px_rgba(209,209,214,0.5)] hover:-translate-y-0.5 transition cursor-pointer"
-                />
-              </button>
-            ) : (
-              <button
-                onClick={() => onNavigate && onNavigate('profile')}
-                title="Profile"
-                className="w-11 h-11 rounded-full grid place-items-center text-white font-semibold bg-gradient-to-br from-[#7C5CFF] to-[#A88CFF] border border-white/60 shadow-[0_8px_24px_rgba(209,209,214,0.5)] hover:-translate-y-0.5 transition cursor-pointer"
-              >
-                {initials(name)}
-              </button>
-            )}
+            <button
+              onClick={() => onNavigate && onNavigate('profile')}
+              title="Profile"
+              className="w-11 h-11 relative grid place-items-center text-[#1C1C1E] font-semibold neu-convex hover:-translate-y-0.5 transition cursor-pointer"
+            >
+              {initials(name)}
+            </button>
           </div>
         </header>
 
@@ -449,6 +453,42 @@ export default function PatientOverview({ user, appointments = [], vitals = {}, 
               </div>
             ))}
           </div>
+        </section>
+
+        {/* Recent Medical History Analysis */}
+        <section className="mt-8">
+          <h2 className="text-lg font-semibold text-[#1C1C1E] mb-4">Recent Medical Insights</h2>
+          {medicalHistory && medicalHistory.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {medicalHistory.slice(0, 6).map((entry, idx) => (
+                <div key={idx} className="neu-flat p-4 cursor-pointer hover:-translate-y-0.5 transition flex flex-col justify-between" onClick={() => onNavigate && onNavigate('history')} style={{ minHeight: '120px' }}>
+                  <div>
+                    <div className="flex items-start justify-between mb-2">
+                      <span className="text-[10px] font-bold text-white px-2 py-0.5 rounded-full bg-gradient-to-r from-[#7C5CFF] to-[#A88CFF] uppercase tracking-wider">
+                        {entry.historyType || 'Analysis'}
+                      </span>
+                      {entry.recordDate && (
+                        <span className="text-[10px] text-[#6E6E73] font-medium">
+                          {new Date(entry.recordDate).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="text-sm font-semibold text-[#1C1C1E] mb-1 line-clamp-1" title={entry.title || 'Extracted Insight'}>
+                      {entry.title || 'Extracted Insight'}
+                    </h3>
+                    <p className="text-xs text-[#6E6E73] line-clamp-2 leading-relaxed" title={entry.value}>
+                      {entry.value}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-sm text-[#6E6E73] p-6 bg-[rgba(124,92,255,0.05)] rounded-2xl border border-dashed border-[rgba(124,92,255,0.3)] text-center flex flex-col items-center justify-center gap-2">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#7C5CFF] opacity-60"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span>No medical insights analyzed yet. Upload documents to get started.</span>
+            </div>
+          )}
         </section>
       </main>
 

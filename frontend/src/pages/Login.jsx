@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSession } from '../contexts/SessionContext';
 import { authApi } from '../lib/api';
+import BackButton from '../components/BackButton';
 import '../styles/login.css';
 
 // ─── Validation helpers ───────────────────────────────────────────────────────
@@ -264,10 +265,17 @@ export default function Login() {
 
   return (
     <div className="login-page">
-      <button className="back-home-btn" onClick={() => navigate('/')}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-        Back to Home
-      </button>
+      <div style={{ position: 'absolute', top: '24px', left: '24px' }}>
+        <BackButton 
+          onClick={() => navigate('/')} 
+          label="Back to Home" 
+          style={{ 
+            boxShadow: 'none', 
+            color: '#fff', 
+            borderColor: 'rgba(255, 255, 255, 0.3)' 
+          }} 
+        />
+      </div>
       <div className={`container ${view === 'login' || view === 'forgot' ? 'login-view' : 'register-view'}`}>
         <div className="logo-container">
           <div className="text-logo">DocTalk<span className="logo-sup">AI</span></div>
@@ -324,10 +332,9 @@ export default function Login() {
                 <button type="submit" className="action-btn" style={{ width:'100%', marginTop:'10px' }}>
                   Send Reset Link
                 </button>
-                <button type="button" onClick={() => { setView('login'); setErrorMsg(null); }}
-                  style={{ background:'none', border:'none', color:'#8B7EFF', cursor:'pointer', fontSize:'13px', fontWeight:'600', textAlign:'center', marginTop:'4px' }}>
-                  ← Back to Login
-                </button>
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px' }}>
+                  <BackButton onClick={() => { setView('login'); setErrorMsg(null); }} label="Back to Login" style={{ marginBottom: 0 }} />
+                </div>
               </form>
             )}
           </div>

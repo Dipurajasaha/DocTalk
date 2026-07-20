@@ -45,13 +45,25 @@
     --radius: 0.75rem;
   }
 
+  html {
+    height: auto;
+    overflow-y: auto;
+  }
+
   body {
     font-family: var(--font-body);
     background-color: var(--bg-base);
     color: var(--text-primary);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    overflow: hidden;
+    min-height: 100vh;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  body::-webkit-scrollbar {
+    display: none;
   }
 }
 
@@ -73,6 +85,13 @@
 
   .neu-convex {
     background: linear-gradient(145deg, #d8d8de, #ffffff);
+    box-shadow: 6px 6px 12px var(--shadow-dark),
+                -6px -6px 12px var(--shadow-light);
+    border-radius: 16px;
+  }
+
+  .neu-concave {
+    background: linear-gradient(145deg, #ffffff, #d8d8de);
     box-shadow: 6px 6px 12px var(--shadow-dark),
                 -6px -6px 12px var(--shadow-light);
     border-radius: 16px;

@@ -1,4 +1,0 @@
-# Docker Compose file - currently empty as all services use external Supabase PostgreSQL.
-# No local MySQL or Adminer needed.
-services: {}
-volumes: {}

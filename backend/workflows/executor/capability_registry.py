@@ -87,13 +87,11 @@ async def handle_appointment_retrieve(
         if appointments:
             content_str += f"Found {len(appointments)} appointments:\n"
             for appt in appointments:
-                doc_name = appt.doctor.name if appt.doctor else "Unknown Doctor"
-                slot_time = (
-                    appt.slot.startTime.strftime("%Y-%m-%d %H:%M")
-                    if appt.slot
-                    else "Unknown Time"
-                )
-                content_str += f"- Doctor: {doc_name} | Time: {slot_time} | Status: {appt.status}\n"
+                doc_name = appt.get("doctorName") or "Unknown Doctor"
+                start_str = appt.get("slotStart") or appt.get("appointmentDate") or appt.get("date")
+                slot_time = str(start_str)[:16] if start_str else "Unknown Time"
+                status = appt.get("status", "UNKNOWN")
+                content_str += f"- Doctor: {doc_name} | Time: {slot_time} | Status: {status}\n"
         else:
             content_str += "No appointments found."
 

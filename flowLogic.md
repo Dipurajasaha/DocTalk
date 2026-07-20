@@ -14,6 +14,7 @@
 4. [Doctor AI Copilot (Patient-Scoped RAG)](#4-doctor-ai-copilot-patient-scoped-rag)
 5. [Prescription Issuance & Verification](#5-prescription-issuance--verification)
 6. [Medical Document Upload & Analysis](#6-medical-document-upload--analysis)
+7. [AI-Automated Payment Processing](#7-ai-automated-payment-processing)
 
 ---
 
@@ -81,9 +82,9 @@ The patient asks a health question and receives a streaming AI response through 
                     │  │  │  ┌──────────────────┐     ┌────────────────────────┐     │   │   │
                     │  │  │  │ • RAG vector     │     │ • Book appointment    │     │   │   │
                     │  │  │  │   search (pgvec) │     │ • Cancel appointment  │     │   │   │
-                    │  │  │  │ • Slot lookup    │     │ • Get doctor info     │     │   │   │
-                    │  │  │  │ • Patient record │     └────────────────────────┘     │   │   │
-                    │  │  │  │ • Doctor list    │                                    │   │   │
+                    │  │  │  │ • Slot lookup    │     │ • Process payment     │     │   │   │
+                    │  │  │  │ • Patient record │     │ • Get doctor info     │     │   │   │
+                    │  │  │  │ • Doctor list    │     └────────────────────────┘     │   │   │
                     │  │  │  └──────────────────┘                                    │   │   │
                     │  │  └──────────────────────────┬───────────────────────────────┘   │   │
                     │  │                             ▼                                   │   │
@@ -753,6 +754,49 @@ A patient uploads a medical document (PDF, X-ray image, report). The file is sto
 
 ---
 
+## 7. AI-Automated Payment Processing
+
+The patient initiates a payment conversationally through the AI Assistant. The AI's LangGraph state machine classifies the intent as `PAYMENT_QUERY`, generates a `PAYMENT_PROCESS` task, and executes the entire payment lifecycle securely.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  FRONTEND (PatientDashboard.jsx / AI Chat)                                          │
+│                                                                                     │
+│  ┌─────────────────────┐   ┌──────────────────────┐   ┌─────────────────────────┐   │
+│  │ User types:         │   │ AI processes via     │   │ AI confirms payment     │   │
+│  │ "Pay for my last    │──▶│ WebSocket and routes │──▶│ securely and returns    │   │
+│  │ consultation"       │   │ to Payment Handler   │   │ transaction details     │   │
+│  └─────────────────────┘   └──────────────────────┘   └─────────────────────────┘   │
+└──────────────────────────────────────┬──────────────────────────────────────────────┘
+                                       │
+┌──────────────────────────────────────┼──────────────────────────────────────────────┐
+│  BACKEND (FastAPI / LangGraph)       ▼                                              │
+│                                                                                     │
+│  ┌──────────────────────────────────────────────────────────────────────────────┐   │
+│  │ 1. Planner Node: Intent parsed as `is_payment`. Builds `PAYMENT_PROCESS` task. │   │
+│  │ 2. Task Executor: Calls `handle_payment_process()` in Action Registry.         │   │
+│  │    ├─ Looks up target Consultation / Appointment.                              │   │
+│  │    ├─ Computes payment amount and verifies no prior payment.                   │   │
+│  │    ├─ Interfaces with Razorpay API (or internal ledger) to execute payment.    │   │
+│  │    └─ Updates `payment_context` inside WorkflowState.                          │   │
+│  │ 3. Response Composer: Formats `{"status": "success", "amount": 500, ...}`      │   │
+│  │ 4. LLM Node: Generates conversational confirmation for the user.               │   │
+│  └──────────────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Step | From | To | Data | Protocol |
+|------|------|----|------|----------|
+| 1 | PatientDashboard.jsx | `/api/chat/ai/patient/ws` | `{"message": "pay for appointment"}` | WebSocket |
+| 2 | `unified_chat_graph` | Planner Node | Strategy: `PAYMENT_QUERY` | Internal |
+| 3 | Planner Node | Task Executor | Task: `PAYMENT_PROCESS` | Internal |
+| 4 | Task Executor | Razorpay Gateway | Create payment transaction | REST/SDK |
+| 5 | Task Executor | `Appointment` / DB | Update payment status to paid | Prisma ORM |
+| 6 | Task Executor | LLM Orchestrator | `payment_context` payload | Internal |
+| 7 | LLM Orchestrator | PatientDashboard.jsx | Streaming confirmation response | WebSocket |
+
+---
+
 ## Architecture Summary
 
 ```
@@ -817,13 +861,13 @@ A patient uploads a medical document (PDF, X-ray image, report). The file is sto
 │  │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────────┘  │   │
 │  │       │                                                                       │   │
 │  │       ▼                                                                       │   │
-│  │  ┌──────────────────────────────────────────────────────────────────────┐    │   │
-│  │  │  Task Executor (Shadow Pipeline — loops up to 3×)                    │    │   │
-│  │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │    │   │
-│  │  │  │ RAG Vector   │  │ DB Query     │  │ Action       │               │    │   │
-│  │  │  │ Search       │  │ (Slots, Appt,│  │ (Book,       │               │    │   │
-│  │  │  │ (pgvector)   │  │  Patients)   │  │  Cancel)     │               │    │   │
-│  │  │  └──────────────┘  └──────────────┘  └──────────────┘               │    │   │
+│  │  ┌─────────────────────────────────────────────────────────────────────────┐ │   │
+│  │  │  Task Executor (Shadow Pipeline — loops up to 3×)                       │ │   │
+│  │  │  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────┐            │ │   │
+│  │  │  │ RAG Vector   │  │ DB Query     │  │ Action              │            │ │   │
+│  │  │  │ Search       │  │ (Slots, Appt,│  │ (Book, Cancel,      │            │ │   │
+│  │  │  │ (pgvector)   │  │  Patients)   │  │  Process Payment)   │            │ │   │
+│  │  │  └──────────────┘  └──────────────┘  └─────────────────────┘            │ │   │
 │  │  └──────────────────────────────────────────────────────────────────────┘    │   │
 │  │       │                                                                       │   │
 │  │       ▼                                                                       │   │

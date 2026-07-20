@@ -53,6 +53,7 @@ export default function CopilotPanel({ patientList = [] }) {
   const [processingState, setProcessingState] = useState(null);
   const socketRef = useRef(null);
   const messageEndRef = useRef(null);
+  const finalTextRef = useRef('');
 
   const normalizedPatients = useMemo(() => {
     const seen = new Set();
@@ -112,8 +113,8 @@ export default function CopilotPanel({ patientList = [] }) {
 
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
+    finalTextRef.current = '';
 
-    let finalText = '';
     let cancelled = false;
 
     socket.onopen = () => {
@@ -150,21 +151,21 @@ export default function CopilotPanel({ patientList = [] }) {
         console.log('[FE-CP] TOKEN_RAW:', JSON.stringify(chunkText));
         const sanitizedChunk = sanitizeAiMessage(chunkText);
         console.log('[FE-CP] TOKEN_SANITIZED:', JSON.stringify(sanitizedChunk));
-        finalText += sanitizedChunk;
-        console.log('[FE-CP] FINAL_ACCUMULATED:', JSON.stringify(finalText));
-        setMessages((currentMessages) => appendOrReplaceAssistantMessage(currentMessages, finalText, false));
+        finalTextRef.current += sanitizedChunk;
+        console.log('[FE-CP] FINAL_ACCUMULATED:', JSON.stringify(finalTextRef.current));
+        setMessages((currentMessages) => appendOrReplaceAssistantMessage(currentMessages, finalTextRef.current, false));
         return;
       }
 
       if (eventType === 'final' || eventType === 'done' || eventType === 'end' || payload?.isFinal === true) {
         setIsAiProcessing(false);
         setProcessingState(null);
-        const rawReply = String(chunkText || finalText || '');
+        const rawReply = String(chunkText || finalTextRef.current || '');
         console.log('[FE-CP] FINAL_RAW:', JSON.stringify(rawReply));
         const replyText = rawReply.trim() || 'Doctor Copilot is ready.';
         console.log('[FE-CP] FINAL_TRIMMED:', JSON.stringify(replyText));
         setMessages((currentMessages) => appendOrReplaceAssistantMessage(currentMessages, replyText, true));
-        finalText = replyText;
+        finalTextRef.current = replyText;
         // IMPORTANT: do NOT close the socket here. The backend keeps the
         // WebSocket open after a final event so the doctor can send follow-up
         // messages. Closing it here drops the session and the next send()
@@ -198,12 +199,12 @@ export default function CopilotPanel({ patientList = [] }) {
       if (cancelled) return;
       setIsAiProcessing(false);
       setProcessingState(null);
-      if (finalText) {
-        console.log('[FE-CP] ONCLOSE_ACCUMULATED:', JSON.stringify(finalText));
+      if (finalTextRef.current) {
+        console.log('[FE-CP] ONCLOSE_ACCUMULATED:', JSON.stringify(finalTextRef.current));
         setMessages((currentMessages) => {
           const hasFinal = currentMessages.some((item) => item.id.startsWith('assistant-final-'));
           if (hasFinal) return currentMessages;
-          return appendOrReplaceAssistantMessage(currentMessages, finalText, true);
+          return appendOrReplaceAssistantMessage(currentMessages, finalTextRef.current, true);
         });
       }
       setStatus('idle');
@@ -249,6 +250,9 @@ export default function CopilotPanel({ patientList = [] }) {
     setProcessingState(null);
     setInputValue('');
     setError('');
+
+    // Reset the streaming text accumulator so the next response starts fresh
+    finalTextRef.current = '';
 
     try {
       socket.send(text);

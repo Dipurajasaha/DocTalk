@@ -13,6 +13,7 @@ export const authApi = {
 };
 
 export const patientApi = {
+  getMedicalHistory: () => apiClient.get('/api/medical-history', { retries: 1, auth: true }),
   listAppointments: () => apiClient.get('/api/appointments', { retries: 1, auth: true }),
   getAvailableSlots: (doctorId) => apiClient.get(`/api/appointments/slots/${encodeURIComponent(doctorId)}`, { retries: 1, auth: true }),
   bookDirectAppointment: (slotId, reason, note) => apiClient.post('/api/appointments/book/direct', { slotId, reason, note }, { retries: 0, auth: true }),
@@ -232,7 +233,7 @@ export const doctorApi = {
       return d >= startOfMonth;
     });
     // Use earningsData from backend if available, otherwise fall back to appointment amountPaise
-    const monthly_revenue_paise = earningsData?.monthly_revenue_paise
+    const monthly_revenue_paise = earningsData?.monthly_earnings_paise
       ?? completedThisMonth.reduce((sum, appt) => sum + (appt.amountPaise || 0), 0);
     const monthly_revenue = Math.round(monthly_revenue_paise / 100);
 

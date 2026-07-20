@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { doctorApi, prescriptionApi } from '../lib/api';
+import BackButton from '../components/BackButton';
 import '../styles/prescription.css';
 
 const emptyMedicine = () => ({ name: '', dosage: '', frequency: '', duration: '', notes: '' });
@@ -190,8 +191,10 @@ export default function PrescriptionComposer({ embedded = false, onBack, onDone 
 
   return (
     <div className={embedded ? '' : 'rx-page'}>
-      <button onClick={() => (onBack ? onBack() : navigate(-1))} className="rx-btn-ghost" style={{ marginBottom: 12 }}>← Back</button>
-      <h1 className="rx-h1">New prescription</h1>
+      <BackButton onClick={() => (onBack ? onBack() : navigate(-1))} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h1 className="rx-h1">New prescription</h1>
+      </div>
       <p className="rx-sub">Signed, sealed, and tamper-evident once issued — corrections require a new version.</p>
 
       <form onSubmit={handleSubmit}>

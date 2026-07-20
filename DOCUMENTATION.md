@@ -326,6 +326,7 @@ class WorkflowState(TypedDict):
     rag_scope: dict                         # {asset_ids: [...]}
     patient_history_context: list[dict]     # medical history entries
     doctor_availability_context: list[dict] # available slots
+    payment_context: dict                   # payment processing results (status, amount, reference_id, paid_at)
     planner_metadata: dict                  # query_type, entities, actions
     shadow_execution_completed: bool
     shadow_response: str
@@ -407,7 +408,7 @@ Keyword-based classification of the user's last message:
 | `"previous consultation"`, `"last visit"`, `"follow up"`, etc. | `CONSULTATION_QUERY` |
 | *(fallback)* | `GENERAL_CHAT` |
 
-`RetrievalStrategy` is a `str` `Enum` with 9 values: `DOCUMENT_QUERY`, `CONSULTATION_QUERY`, `APPOINTMENT_QUERY`, `ASSET_INDEX_QUERY`, `PATIENT_HISTORY_QUERY`, `MEMORY_QUERY`, `DEEP_REASONING`, `GENERAL_CHAT`, `DOCTOR_AVAILABILITY_QUERY`.
+`RetrievalStrategy` is a `str` `Enum` with 10 values: `DOCUMENT_QUERY`, `CONSULTATION_QUERY`, `APPOINTMENT_QUERY`, `ASSET_INDEX_QUERY`, `PATIENT_HISTORY_QUERY`, `MEMORY_QUERY`, `DEEP_REASONING`, `GENERAL_CHAT`, `DOCTOR_AVAILABILITY_QUERY`, `PAYMENT_QUERY`.
 
 ### 6.5 Planner Node (`nodes/planner.py`)
 
@@ -420,7 +421,7 @@ Keyword-based classification of the user's last message:
 
 ### 6.6 Planner Rules (`planner_rule_registry.py`)
 
-Six `PlannerRule` subclasses:
+Seven `PlannerRule` subclasses:
 
 | Rule | Matches When | Generates Tasks |
 |---|---|---|
@@ -430,6 +431,7 @@ Six `PlannerRule` subclasses:
 | `PatientHistoryRule` | `parsed_intent.is_history` | `PATIENT_HISTORY` |
 | `DocumentRule` | `parse_document_query(text)` returns a result | `ASSET_INDEX` |
 | `MemoryRule` | strategy is `MEMORY_QUERY` | `MEMORY` |
+| `PaymentRule` | `parsed_intent.is_payment` or strategy is `PAYMENT_QUERY` | `PAYMENT_PROCESS`, `PAYMENT_STATUS`, or `PAYMENT_VERIFY` |
 
 ### 6.7 Task Executor (`nodes/task_executor.py`)
 
@@ -458,6 +460,9 @@ Results are merged into a `TaskExecutionResult` aggregate. `MAX_PENDING_TASK_DEP
 | `APPOINTMENT_CANCEL` | `handle_appointment_cancel` | Finds the most recent upcoming `CONFIRMED`/`PENDING` appointment for the patient. Resets slot (`isBooked=False, isActive=False`), sets appointment to `CANCELLED`. |
 | `APPOINTMENT_RESCHEDULE` | `handle_appointment_reschedule` | Stub — returns action context only. |
 | `APPOINTMENT_SEARCH_SLOTS` | `handle_appointment_search_slots` | Stub — returns empty results. |
+| `PAYMENT_PROCESS` | `handle_payment_process` | Full payment lifecycle automation. Resolves the linked appointment/consultation, creates or updates a payment record, processes the payment transaction end-to-end, and returns a structured confirmation including amount, status, and reference ID. |
+| `PAYMENT_STATUS` | `handle_payment_status` | Retrieves the current status of a payment by appointment or consultation ID. Returns `{payment_id, status, amount, paid_at}`. |
+| `PAYMENT_VERIFY` | `handle_payment_verify` | Verifies a payment reference against the records and marks it as verified. |
 
 ### 6.10 LLM Nodes
 

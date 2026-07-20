@@ -28,6 +28,7 @@ Under the hood, DocTalk orchestrates AI workflows using **LangGraph** state mach
 ### For Patients
 - **Intelligent AI Health Assistant** — Ask health questions in natural language. The system triages for emergencies, retrieves your medical history and uploaded documents via RAG, and responds with contextualized, evidence-backed answers.
 - **Appointment Booking** — Browse doctor availability, select an open slot, and confirm — or let the AI assistant book for you conversationally ("Book me the first available slot with Dr. Sharma").
+- **AI-Automated Payments** — The AI workflow can now handle the full payment lifecycle conversationally. Ask the assistant to process, verify, or review a consultation payment and the workflow executes it end-to-end without leaving the chat.
 - **Medical Document Vault** — Upload reports, prescriptions, and X-rays. Files are stored securely with optional encryption. Text is extracted automatically (OCR for images, PDF parsing for documents) and indexed for AI retrieval.
 - **AI Image & X-ray Analysis** — Upload a medical image for AI-powered analysis via Gemini Vision. Receive structured findings, clinical impressions, and follow-up recommendations.
 
@@ -92,8 +93,8 @@ When a user sends a message through the AI chat WebSocket, it passes through a *
 
 1. **Log Entry Context** → Records session metadata
 2. **Shadow Pipeline** → An iterative data-gathering loop:
-   - *Planner Node* classifies intent (appointments? medical records? doctor availability?) and builds an execution plan
-   - *Task Executor* runs retrieval tasks (database queries, RAG vector search, slot lookups) and action tasks (booking, cancelling)
+   - *Planner Node* classifies intent (appointments? medical records? doctor availability? **payments?**) and builds an execution plan
+   - *Task Executor* runs retrieval tasks (database queries, RAG vector search, slot lookups) and action tasks (booking, cancelling, **processing payments**)
    - *Need-Action Decision* checks if more data is needed (loops up to 3×)
    - *Response Composer* assembles all gathered evidence into structured sections
 3. **Role-Based Routing** → Routes to the appropriate LLM node:
@@ -172,28 +173,40 @@ VISION_ENDPOINT=gemini
 
 ### 2. One-Command Launch (Windows)
 
-The project ships with automated dev scripts that handle everything:
+DocTalk ships with a single root `package.json` that delegates everything to [`start_dev.ps1`](./start_dev.ps1). Running the following from the **project root** is the only command you need:
 
 ```powershell
-# PowerShell (recommended)
 npm run dev
-
-# Or directly:
-.\start_dev.ps1
 ```
 
-```batch
-# Command Prompt
-start_dev.bat
+Under the hood, this executes:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File start_dev.ps1
 ```
 
-This will:
-- ✅ Create a Python virtual environment (`.venv/`)
-- ✅ Install all backend dependencies from `requirements.txt`
-- ✅ Install frontend npm packages
-- ✅ Generate the Prisma client
-- ✅ Launch the backend on `http://127.0.0.1:8000`
-- ✅ Launch the frontend on Vite's default port (`http://localhost:5173`)
+[`start_dev.ps1`](./start_dev.ps1) performs all setup automatically on first run and skips steps that are already done:
+
+| Step | What happens |
+|---|---|
+| **Python venv** | Creates `.venv/` if it doesn't exist |
+| **Backend deps** | Runs `pip install -r backend/requirements.txt` only when `requirements.txt` is newer than the last install flag |
+| **Frontend deps** | Runs `npm install` in `frontend/` only when `node_modules/` is missing |
+| **Root deps** | Installs root `node_modules/` (for `concurrently`) if missing |
+| **Prisma client** | Regenerates the Python Prisma client from `backend/prisma/schema.prisma` |
+| **Backend server** | Starts `uvicorn backend.main:app --reload` on `http://127.0.0.1:8000` |
+| **Frontend server** | Starts Vite dev server, typically on `http://localhost:5173` |
+
+Both servers run concurrently in the same terminal window (via `npx concurrently`). Press **Ctrl+C** once to stop both.
+
+> **Alternative**: You can also invoke the script directly:
+> ```powershell
+> .\start_dev.ps1
+> ```
+> Or, on Command Prompt:
+> ```batch
+> start_dev.bat
+> ```
 
 ### Admin onboarding
 
